@@ -3,7 +3,6 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { DEFAULT_VOICE, voiceOptions } from "./constants";
 
-
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -164,4 +163,58 @@ export async function parsePDFFile(file: File) {
       `Failed to parse PDF file: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+// ============================================
+// LIBRARY SPINE & PALETTE HELPERS (Gloss Style)
+// ============================================
+
+export const SPINE_PALETTES = [
+  { bg: "#7A2E22", text: "#F7EDE2", border: "#581F17", accent: "#E59866" }, // Terracotta Oxblood
+  { bg: "#1F3B2C", text: "#E8F5E9", border: "#14271D", accent: "#A3E4D7" }, // Deep Forest
+  { bg: "#1D2D44", text: "#EDF2F4", border: "#111B29", accent: "#8ECAE6" }, // Vintage Navy
+  { bg: "#7A5826", text: "#FEF9E7", border: "#523A17", accent: "#F9E79F" }, // Antique Ochre
+  { bg: "#4A2B42", text: "#FADBD8", border: "#311B2C", accent: "#D7BDE2" }, // Mulberry Plum
+  { bg: "#2B4049", text: "#E0F2F1", border: "#1A272D", accent: "#80CBC4" }, // Slate Teal
+  { bg: "#6E3D1F", text: "#FBEEE6", border: "#492612", accent: "#EDBB99" }, // Cognac Amber
+  { bg: "#323031", text: "#ECEBE4", border: "#1C1A1B", accent: "#D1C7BD" }, // Charcoal Leather
+  { bg: "#3B5249", text: "#E9F5ED", border: "#24332D", accent: "#A2D2FF" }, // Sage Pine
+  { bg: "#512E5F", text: "#F4ECF7", border: "#361D40", accent: "#BB8FCE" }, // Royal Violet
+];
+
+export function getBookSpinePalette(title: string, customColor?: string) {
+  if (customColor) {
+    return {
+      bg: customColor,
+      text: "#FFFFFF",
+      border: "rgba(0,0,0,0.25)",
+      accent: "#FFD700",
+    };
+  }
+  let hash = 0;
+  for (let i = 0; i < title.length; i++) {
+    hash = (hash << 5) - hash + title.charCodeAt(i);
+    hash |= 0;
+  }
+  const index = Math.abs(hash) % SPINE_PALETTES.length;
+  return SPINE_PALETTES[index];
+}
+
+export function getBookReadingTime(book: {
+  readingTimeMinutes?: number;
+  totalSegments?: number;
+}): number {
+  if (book.readingTimeMinutes && book.readingTimeMinutes > 0) {
+    return book.readingTimeMinutes;
+  }
+  return Math.max(5, (book.totalSegments || 1) * 3);
+}
+
+export function getBookYear(book: {
+  year?: number;
+  createdAt?: string | Date;
+}): number {
+  if (book.year && book.year > 0) return book.year;
+  if (book.createdAt) return new Date(book.createdAt).getFullYear();
+  return 2024;
 }

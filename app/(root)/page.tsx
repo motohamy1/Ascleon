@@ -1,7 +1,9 @@
 import Hero from "@/components/Hero";
-import BookCard from "@/components/BookCard";
 import { getAllBooks } from "@/lib/actions/book.actions";
 import Search from "@/components/Search";
+import PersonalLibrary from "@/components/library/PersonalLibrary";
+import { sampleBooks } from "@/lib/constants";
+import { IBook } from "@/types";
 
 export const revalidate = 60;
 
@@ -14,37 +16,34 @@ const Home = async ({ searchParams }: HomeProps) => {
   const searchQuery = typeof params.search === "string" ? params.search : undefined;
 
   const bookResults = await getAllBooks(searchQuery);
-  const books = bookResults.success ? bookResults.data ?? [] : [];
+  const dbBooks = bookResults.success ? (bookResults.data as IBook[]) ?? [] : [];
+
+  // Fallback to rich sample library if no books have been uploaded yet and no search active
+  const books: IBook[] =
+    dbBooks.length > 0
+      ? dbBooks
+      : !searchQuery
+        ? (sampleBooks as unknown as IBook[])
+        : [];
 
   return (
-    <main className="wrapper container min-h-screen bg-[#FAFAF8] pt-[74px]">
+    <main className="max-w-7xl mx-auto px-5 w-full min-h-screen bg-[#FAFAF8] pt-6 sm:pt-8 pb-20">
       <Hero />
 
-      <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <h2 className="section-title">Recent Books</h2>
+          <div>
+            <h2 className="section-title text-2xl sm:text-3xl font-serif font-bold text-[#212A3B]">
+              Personal Library
+            </h2>
+            <p className="text-xs sm:text-sm text-[#736B63] mt-0.5">
+              Browse your books on the interactive shelf or grid
+            </p>
+          </div>
           <Search />
         </div>
 
-        {books.length > 0 ? (
-          <div className="library-books-grid">
-            {books.map((book) => (
-              <BookCard
-                key={book._id}
-                title={book.title}
-                author={book.author}
-                coverURL={book.coverURL}
-                slug={book.slug}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="library-empty-card text-center py-20">
-            <p className="text-xl font-medium text-[var(--text-secondary)]">
-              No books found matching &ldquo;{searchQuery}&rdquo;
-            </p>
-          </div>
-        )}
+        <PersonalLibrary initialBooks={books} />
       </div>
     </main>
   );

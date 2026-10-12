@@ -20,6 +20,17 @@ const BookSchema = new Schema<IBook>(
     coverBlobKey: { type: String },
     fileSize: { type: Number, required: true },
     totalSegments: { type: Number, default: 0 },
+    topic: { type: String, default: "General" },
+    readingStatus: {
+      type: String,
+      enum: ["not_started", "in_progress", "read"],
+      default: "not_started",
+    },
+    readingTimeMinutes: { type: Number, default: 15 },
+    color: { type: String },
+    isFavorite: { type: Boolean, default: false },
+    year: { type: Number },
+    summary: { type: String },
   },
   { timestamps: true },
 );

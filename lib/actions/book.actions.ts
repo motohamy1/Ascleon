@@ -1,6 +1,6 @@
 "use server";
 
-import { CreateBook, TextSegment } from "@/types";
+import { CreateBook, ReadingStatus, TextSegment, IBookSegmentData } from "@/types";
 import { connectToDatabase } from "@/database/mongoose";
 import { escapeRegex, generateSlug, serializeData } from "@/lib/utils";
 import Book from "@/database/models/book.model";
@@ -171,7 +171,13 @@ export const saveBookSegments = async (
 
     await BookSegment.insertMany(segmentsToInsert);
 
-    await Book.findByIdAndUpdate(bookId, { totalSegments: segments.length });
+    const totalWords = segments.reduce((sum, s) => sum + (s.wordCount || 0), 0);
+    const estimatedMinutes = Math.max(5, Math.round(totalWords / 200));
+
+    await Book.findByIdAndUpdate(bookId, {
+      totalSegments: segments.length,
+      readingTimeMinutes: estimatedMinutes,
+    });
 
     console.log("Book segments saved successfully.");
 
@@ -245,6 +251,92 @@ export const searchBookSegments = async (
       success: false,
       error: (error as Error).message,
       data: [],
+    };
+  }
+};
+
+// Fetches all segments of a book ordered by segmentIndex
+export const getBookSegments = async (bookId: string) => {
+  try {
+    await connectToDatabase();
+
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      return { success: true, data: [] as IBookSegmentData[] };
+    }
+
+    const segments = await BookSegment.find({
+      bookId: new mongoose.Types.ObjectId(bookId),
+    })
+      .sort({ segmentIndex: 1 })
+      .lean();
+
+    return {
+      success: true,
+      data: serializeData(segments) as IBookSegmentData[],
+    };
+  } catch (error) {
+    console.error("Error fetching book segments:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to fetch segments",
+      data: [] as IBookSegmentData[],
+    };
+  }
+};
+
+// Toggle favorite state of a book
+export const toggleBookFavorite = async (bookId: string) => {
+  try {
+    await connectToDatabase();
+
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      return { success: true, isFavorite: true };
+    }
+
+    const book = await Book.findById(bookId);
+    if (!book) {
+      return { success: false, error: "Book not found" };
+    }
+
+    const newFav = !book.isFavorite;
+    book.isFavorite = newFav;
+    await book.save();
+
+    revalidatePath("/");
+    return { success: true, isFavorite: newFav };
+  } catch (error) {
+    console.error("Error toggling book favorite:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to toggle favorite",
+    };
+  }
+};
+
+// Update reading status of a book
+export const updateBookReadingStatus = async (
+  bookId: string,
+  status: ReadingStatus,
+) => {
+  try {
+    await connectToDatabase();
+
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      return { success: true, status };
+    }
+
+    await Book.findByIdAndUpdate(bookId, { readingStatus: status });
+
+    revalidatePath("/");
+    return { success: true, status };
+  } catch (error) {
+    console.error("Error updating reading status:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to update status",
     };
   }
 };

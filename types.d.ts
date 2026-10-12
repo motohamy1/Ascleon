@@ -4,11 +4,13 @@ import { Control, FieldPath, FieldValues } from "react-hook-form";
 import { LucideIcon } from "lucide-react";
 import z from "zod";
 import { UploadSchema } from "@/lib/zod";
-import { PLANS, PlanType } from "@/lib/subscription-constants";
+import { PlanType } from "@/lib/subscription-constants";
 
 // ============================================
 // DATABASE MODELS
 // ============================================
+
+export type ReadingStatus = "not_started" | "in_progress" | "read";
 
 export interface IBook extends Document {
   _id: string;
@@ -23,6 +25,13 @@ export interface IBook extends Document {
   coverBlobKey?: string;
   fileSize: number;
   totalSegments: number;
+  topic?: string;
+  readingStatus?: ReadingStatus;
+  readingTimeMinutes?: number;
+  color?: string;
+  isFavorite?: boolean;
+  year?: number;
+  summary?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -36,6 +45,18 @@ export interface IBookSegment extends Document {
   wordCount: number;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface IBookSegmentData {
+  _id: string;
+  clerkId: string;
+  bookId: string;
+  content: string;
+  segmentIndex: number;
+  pageNumber?: number;
+  wordCount: number;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
 }
 
 export interface IVoiceSession extends Document {
@@ -66,6 +87,11 @@ export interface CreateBook {
   coverURL?: string;
   coverBlobKey?: string;
   fileSize: number;
+  topic?: string;
+  readingTimeMinutes?: number;
+  color?: string;
+  year?: number;
+  summary?: string;
 }
 
 export interface TextSegment {
@@ -80,6 +106,11 @@ export interface BookCardProps {
   author: string;
   coverURL: string;
   slug: string;
+  topic?: string;
+  readingStatus?: ReadingStatus;
+  readingTimeMinutes?: number;
+  isFavorite?: boolean;
+  color?: string;
 }
 
 export interface Messages {

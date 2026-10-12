@@ -31,8 +31,8 @@ async function processBookSearch(bookId: unknown, query: unknown) {
     return { result: "No information found about this topic in the book." };
   }
 
-  const combinedText = searchResult.data
-    .map((segment) => (segment as { content: string }).content)
+  const combinedText = (searchResult.data as Array<{ content: string }>)
+    .map((segment: { content: string }) => segment.content)
     .join("\n\n");
 
   return { result: combinedText };

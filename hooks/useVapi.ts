@@ -28,6 +28,32 @@ export function useLatestRef<T>(value: T) {
 const VAPI_API_KEY = process.env.NEXT_PUBLIC_VAPI_API_KEY;
 const TIMER_INTERVAL_MS = 1000;
 const SECONDS_PER_MINUTE = 60;
+function describeVapiError(error: unknown): string {
+  if (error instanceof Error) return error.message || error.name;
+  if (typeof error === "string") return error;
+  if (!error || typeof error !== "object") {
+    return String(error ?? "Unknown Vapi error");
+  }
+
+  const value = error as Record<string, unknown>;
+  const nestedError = value.error;
+  const nestedMessage =
+    typeof nestedError === "string"
+      ? nestedError
+      : nestedError instanceof Error
+        ? nestedError.message
+        : nestedError &&
+            typeof nestedError === "object" &&
+            "message" in nestedError &&
+            typeof nestedError.message === "string"
+          ? nestedError.message
+          : undefined;
+
+  return [value.type, value.stage, value.message, nestedMessage]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .join(": ") || "Unknown Vapi error";
+}
+
 
 export type CallStatus =
   | "idle"
@@ -90,6 +116,15 @@ export function useVapi(book: IBook) {
   // Set up Vapi event listeners
   useEffect(() => {
     const handlers = {
+      "call-start-progress": (event: { stage: string; status: string }) => {
+        if (event.status === "failed") {
+          console.error(`Vapi call startup failed at ${event.stage}`);
+        }
+      },
+      "call-start-failed": (event: { stage: string; error: string }) => {
+        console.error(`Vapi call startup failed at ${event.stage}:`, event.error);
+      },
+
       "call-start": () => {
         isStoppingRef.current = false;
         setStatus("starting"); // AI speaks first, wait for it
@@ -163,7 +198,18 @@ export function useVapi(book: IBook) {
         role: string;
         transcriptType: string;
         transcript: string;
+        status?: string;
+        endedReason?: string;
       }) => {
+        if (message.type === "status-update" && message.status === "ended") {
+          if (!isStoppingRef.current) {
+            const reason = message.endedReason || "unknown reason";
+            console.error("Vapi call ended:", reason);
+            setLimitError(`Voice service ended the call (${reason}). Try again later.`);
+          }
+          return;
+        }
+
         if (message.type !== "transcript") return;
 
         // User partial → update live transcript
@@ -218,8 +264,9 @@ export function useVapi(book: IBook) {
         }
       },
 
-      error: (error: Error) => {
-        console.error("Vapi error:", error);
+      error: (error: unknown) => {
+        const errorMessage = describeVapiError(error);
+        console.error("Vapi error:", errorMessage);
         // Don't reset isStoppingRef here - delayed events may still fire
         setStatus("idle");
         setCurrentMessage("");
@@ -240,26 +287,27 @@ export function useVapi(book: IBook) {
         }
 
         // Show user-friendly error message
-        const errorMessage = (error.message || error.toString() || "").toLowerCase();
+        const normalizedError = errorMessage.toLowerCase();
         if (
-          errorMessage.includes("timeout") ||
-          errorMessage.includes("silence")
+          normalizedError.includes("timeout") ||
+          normalizedError.includes("silence")
         ) {
           setLimitError(
             "Session ended due to inactivity. Click the mic to start again.",
           );
         } else if (
-          errorMessage.includes("network") ||
-          errorMessage.includes("connection")
+          normalizedError.includes("network") ||
+          normalizedError.includes("connection")
         ) {
           setLimitError(
             "Connection lost. Please check your internet and try again.",
           );
-        } else if (errorMessage.includes("meeting has ended") || errorMessage.includes("ejection")) {
-          setLimitError(
-            "Session ended. Click the mic to start again.",
-          );
-        } else if (errorMessage === "") {
+        } else if (
+          normalizedError.includes("meeting has ended") ||
+          normalizedError.includes("ejection")
+        ) {
+          setLimitError(`Voice call ended: ${errorMessage}`);
+        } else if (normalizedError === "unknown vapi error") {
           setLimitError(
             "Session ended. Click the mic to start again.",
           );

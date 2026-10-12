@@ -1,11 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import Image from "next/image";
-import Link from "next/link";
-import { ArrowLeft, MicOff, Mic } from "lucide-react";
-
-import { getBookBySlug } from "@/lib/actions/book.actions";
-import VapiControls from "@/components/VapiControls";
+import { getBookBySlug, getBookSegments } from "@/lib/actions/book.actions";
+import BookExperience from "@/components/reader/BookExperience";
+import { sampleBooks } from "@/lib/constants";
+import { IBook, IBookSegmentData } from "@/types";
 
 export default async function BookDetailsPage({
   params,
@@ -14,26 +12,37 @@ export default async function BookDetailsPage({
 }) {
   const { userId } = await auth();
 
-  if (!userId) {
-    redirect("/sign-in");
-  }
-
   const { slug } = await params;
   const result = await getBookBySlug(slug);
 
-  if (!result.success || !result.data) {
+  let book: IBook | null =
+    result.success && result.data ? (result.data as IBook) : null;
+
+  // Fallback to sample book if not in DB
+  if (!book) {
+    const foundSample = sampleBooks.find((b) => b.slug === slug);
+    if (foundSample) {
+      book = foundSample as unknown as IBook;
+    }
+  }
+
+  if (!book) {
     redirect("/");
   }
 
-  const book = result.data;
+  let segments: IBookSegmentData[] = [];
+  if (result.success && result.data?._id) {
+    const segResult = await getBookSegments(result.data._id);
+    if (segResult.success && segResult.data) {
+      segments = segResult.data;
+    }
+  }
 
   return (
-    <div className="book-page-container">
-      <Link href="/" className="back-btn-floating">
-        <ArrowLeft className="size-6 text-[#212a3b]" />
-      </Link>
-
-      <VapiControls book={book} />
-    </div>
+    <BookExperience
+      book={book}
+      segments={segments}
+      isAuthenticated={Boolean(userId)}
+    />
   );
 }

@@ -1,4 +1,12 @@
 import mongoose from "mongoose";
+import dns from "node:dns";
+
+// Fix Node.js on Windows querySrv ECONNREFUSED when resolving MongoDB Atlas SRV records
+try {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+} catch {
+  // Ignore in restricted environments
+}
 
 declare global {
   var mongooseCache: {
@@ -32,7 +40,8 @@ export const connectToDatabase = async () => {
   } catch (e) {
     cached.promise = null;
     console.error(
-      "MongoDB connection error. Please make sure MongoDB is running. " + e,
+      "MongoDB connection error. Please make sure MongoDB is running: " +
+        (e instanceof Error ? e.message : String(e)),
     );
     throw e;
   }
