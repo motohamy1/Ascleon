@@ -40,6 +40,42 @@ export const getAllBooks = async (search?: string) => {
   }
 };
 
+// Fetches the signed-in user's books, newest first
+export const getUserBooks = async (search?: string) => {
+  try {
+    await connectToDatabase();
+
+    const { userId } = await auth();
+
+    let query: Record<string, unknown> = {};
+    if (userId) {
+      query.clerkId = userId;
+    }
+
+    if (search) {
+      const escapedSearch = escapeRegex(search);
+      const regex = new RegExp(escapedSearch, "i");
+      query = {
+        ...query,
+        $or: [{ title: { $regex: regex } }, { author: { $regex: regex } }],
+      };
+    }
+
+    const books = await Book.find(query).sort({ createdAt: -1 }).lean();
+
+    return {
+      success: true,
+      data: serializeData(books),
+    };
+  } catch (e) {
+    console.error("Error fetching user books", e);
+    return {
+      success: false,
+      error: e instanceof Error ? e.message : "Failed to fetch books",
+    };
+  }
+};
+
 export const checkBookExists = async (title: string) => {
   try {
     await connectToDatabase();

@@ -1,52 +1,35 @@
-import Hero from "@/components/Hero";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { getAllBooks } from "@/lib/actions/book.actions";
-import Search from "@/components/Search";
-import PersonalLibrary from "@/components/library/PersonalLibrary";
-import { sampleBooks } from "@/lib/constants";
+import {
+  getUserSessions,
+  SessionHistoryItem,
+} from "@/lib/actions/session.actions";
+import Welcome from "@/components/welcome/Welcome";
+import ProgressView from "@/components/progress/ProgressView";
 import { IBook } from "@/types";
 
-export const revalidate = 60;
+const SpacePage = async () => {
+  const user = await currentUser();
 
-interface HomeProps {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-}
+  const booksResult = await getAllBooks();
+  const books = (booksResult.success ? (booksResult.data as IBook[]) ?? [] : []);
 
-const Home = async ({ searchParams }: HomeProps) => {
-  const params = await searchParams;
-  const searchQuery = typeof params.search === "string" ? params.search : undefined;
+  const sessionsResult = await getUserSessions(40);
+  const sessions = sessionsResult.success
+    ? (sessionsResult.data as SessionHistoryItem[])
+    : [];
 
-  const bookResults = await getAllBooks(searchQuery);
-  const dbBooks = bookResults.success ? (bookResults.data as IBook[]) ?? [] : [];
+  return <ProgressView books={books} sessions={sessions} firstName={user?.firstName ?? null} />;
+};
 
-  // Fallback to rich sample library if no books have been uploaded yet and no search active
-  const books: IBook[] =
-    dbBooks.length > 0
-      ? dbBooks
-      : !searchQuery
-        ? (sampleBooks as unknown as IBook[])
-        : [];
+const HomePage = async () => {
+  const { userId } = await auth();
 
   return (
-    <main className="max-w-7xl mx-auto px-5 w-full min-h-screen bg-[#FAFAF8] pt-6 sm:pt-8 pb-20">
-      <Hero />
-
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2 className="section-title text-2xl sm:text-3xl font-serif font-bold text-[#212A3B]">
-              Personal Library
-            </h2>
-            <p className="text-xs sm:text-sm text-[#736B63] mt-0.5">
-              Browse your books on the interactive shelf or grid
-            </p>
-          </div>
-          <Search />
-        </div>
-
-        <PersonalLibrary initialBooks={books} />
-      </div>
+    <main className="mx-auto w-full max-w-[1580px] px-3 pt-[108px] pb-16 sm:px-4 sm:pt-[116px] acid-bg">
+      {userId ? <SpacePage /> : <Welcome />}
     </main>
   );
 };
 
-export default Home;
+export default HomePage;

@@ -1,7 +1,15 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
-@import "tw-animate-css";
 @import "shadcn/tailwind.css";
+
+/* Signature display face — self-hosted (Fontshare, free licence) */
+@font-face {
+  font-family: 'Tanker';
+  src: url('/fonts/tanker-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 
 @custom-variant dark (&:is(.dark *));
 
@@ -171,6 +179,10 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* Acid/Y2K system: lavender paper is the app-wide page surface */
+  body {
+    background-color: var(--paper);
+  }
 }
 
 @layer utilities {
@@ -178,7 +190,7 @@
     @apply max-w-7xl px-5 mx-auto w-full;
   }
   .container {
-    @apply pt-[94px] pb-18 min-h-screen;
+    @apply pt-[116px] pb-18 min-h-screen;
   }
   .navItem {
     @apply px-1 sm:px-3 text-sm sm:text-base font-medium flex items-center cursor-pointer text-[var(--text-primary)];
@@ -205,7 +217,7 @@
     @apply !mt-3 text-center text-lg;
   }
   .new-book {
-    @apply max-w-7xl px-5 mx-auto w-full space-y-6 py-18 min-h-screen;
+    @apply max-w-7xl px-5 mx-auto w-full space-y-6 pt-[116px] pb-18 min-h-screen;
   }
   .new-book-wrapper {
     @apply mx-auto max-w-2xl space-y-6 mt-12 mb-20;
@@ -373,7 +385,7 @@
     @apply flex flex-col sm:flex-row items-center sm:items-start gap-5 sm:gap-8;
   }
   .book-page-container {
-    @apply max-w-7xl px-5 mx-auto w-full pt-20 sm:pt-28 min-h-screen pb-12;
+    @apply max-w-7xl px-5 mx-auto w-full pt-[116px] sm:pt-[124px] min-h-screen pb-12;
   }
   .library-filter-bar {
     @apply mb-5 md:mb-9 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4;
@@ -928,6 +940,149 @@ button[data-variant='unstyled'] *,
 .cl-pricingTableCard:first-child {
   border: 2px solid #663820 !important;
 }
+
+/* ===========================================================
+   ACID/Y2K DESIGN SYSTEM (extracted from Dsgners® reference)
+   - pale lavender page, ink frame, peach cards, orange accent
+   - bold extended display face, small meta labels, stickers
+   =========================================================== */
+
+:root {
+  /* Surfaces */
+  --ink: #0f0e10;
+  --ink-soft: #1d1b20;
+  --paper: #e9e5ec;
+  --panel: #fbf7f0;
+  --cream: #f6d7a1;
+  --cream-deep: #eec584;
+
+  /* Accents */
+  --orange: #ff4c00;
+  --magenta: #a1156e;
+  --magenta-light: #e0459a;
+  --teal: #2e6f68;
+
+  /* Radii */
+  --r-frame: 28px;
+  --r-card: 18px;
+
+  /* Directional shadows (one light source, dark-tinted, no bloom) */
+  --shadow-nav-deep: 0 22px 44px -16px rgba(15, 13, 18, 0.55),
+    0 8px 16px -8px rgba(15, 13, 18, 0.3);
+  --shadow-frame: 0 34px 80px -32px rgba(15, 13, 18, 0.55),
+    0 12px 32px -18px rgba(15, 13, 18, 0.3);
+  --shadow-chip: 0 14px 30px -14px rgba(15, 13, 18, 0.5),
+    0 4px 10px -6px rgba(15, 13, 18, 0.25);
+}
+
+@font-face {
+  font-family: 'Tanker';
+  src: url('/fonts/tanker-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer utilities {
+  .acid-bg {
+    background-color: var(--paper);
+  }
+  .shadow-nav-deep {
+    box-shadow: var(--shadow-nav-deep);
+  }
+  .shadow-frame {
+    box-shadow: var(--shadow-frame);
+  }
+  .shadow-chip {
+    box-shadow: var(--shadow-chip);
+  }
+
+  /* Signature display type */
+  .display {
+    font-family: 'Tanker', var(--font-mona-sans), sans-serif;
+    font-weight: 400;
+    text-transform: uppercase;
+    line-height: 1;
+    letter-spacing: 0.005em;
+  }
+
+  /* Small meta label — used sparingly for genuine metadata */
+  .meta-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  /* Chrome 3D sphere (decorative, crafted gradient — no glow) */
+  .chrome-sphere {
+    border-radius: 9999px;
+    background: radial-gradient(
+      circle at 32% 27%,
+      #ffffff 0%,
+      #efeaf6 16%,
+      #c3b9d6 38%,
+      #8a7fa3 56%,
+      #524a66 74%,
+      #2b2438 90%,
+      #191522 100%
+    );
+    box-shadow: inset -8px -12px 22px rgba(255, 255, 255, 0.2),
+      inset 5px 9px 18px rgba(22, 17, 34, 0.35);
+  }
+  .chrome-sphere-violet {
+    border-radius: 9999px;
+    background: radial-gradient(
+      circle at 32% 27%,
+      #ffffff 0%,
+      #ece2ff 15%,
+      #bfa4ef 38%,
+      #8a5fd8 58%,
+      #5a3798 78%,
+      #2c1a52 95%
+    );
+    box-shadow: inset -8px -12px 22px rgba(255, 255, 255, 0.16),
+      inset 5px 9px 18px rgba(30, 16, 60, 0.4);
+  }
+
+  /* Barcode texture — decorative only, pure CSS, currentColor */
+  .barcode {
+    background-image: repeating-linear-gradient(
+      90deg,
+      currentColor 0 2px,
+      transparent 2px 5px,
+      currentColor 5px 6px,
+      transparent 6px 10px,
+      currentColor 10px 11px,
+      transparent 11px 15px,
+      currentColor 15px 18px,
+      transparent 18px 21px
+    );
+  }
+
+  /* Magenta swatch ramp — the reference's Pantone-chip motif */
+  .swatch-ramp {
+    background: linear-gradient(
+      90deg,
+      #5c0c38 0%,
+      #a1156e 26%,
+      #e0459a 52%,
+      #ff5fa2 76%,
+      #ffb3d1 100%
+    );
+  }
+
+  /* Quiet card hover — tonal only, no bloom */
+  .card-lift {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+    &:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 18px 36px -20px rgba(15, 13, 18, 0.55);
+    }
+  }
+}
+/* END ACID/Y2K DESIGN SYSTEM */
 
 /* Style the Active badge with better contrast */
 .cl-badge,

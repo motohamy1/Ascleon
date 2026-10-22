@@ -10,6 +10,7 @@ interface BookSpineProps {
   isSelected: boolean;
   onSelect: (book: IBook) => void;
   index: number;
+  totalBooks?: number;
 }
 
 export default function BookSpine({
@@ -17,6 +18,7 @@ export default function BookSpine({
   isSelected,
   onSelect,
   index,
+  totalBooks,
 }: BookSpineProps) {
   const palette = useMemo(
     () => getBookSpinePalette(book.title, book.color),
@@ -33,14 +35,35 @@ export default function BookSpine({
     return { height, width };
   }, [book.title, index]);
 
+  const isFirst = index === 0;
+  const isLast = Boolean(
+    totalBooks && totalBooks > 3 && index === totalBooks - 1,
+  );
+
+  // Position card over the books to avoid being clipped by container edges:
+  // - First book at the start of the row aligns left-0 to extend over the shelf
+  // - Last book in a full shelf aligns right-0 to extend inward
+  // - Middle books remain centered directly above the spine
+  const horizontalPosition = isFirst
+    ? "left-0"
+    : isLast
+      ? "right-0"
+      : "left-1/2 -translate-x-1/2";
+
   return (
-    <div className="relative group flex flex-col items-center">
+    <div
+      className={cn(
+        "relative group flex flex-col items-center",
+        isSelected ? "z-30" : "hover:z-40 focus-within:z-40",
+      )}
+    >
       {/* Floating Hover Tooltip Card (Appears directly above book spine on hover) */}
       <div
         className={cn(
           "absolute -top-24 z-30 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none",
           "w-48 bg-[#212A3B] text-[#FAF7F2] rounded-xl p-2.5 shadow-xl border border-[#3E4A61]/50",
           "flex flex-col gap-1 items-start text-left transform -translate-y-1 group-hover:translate-y-0",
+          horizontalPosition,
         )}
       >
         <div className="w-full flex items-center justify-between text-[10px] text-[#C4B5A5] font-mono">

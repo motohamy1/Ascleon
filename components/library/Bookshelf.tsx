@@ -68,6 +68,7 @@ export default function Bookshelf({
               key={book._id}
               book={book}
               index={index}
+              totalBooks={books.length}
               isSelected={selectedBook?._id === book._id}
               onSelect={(b) =>
                 onSelectBook(selectedBook?._id === b._id ? null : b)
