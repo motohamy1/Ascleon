@@ -158,7 +158,7 @@ const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
             </Link>
           ) : (
             <Link
-              href="/books/new"
+              href="/library"
               className="card-lift group flex min-h-[280px] flex-1 cursor-pointer flex-col justify-between rounded-[22px] bg-[color:var(--orange)] p-6 shadow-chip"
             >
               <p className="meta-label text-[color:var(--ink)]/80">
@@ -356,7 +356,7 @@ const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
         {/* Quick actions */}
         <div className="flex flex-col gap-3 lg:col-span-3">
           <Link
-            href="/books/new"
+            href="/library"
             className="card-lift group flex flex-1 cursor-pointer items-start justify-between gap-4 rounded-[22px] bg-[color:var(--ink)] p-6 text-[color:var(--cream)] shadow-chip"
           >
             <div>

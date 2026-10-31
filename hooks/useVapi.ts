@@ -54,7 +54,6 @@ function describeVapiError(error: unknown): string {
     .join(": ") || "Unknown Vapi error";
 }
 
-
 export type CallStatus =
   | "idle"
   | "connecting"
@@ -63,7 +62,13 @@ export type CallStatus =
   | "thinking"
   | "speaking";
 
-export function useVapi(book: IBook) {
+export interface VapiContextOptions {
+  currentSegmentIndex?: number;
+  currentSegmentContent?: string;
+  selectedText?: string;
+}
+
+export function useVapi(book: IBook, contextOptions?: VapiContextOptions) {
   const { userId } = useAuth();
   const { limits } = usePlan();
 
@@ -80,6 +85,8 @@ export function useVapi(book: IBook) {
   const startTimeRef = useRef<number | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const isStoppingRef = useRef(false);
+
+  const contextRef = useLatestRef(contextOptions);
 
   const getVapi = useCallback(() => {
     if (!vapiRef.current) {
@@ -118,45 +125,39 @@ export function useVapi(book: IBook) {
     const handlers = {
       "call-start-progress": (event: { stage: string; status: string }) => {
         if (event.status === "failed") {
-          console.error(`Vapi call startup failed at ${event.stage}`);
+          console.error("Call start progress failed:", event);
+          setStatus("idle");
+          setLimitError(`Voice call setup failed at stage: ${event.stage}`);
         }
-      },
-      "call-start-failed": (event: { stage: string; error: string }) => {
-        console.error(`Vapi call startup failed at ${event.stage}:`, event.error);
       },
 
       "call-start": () => {
         isStoppingRef.current = false;
-        setStatus("starting"); // AI speaks first, wait for it
-        setCurrentMessage("");
-        setCurrentUserMessage("");
+        setStatus("speaking");
+        startTimeRef.current = Date.now();
 
         // Start duration timer
-        startTimeRef.current = Date.now();
-        setDuration(0);
         timerRef.current = setInterval(() => {
           if (startTimeRef.current) {
-            const newDuration = Math.floor(
+            const elapsed = Math.floor(
               (Date.now() - startTimeRef.current) / TIMER_INTERVAL_MS,
             );
-            setDuration(newDuration);
+            setDuration(elapsed);
 
-            // Check duration limit
-            if (newDuration >= maxDurationRef.current) {
+            // Enforce max duration from plan limits
+            if (elapsed >= maxDurationRef.current) {
+              isStoppingRef.current = true;
               getVapi().stop();
+              setStatus("idle");
               setLimitError(
-                `Session time limit (${Math.floor(
-                  maxDurationRef.current / SECONDS_PER_MINUTE,
-                )} minutes) reached. Upgrade your plan for longer sessions.`,
+                `Session reached plan limit of ${Math.floor(maxDurationRef.current / SECONDS_PER_MINUTE)} minutes.`,
               );
-              setIsBillingError(true);
             }
           }
         }, TIMER_INTERVAL_MS);
       },
 
       "call-end": () => {
-        // Don't reset isStoppingRef here - delayed events may still fire
         setStatus("idle");
         setCurrentMessage("");
         setCurrentUserMessage("");
@@ -347,7 +348,7 @@ export function useVapi(book: IBook) {
     };
   }, []);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (customGreeting?: string) => {
     if (!userId) {
       setLimitError("Please sign in to start a voice session.");
       return;
@@ -371,10 +372,16 @@ export function useVapi(book: IBook) {
       }
 
       sessionIdRef.current = result.sessionId || null;
-      // Note: Server-returned maxDurationMinutes is informational only
-      // The actual limit is enforced by useLatestRef(limits.maxSessionMinutes * 60)
 
-      const firstMessage = `Hey, good to meet you. Quick question before we dive in - have you actually read ${book.title} yet, or are we starting fresh?`;
+      const currentCtx = contextRef.current;
+      const sectionNum = (currentCtx?.currentSegmentIndex ?? 0) + 1;
+      const hasSelection = !!currentCtx?.selectedText;
+
+      const defaultGreeting = hasSelection
+        ? `Hello! I see you've highlighted: "${currentCtx!.selectedText!.slice(0, 90)}...". Let's explore the clinical mechanism behind this. What would you like to examine first?`
+        : `Hello, I'm your bedside Socratic clinical mentor for "${book.title}". We're on Section ${sectionNum}. Would you like me to walk through the auscultation mechanics, or shall we do a quick oral viva?`;
+
+      const firstMessage = customGreeting || defaultGreeting;
 
       await getVapi().start(ASSISTANT_ID, {
         firstMessage,
@@ -382,6 +389,9 @@ export function useVapi(book: IBook) {
           title: book.title,
           author: book.author,
           bookId: book._id,
+          currentSection: String(sectionNum),
+          selectedText: currentCtx?.selectedText || "",
+          activeContent: currentCtx?.currentSegmentContent?.slice(0, 800) || "",
         },
         voice: {
           provider: "11labs" as const,
@@ -398,7 +408,7 @@ export function useVapi(book: IBook) {
       setStatus("idle");
       setLimitError("Failed to start voice session. Please try again.");
     }
-  }, [book._id, book.title, book.author, voice, userId]);
+  }, [book._id, book.title, book.author, voice, userId, contextRef]);
 
   const stop = useCallback(() => {
     isStoppingRef.current = true;
@@ -416,12 +426,6 @@ export function useVapi(book: IBook) {
     status === "thinking" ||
     status === "speaking";
 
-  // Calculate remaining time
-  // const maxDurationSeconds = limits.maxSessionMinutes * SECONDS_PER_MINUTE;
-  // const remainingSeconds = Math.max(0, maxDurationSeconds - duration);
-  // const showTimeWarning =
-  //     isActive && remainingSeconds <= TIME_WARNING_THRESHOLD && remainingSeconds > 0;
-
   return {
     status,
     isActive,
@@ -435,10 +439,6 @@ export function useVapi(book: IBook) {
     isBillingError,
     maxDurationSeconds,
     clearError,
-    // maxDurationSeconds,
-    // remainingSeconds,
-    // showTimeWarning,
   };
 }
-
 export default useVapi;

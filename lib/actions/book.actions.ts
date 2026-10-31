@@ -240,6 +240,10 @@ export const searchBookSegments = async (
   try {
     await connectToDatabase();
 
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      return { success: true, data: [] };
+    }
+
     console.log(`Searching for: "${query}" in book ${bookId}`);
 
     const bookObjectId = new mongoose.Types.ObjectId(bookId);

@@ -6,7 +6,7 @@ const features = [
   {
     n: '01',
     title: 'Upload anything',
-    desc: 'Drop a PDF. Bookify splits it into chapters and preps the conversation.',
+    desc: 'Drop a PDF. Ascleon splits it into chapters and preps the conversation.',
     card: 'bg-[color:var(--panel)] text-[color:var(--ink)]',
     dim: 'text-[color:var(--ink)]/50',
     body: 'text-[color:var(--ink)]/70',
@@ -64,7 +64,7 @@ const Welcome = () => {
         <div className="relative flex min-h-[430px] flex-col justify-between overflow-hidden rounded-[22px] bg-[color:var(--cream)] p-6 sm:p-10 lg:col-span-8 lg:min-h-[520px]">
           <div className="flex items-center justify-between gap-6">
             <p className="meta-label text-[color:var(--ink)]/70">
-              Bookify® · reading, out loud
+              Ascleon® · reading, out loud
             </p>
             <div className="barcode h-7 w-20 shrink-0 text-[color:var(--ink)]" />
           </div>
@@ -76,7 +76,7 @@ const Welcome = () => {
               your books.
             </h1>
             <p className="mt-5 max-w-md text-[15px] leading-relaxed text-[color:var(--ink-soft)] sm:text-base">
-              Upload any stubborn book, light or med-school dense. Bookify
+              Upload any stubborn book, light or med-school dense. Ascleon
               turns its chapters into live conversations with an AI co-reader,
               so the hard parts finally open up.
             </p>
@@ -201,7 +201,7 @@ const Welcome = () => {
       </section>
 
       <p className="meta-label mt-3 text-center text-[color:var(--ink)]/55">
-        Bookify® · built for stubborn readers
+        Ascleon® · built for stubborn readers
       </p>
     </div>
   );

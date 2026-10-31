@@ -99,63 +99,83 @@ export async function parsePDFFile(file: File) {
   try {
     const pdfjsLib = await import("pdfjs-dist");
 
-    // Set worker source for browser environment
-    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-      "pdfjs-dist/build/pdf.worker.min.mjs",
-      import.meta.url,
-    ).toString();
+    // Configure worker with unpkg CDN matching library version for stability
+    const workerVersion = pdfjsLib.version || "5.5.207";
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${workerVersion}/build/pdf.worker.min.mjs`;
 
     // Read file as array buffer
     const arrayBuffer = await file.arrayBuffer();
 
     // Load PDF document
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const loadingTask = pdfjsLib.getDocument({
+      data: arrayBuffer,
+      useSystemFonts: true,
+    });
     const pdfDocument = await loadingTask.promise;
 
-    // Render first page as cover image
-    const firstPage = await pdfDocument.getPage(1);
-    const viewport = firstPage.getViewport({ scale: 2 }); // 2x scale for better quality
+    // Render first page as cover image (with fallback if canvas context fails)
+    let coverDataURL = "";
+    try {
+      const firstPage = await pdfDocument.getPage(1);
+      const viewport = firstPage.getViewport({ scale: 2 });
 
-    const canvas = document.createElement("canvas");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const context = canvas.getContext("2d");
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const context = canvas.getContext("2d");
 
-    if (!context) {
-      throw new Error("Could not get canvas context");
+      if (context) {
+        await firstPage.render({
+          canvasContext: context,
+          viewport: viewport,
+          canvas: canvas,
+        }).promise;
+        coverDataURL = canvas.toDataURL("image/png");
+      }
+    } catch (coverErr) {
+      console.warn("Cover extraction warning (fallback will be used):", coverErr);
     }
-
-    await firstPage.render({
-      canvasContext: context,
-      viewport: viewport,
-      canvas: canvas,
-    }).promise;
-
-    // Convert canvas to data URL
-    const coverDataURL = canvas.toDataURL("image/png");
 
     // Extract text from all pages
     let fullText = "";
 
     for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
-      const page = await pdfDocument.getPage(pageNum);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .filter((item) => "str" in item)
-        .map((item) => (item as { str: string }).str)
-        .join(" ");
-      fullText += pageText + "\n";
+      try {
+        const page = await pdfDocument.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items
+          .filter((item) => "str" in item)
+          .map((item) => (item as { str: string }).str)
+          .join(" ");
+        fullText += pageText + "\n";
+      } catch (pageErr) {
+        console.warn(`Error extracting text on page ${pageNum}:`, pageErr);
+      }
     }
 
     // Split text into segments for search
-    const segments = splitIntoSegments(fullText);
+    let segments = splitIntoSegments(fullText.trim());
+
+    // If text was minimal (e.g. image-only/scanned PDF), provide initial fallback segment
+    if (segments.length === 0) {
+      const cleanDocTitle = file.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
+      segments = [
+        {
+          text: `Study Material: ${cleanDocTitle}.\n\nThis document is ready for interactive reading, voice questions, and active recall.`,
+          segmentIndex: 0,
+          wordCount: 18,
+        },
+      ];
+    }
 
     // Clean up PDF document resources
+    const numPages = pdfDocument.numPages;
     await pdfDocument.destroy();
 
     return {
       content: segments,
       cover: coverDataURL,
+      numPages,
     };
   } catch (error) {
     console.error("Error parsing PDF:", error);

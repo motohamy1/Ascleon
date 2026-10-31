@@ -44,17 +44,32 @@ const FileUploader = <T extends FieldValues>({
         return;
       }
 
-      // Validate file type
-      if (!acceptTypes.includes(file.type)) {
+      // Robust file type check (works across Windows MIME type gaps)
+      const isPdfAccepted =
+        acceptTypes.includes("application/pdf") &&
+        (file.type === "application/pdf" ||
+          file.name.toLowerCase().endsWith(".pdf"));
+      const isImgAccepted =
+        isImageFile() &&
+        (file.type.startsWith("image/") ||
+          /\.(jpe?g|png|webp)$/i.test(file.name));
+      const isValid =
+        acceptTypes.includes(file.type) || isPdfAccepted || isImgAccepted;
+
+      if (!isValid) {
         setError(`Invalid file type. Accepted: ${acceptTypes.join(", ")}`);
         onChange(undefined);
         return;
       }
 
       // Create preview for images
-      if (isImageFile()) {
-        const url = URL.createObjectURL(file);
-        setPreviewUrl(url);
+      if (isImageFile() || /\.(jpe?g|png|webp)$/i.test(file.name)) {
+        try {
+          const url = URL.createObjectURL(file);
+          setPreviewUrl(url);
+        } catch {
+          // Ignore preview generation failure
+        }
       }
 
       onChange(file);
@@ -152,7 +167,7 @@ const FileUploader = <T extends FieldValues>({
                           e.stopPropagation();
                           clearFile(onChange);
                         }}
-                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors cursor-pointer"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -180,7 +195,7 @@ const FileUploader = <T extends FieldValues>({
                           e.stopPropagation();
                           clearFile(onChange);
                         }}
-                        className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+                        className="p-2 text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
                       >
                         <X className="w-5 h-5" />
                       </button>
@@ -204,7 +219,7 @@ const FileUploader = <T extends FieldValues>({
             </div>
 
             {displayError && (
-              <p className="text-sm text-red-500">{displayError}</p>
+              <p className="text-xs text-red-500">{displayError}</p>
             )}
           </div>
         );

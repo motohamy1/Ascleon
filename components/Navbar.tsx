@@ -1,7 +1,6 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -12,18 +11,22 @@ import {
   useAuth,
   useClerk,
 } from '@clerk/nextjs';
-import { ArrowUpRight, Menu, X } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 
 const navItems = [
   { href: '/', label: 'Progress', match: '/' },
-  { href: '/space/active', label: 'Space & Study', match: '/space/active' },
+  { href: '/space/active', label: 'Space & Study', match: '/space/active', extraMatch: '/books' },
   { href: '/library', label: 'Library', match: '/library' },
   { href: '/space/revision', label: 'Revision', match: '/space/revision' },
+
 ];
 
-const isActiveRoute = (pathname: string, match: string) =>
-  match === '/' ? pathname === '/' : pathname.startsWith(match);
+const isActiveRoute = (pathname: string, match: string, extraMatch?: string) =>
+  match === '/'
+    ? pathname === '/'
+    : pathname.startsWith(match) ||
+      (!!extraMatch && pathname.startsWith(extraMatch));
 
 // Tabs that require an account; guests get the sign-in modal instead
 const authRequired = new Set(['/space/active', '/space/revision']);
@@ -58,44 +61,39 @@ const Navbar = () => {
   return (
     <header className="fixed inset-x-0 top-0 z-50 px-3 pt-3 sm:px-4 sm:pt-4">
       <div className="relative mx-auto flex w-full max-w-[1680px] items-center justify-between gap-3">
-        {/* Brand cluster — separate pill at the start */}
+        {/* Left: Brand Identity */}
         <Link
           href="/"
           className={cn(
-            'flex h-13 shrink-0 items-center gap-2.5 rounded-full py-2 pl-3.5 pr-5 transition-transform active:scale-[0.98]',
-            clusterClass,
+            'group flex items-center gap-2.5 rounded-[1.25rem] px-3.5 py-2 transition-transform active:scale-[0.98]',
+            clusterClass
           )}
         >
-          <Image
-            src="/assets/logo.png"
-            alt="Bookify logo"
-            width={30}
-            height={30}
-            className="size-7"
-          />
-          <span className="display pt-0.5 text-[19px] leading-none text-[color:var(--ink)] sm:text-[21px]">
-            Bookify
+          <span className="font-serif text-lg font-bold tracking-tight text-[color:var(--ink)]">
+            Ascleon
           </span>
         </Link>
 
-        {/* Center nav — separate rounded container in the middle */}
+        {/* Center: Primary Navigation (Desktop) */}
         <nav
           aria-label="Primary"
-          className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--ink)] p-1.5 shadow-nav-deep md:flex"
+          className={cn(
+            'hidden items-center gap-1 rounded-full p-1.5 md:flex',
+            'shadow-nav-deep border-2 border-[color:var(--ink)] bg-[color:var(--ink)]'
+          )}
         >
           {navItems.map((item) => {
-            const active = isActiveRoute(pathname, item.match);
+            const active = isActiveRoute(pathname, item.match, item.extraMatch);
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 onClick={(e) => guardClick(e, item.href)}
-                aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'rounded-full px-4 py-2 text-[12px] font-bold uppercase tracking-[0.08em] whitespace-nowrap transition-colors lg:px-5',
+                  'rounded-full px-4 py-1.5 text-xs font-semibold tracking-wide transition-all uppercase',
                   active
-                    ? 'bg-[color:var(--orange)] text-[color:var(--ink)]'
-                    : 'text-[#f4efe6]/80 hover:bg-white/10 hover:text-white',
+                    ? 'bg-[color:var(--cream)] text-[color:var(--ink)] shadow-xs'
+                    : 'text-[color:var(--cream)]/75 hover:text-[color:var(--cream)] hover:bg-white/10'
                 )}
               >
                 {item.label}
@@ -104,90 +102,110 @@ const Navbar = () => {
           })}
         </nav>
 
-        {/* Right cluster — profile circle kept separate at the end */}
-        <div className="flex shrink-0 items-center gap-2">
-          <SignedIn>
-            <div
-              className={cn('rounded-full p-[5px]', clusterClass)}
-              title="Account"
-            >
-              <UserButton
-                appearance={{
-                  elements: {
-                    avatarBox: 'w-8 h-8 rounded-full',
-                  },
-                }}
-              />
-            </div>
-          </SignedIn>
-
+        {/* Right: Auth & CTAs (Desktop) */}
+        <div className="hidden items-center gap-2 md:flex">
           <SignedOut>
             <SignInButton mode="modal">
               <button
+                type="button"
                 className={cn(
-                  'hidden h-13 cursor-pointer items-center rounded-full px-5 text-[12px] font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] transition-transform hover:-translate-y-0.5 sm:flex',
-                  'border-2 border-[color:var(--ink)] bg-[color:var(--orange)] shadow-nav-deep',
+                  'cursor-pointer rounded-[1.25rem] px-4 py-2 font-serif text-xs font-bold uppercase tracking-wider text-[color:var(--ink)] transition-transform hover:-translate-y-0.5 active:translate-y-0',
+                  clusterClass
                 )}
               >
                 Sign in
               </button>
             </SignInButton>
           </SignedOut>
+          <SignedIn>
+            <div
+              className={cn(
+                'flex items-center rounded-full p-1',
+                clusterClass
+              )}
+            >
+              <UserButton
+                appearance={{
+                  elements: {
+                    userButtonAvatarBox: 'h-8 w-8',
+                  },
+                }}
+              />
+            </div>
+          </SignedIn>
+        </div>
 
-          {/* Hamburger — mobile only */}
+        {/* Mobile menu toggle */}
+        <div className="flex items-center gap-2 md:hidden">
           <button
-            onClick={() => setOpen((v) => !v)}
+            type="button"
+            onClick={() => setOpen((prev) => !prev)}
             aria-expanded={open}
-            aria-label={open ? 'Close menu' : 'Open menu'}
+            aria-label="Toggle navigation menu"
             className={cn(
-              'flex size-13 cursor-pointer items-center justify-center rounded-full text-[color:var(--ink)] transition-transform active:scale-95 md:hidden',
-              clusterClass,
+              'flex h-10 w-10 items-center justify-center rounded-[1rem] text-[color:var(--ink)]',
+              clusterClass
             )}
           >
-            {open ? <X className="size-5" /> : <Menu className="size-5" />}
+            {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </div>
       </div>
 
-      {/* Mobile panel */}
+      {/* Mobile Drawer */}
       {open && (
-        <div className="mx-auto mt-3 max-w-[440px] animate-in fade-in slide-in-from-top-2 rounded-[26px] border-2 border-[color:var(--ink)] bg-[color:var(--cream)] p-2 shadow-nav-deep duration-200 md:hidden">
-          <nav aria-label="Mobile" className="flex flex-col">
-            {navItems.map((item) => {
-              const active = isActiveRoute(pathname, item.match);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={(e) => {
-                    guardClick(e, item.href);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    'flex items-center justify-between rounded-2xl px-4 py-3 text-[13px] font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] transition-colors',
-                    active
-                      ? 'bg-[color:var(--orange)]'
-                      : 'hover:bg-black/5',
-                  )}
-                >
-                  {item.label}
-                  <ArrowUpRight className="size-4" />
-                </Link>
-              );
-            })}
-          </nav>
-
-          <SignedOut>
-            <SignInButton mode="modal">
-              <button
-                onClick={() => setOpen(false)}
-                className="mt-1 flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-[color:var(--ink)] bg-[color:var(--ink)] px-4 py-3 text-[13px] font-bold uppercase tracking-[0.08em] text-[color:var(--cream)]"
-              >
-                Sign in
-                <ArrowUpRight className="size-4" />
-              </button>
-            </SignInButton>
-          </SignedOut>
+        <div className="mt-2 md:hidden">
+          <div
+            className={cn(
+              'flex flex-col gap-2 rounded-2xl p-3 shadow-xl',
+              clusterClass
+            )}
+          >
+            <nav className="flex flex-col gap-1">
+              {navItems.map((item) => {
+                const active = isActiveRoute(pathname, item.match, item.extraMatch);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={(e) => {
+                      guardClick(e, item.href);
+                      setOpen(false);
+                    }}
+                    className={cn(
+                      'rounded-xl px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors',
+                      active
+                        ? 'bg-[color:var(--ink)] text-[color:var(--cream)]'
+                        : 'text-[color:var(--ink)] hover:bg-black/5'
+                    )}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+            <div className="mt-2 border-t border-[color:var(--ink)]/15 pt-2">
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className="w-full cursor-pointer rounded-xl bg-[color:var(--ink)] py-2 text-center font-serif text-sm font-bold uppercase tracking-wider text-[color:var(--cream)]"
+                  >
+                    Sign in
+                  </button>
+                </SignInButton>
+              </SignedOut>
+              <SignedIn>
+                <div className="flex items-center justify-between px-2 py-1">
+                  <span className="text-xs font-semibold text-[color:var(--ink)]">
+                    Account
+                  </span>
+                  <UserButton />
+                </div>
+              </SignedIn>
+            </div>
+          </div>
         </div>
       )}
     </header>

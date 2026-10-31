@@ -1,8 +1,9 @@
-import Link from 'next/link';
-import { ArrowUpRight, Library as LibraryIcon } from 'lucide-react';
+import { Suspense } from 'react';
+import { Library as LibraryIcon } from 'lucide-react';
 import { getAllBooks } from '@/lib/actions/book.actions';
 import PersonalLibrary from '@/components/library/PersonalLibrary';
 import Search from '@/components/Search';
+import DirectBookUpload from '@/components/library/DirectBookUpload';
 import { sampleBooks } from '@/lib/constants';
 import { IBook } from '@/types';
 
@@ -40,14 +41,10 @@ const LibraryPage = async ({ searchParams }: LibraryPageProps) => {
             </span>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Search />
-            <Link
-              href="/books/new"
-              className="group flex shrink-0 items-center justify-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-5 py-2.5 text-[12px] font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5"
-            >
-              Add book
-              <ArrowUpRight className="size-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-            </Link>
+            <Suspense fallback={<div className="h-11 w-64 rounded-full bg-[color:var(--panel)] animate-pulse" />}>
+              <Search />
+            </Suspense>
+            <DirectBookUpload />
           </div>
         </header>
 

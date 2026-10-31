@@ -10,6 +10,10 @@ const Search = () => {
   const [query, setQuery] = useState(searchParams.get("search") || "");
 
   useEffect(() => {
+    const currentSearch = searchParams.get("search") || "";
+    // Only push if the user query is actually different from the current URL param
+    if (query === currentSearch) return;
+
     const delayDebounceFn = setTimeout(() => {
       const params = new URLSearchParams(searchParams.toString());
       if (query) {

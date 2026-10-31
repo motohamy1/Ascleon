@@ -20,8 +20,8 @@ const monaSans = Mona_Sans({
 
 
 export const metadata: Metadata = {
-  title: "Bookify",
-  description: "Talk to your books. Bookify turns any difficult book into a live conversation with an AI co-reader.",
+  title: "Ascleon",
+  description: "Talk to your books. Ascleon turns any difficult book into a live conversation with an AI co-reader.",
 };
 
 export default function RootLayout({

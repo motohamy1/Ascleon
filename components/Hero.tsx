@@ -1,9 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import Link from "next/link";
+import AddBookButton from "@/components/library/AddBookButton";
 
 const steps = [
   {
@@ -23,10 +21,10 @@ const steps = [
   },
 ];
 
-export default function Hero() {
+const Hero = () => {
   return (
-    <section className="w-full px-4 sm:px-6 lg:px-8 pt-6 pb-6 mt-4 mb-10 md:mb-16">
-      <div className="max-w-7xl mx-auto">
+    <section className="w-full pt-10 pb-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Main beige card */}
         <div className="bg-[#F5E6D3] rounded-3xl p-8 md:p-12 lg:p-16">
           <div className="flex flex-col lg:flex-row items-center justify-between gap-8 lg:gap-12">
@@ -40,15 +38,9 @@ export default function Hero() {
                 <br />
                 Listen, learn, and discuss your favorite reads.
               </p>
-              <Link href="/books/new">
-                <Button
-                  variant="outline"
-                  className="bg-white border-gray-300 text-gray-900 hover:bg-gray-50 rounded-full px-6 py-5 text-base font-medium shadow-sm cursor-pointer"
-                >
-                  <Plus className="w-5 h-5 mr-2" />
-                  Add new book
-                </Button>
-              </Link>
+              <div className="inline-flex">
+                <AddBookButton />
+              </div>
             </div>
 
             {/* Center Section - Illustration */}
@@ -58,38 +50,30 @@ export default function Hero() {
                 alt="Vintage books with globe and lamp"
                 width={500}
                 height={350}
-                className="object-contain max-w-full h-auto"
+                className="w-full max-w-md h-auto object-contain"
                 priority
               />
             </div>
+          </div>
 
-            {/* Right Section - Steps Card */}
-            <div className="flex-1 w-full max-w-xs">
-              <div className="bg-white rounded-2xl p-6 shadow-sm">
-                <div className="space-y-6">
-                  {steps.map((step) => (
-                    <div key={step.number} className="flex items-start gap-4">
-                      <div className="flex-shrink-0 w-8 h-8 rounded-full border-2 border-gray-900 flex items-center justify-center">
-                        <span className="text-sm font-semibold text-gray-900">
-                          {step.number}
-                        </span>
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-gray-900">
-                          {step.title}
-                        </h3>
-                        <p className="text-sm text-gray-500">
-                          {step.description}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+          {/* Bottom - 3 Steps */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12 pt-8 border-t border-[#E8D5C0]">
+            {steps.map((step) => (
+              <div key={step.number} className="flex items-start gap-4">
+                <div className="w-8 h-8 rounded-full bg-[#663820] text-white flex items-center justify-center font-bold text-sm shrink-0">
+                  {step.number}
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">{step.title}</h3>
+                  <p className="text-sm text-gray-500">{step.description}</p>
                 </div>
               </div>
-            </div>
+            ))}
           </div>
         </div>
       </div>
     </section>
   );
-}
+};
+
+export default Hero;

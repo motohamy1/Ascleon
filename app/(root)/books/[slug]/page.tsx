@@ -4,6 +4,7 @@ import { getBookBySlug, getBookSegments } from "@/lib/actions/book.actions";
 import BookExperience from "@/components/reader/BookExperience";
 import { sampleBooks } from "@/lib/constants";
 import { IBook, IBookSegmentData } from "@/types";
+import { getSampleSegmentsForBook } from "@/lib/ai/knowledge/sample-book-data";
 
 export default async function BookDetailsPage({
   params,
@@ -38,6 +39,10 @@ export default async function BookDetailsPage({
     }
   }
 
+  if (segments.length === 0) {
+    segments = getSampleSegmentsForBook(book);
+  }
+
   return (
     <BookExperience
       book={book}
@@ -46,3 +51,4 @@ export default async function BookDetailsPage({
     />
   );
 }
+

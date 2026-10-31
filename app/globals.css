@@ -398,10 +398,11 @@
      VAPI CONTROLS COMPONENT
      =========================================== */
   .vapi-header-card {
-    @apply flex items-center gap-6 bg-[#f3e4c7] rounded-[14px] p-6 relative overflow-hidden;
+    @apply flex items-center gap-6 rounded-[18px] border-2 border-(--ink) bg-(--cream) p-6 relative overflow-hidden;
+    box-shadow: var(--shadow-chip);
   }
   .vapi-compact-header {
-    @apply flex items-center gap-2 bg-[#f3e4c7] rounded-[14px] p-3 mb-3;
+    @apply flex items-center gap-2 rounded-[14px] border-2 border-(--ink) bg-(--cream) p-3 mb-3;
   }
   .vapi-transcript-wrapper {
     @apply min-h-[400px] max-h-[60vh] flex flex-col;
@@ -423,13 +424,13 @@
     @apply absolute inset-0 w-[50px] h-[50px] sm:w-[60px] sm:h-[60px] bg-white rounded-full opacity-50 animate-ping;
   }
   .vapi-mic-btn {
-    @apply relative w-[50px] h-[50px] sm:w-[60px] sm:h-[60px] cursor-pointer rounded-full flex items-center justify-center transition-all duration-300 border-0 bg-white;
+    @apply relative w-[50px] h-[50px] sm:w-[60px] sm:h-[60px] cursor-pointer rounded-full flex items-center justify-center transition-all duration-300 border-0 bg-(--cream);
 
     &:hover {
       transform: scale(1.05);
     }
     &:hover svg {
-      @apply text-[#aaa];
+      @apply text-(--magenta);
     }
     &:active {
       transform: scale(0.95);
@@ -439,42 +440,43 @@
     }
   }
   .vapi-mic-btn-active {
-    @apply bg-white;
+    @apply bg-(--orange) border-2 border-(--ink);
+    box-shadow: var(--shadow-chip);
   }
   .vapi-mic-btn-inactive {
-    @apply bg-white;
+    @apply bg-(--cream) border-2 border-(--ink);
   }
   .vapi-badge-ai {
-    @apply inline-block bg-white px-3 py-2 rounded-[4px];
+    @apply inline-block bg-(--panel) px-3 py-2 rounded-[4px];
   }
   .vapi-badge-ai-text {
-    @apply text-sm font-medium text-[#212a3b];
-    font-family: 'IBM Plex Serif', serif;
+    @apply text-xs font-bold text-(--ink);
+    letter-spacing: 0.04em;
   }
   .vapi-status-indicator {
-    @apply flex items-center gap-2 bg-white px-3 py-2 rounded-[4px];
+    @apply flex items-center gap-2 bg-(--panel) px-3 py-2 rounded-[4px];
   }
   .vapi-status-dot {
     @apply inline-block w-3 h-3 rounded-full;
   }
   .vapi-status-dot-ready {
-    @apply bg-gray-400;
+    @apply bg-(--paper) border border-(--ink)/30;
   }
   .vapi-status-dot-connecting {
-    @apply bg-yellow-500 animate-pulse;
+    @apply bg-(--orange) animate-pulse;
   }
   .vapi-status-dot-listening {
-    @apply bg-green-500 animate-pulse;
+    @apply bg-[#43a08f] animate-pulse;
   }
   .vapi-status-dot-thinking {
-    @apply bg-yellow-500 animate-pulse;
+    @apply bg-(--orange) animate-pulse;
   }
   .vapi-status-dot-speaking {
-    @apply bg-green-500 animate-pulse;
+    @apply bg-[#43a08f] animate-pulse;
   }
   .vapi-status-text {
-    @apply text-sm font-medium text-[#212a3b];
-    font-family: 'IBM Plex Serif', serif;
+    @apply text-xs font-bold text-(--ink);
+    letter-spacing: 0.04em;
   }
   .vapi-stat-box {
     @apply bg-white rounded-[10px] px-2.5 py-5 min-w-[225px] text-center;
@@ -1004,6 +1006,38 @@ button[data-variant='unstyled'] *,
     text-transform: uppercase;
     line-height: 1;
     letter-spacing: 0.005em;
+  }
+
+  /* Thin reader scrollbars — one per pane tone */
+  .custom-scrollbar {
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: rgba(15, 14, 16, 0.28);
+      border-radius: 3px;
+    }
+    &::-webkit-scrollbar-thumb:hover {
+      background: rgba(15, 14, 16, 0.45);
+    }
+  }
+  .custom-scrollbar-dark {
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: rgba(244, 239, 230, 0.22);
+      border-radius: 3px;
+    }
+    &::-webkit-scrollbar-thumb:hover {
+      background: rgba(244, 239, 230, 0.38);
+    }
   }
 
   /* Small meta label — used sparingly for genuine metadata */

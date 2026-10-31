@@ -81,14 +81,14 @@ const VapiControls = ({ book }: { book: IBook }) => {
                 <div className="absolute inset-0 rounded-full bg-white animate-ping opacity-75" />
               )}
               <button
-                onClick={isActive ? stop : start}
+                onClick={isActive ? stop : () => { start(); }}
                 disabled={status === "connecting"}
                 className={`vapi-mic-btn shadow-md !w-[60px] !h-[60px] z-10 ${isActive ? "vapi-mic-btn-active" : "vapi-mic-btn-inactive"}`}
               >
                 {isActive ? (
-                  <Mic className="size-7 text-white" />
+                  <Mic className="size-7 text-(--ink)" />
                 ) : (
-                  <MicOff className="size-7 text-[#212a3b]" />
+                  <MicOff className="size-7 text-(--ink)" />
                 )}
               </button>
             </div>
@@ -96,10 +96,10 @@ const VapiControls = ({ book }: { book: IBook }) => {
 
           <div className="flex flex-col gap-4 flex-1">
             <div>
-              <h1 className="text-2xl sm:text-3xl font-bold font-serif text-[#212a3b] mb-1">
+              <h1 className="display text-2xl sm:text-3xl text-(--ink) mb-1">
                 {book.title}
               </h1>
-              <p className="text-[#3d485e] font-medium">by {book.author}</p>
+              <p className="text-(--ink)/70 font-medium">by {book.author}</p>
             </div>
 
             <div className="flex flex-wrap gap-3">
@@ -124,17 +124,17 @@ const VapiControls = ({ book }: { book: IBook }) => {
           </div>
         </div>
 
-        <div className="vapi-transcript-wrapper">
-          <div className="transcript-container min-h-[400px]">
-            <Transcript
-              messages={messages}
-              currentMessage={currentMessage}
-              currentUserMessage={currentUserMessage}
-            />
-          </div>
+        {/* Transcript Card */}
+        <div className="vapi-transcript-card">
+          <Transcript
+            messages={messages}
+            currentMessage={currentMessage}
+            currentUserMessage={currentUserMessage}
+          />
         </div>
       </div>
     </>
   );
 };
+
 export default VapiControls;

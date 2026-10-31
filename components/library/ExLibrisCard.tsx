@@ -108,7 +108,7 @@ export default function ExLibrisCard({
           ✦ EX LIBRIS ✦
         </span>
         <h4 className="text-xs uppercase tracking-wider text-[#6B5E50] mt-1 font-sans">
-          A Bookify Companion
+          An Ascleon Companion
         </h4>
         <div className="flex items-center gap-2 text-[11px] text-[#8C7A68] font-sans mt-1.5">
           <span>No. {catalogNumber}</span>

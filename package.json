@@ -1,5 +1,5 @@
 {
-  "name": "bookify",
+  "name": "ascleon",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^6.39.0",
+    "@google/genai": "^2.31.0",
     "@hookform/resolvers": "^5.2.2",
     "@vapi-ai/web": "^2.7.1",
     "@vercel/blob": "^2.3.1",
