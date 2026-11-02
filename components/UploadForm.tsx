@@ -32,8 +32,12 @@ import {
   createBook,
   saveBookSegments,
 } from "@/lib/actions/book.actions";
+import {
+  requestPresignedUpload,
+  saveCoverImageAction,
+} from "@/lib/actions/storage.actions";
 import { useRouter } from "next/navigation";
-import { parsePDFFile } from "@/lib/utils";
+import { parsePDFFile, withRetry } from "@/lib/utils";
 import { upload } from "@vercel/blob/client";
 
 const UploadForm = () => {
@@ -100,67 +104,140 @@ const UploadForm = () => {
         return;
       }
 
-      setStatusMessage("Uploading PDF document to cloud storage...");
-      const uploadedPdfBlob = await upload(`${fileTitle}.pdf`, pdfFile, {
-        access: "public",
-        handleUploadUrl: "/api/upload",
-        contentType: "application/pdf",
-      });
+      setStatusMessage("Digesting study source & uploading to cloud in parallel...");
 
-      let coverUrl: string;
-      let coverBlobKey: string;
+      // Task A: PDF Upload with Retry
+      const uploadPdfTask = async () => {
+        return await withRetry(
+          async () => {
+            let url = "";
+            let key = "";
+            try {
+              const presigned = await requestPresignedUpload(`${fileTitle}.pdf`, pdfFile.type || "application/pdf");
+              if (presigned.success && presigned.data) {
+                const r2Res = await fetch(presigned.data.uploadUrl, {
+                  method: "PUT",
+                  body: pdfFile,
+                  headers: {
+                    "Content-Type": pdfFile.type || "application/pdf",
+                  },
+                });
+                if (r2Res.ok) {
+                  url = presigned.data.publicUrl;
+                  key = presigned.data.key;
+                }
+              }
+            } catch (r2Err) {
+              console.warn("Direct R2 upload attempt failed, using fallback:", r2Err);
+            }
 
-      setStatusMessage("Uploading book cover...");
-      if (data.coverImage) {
-        const coverFile = data.coverImage;
-        const uploadedCoverBlob = await upload(
-          `${fileTitle}_cover.png`,
-          coverFile,
-          {
-            access: "public",
-            handleUploadUrl: "/api/upload",
-            contentType: coverFile.type || "image/png",
+            if (!url) {
+              const uploadedPdfBlob = await upload(`${fileTitle}.pdf`, pdfFile, {
+                access: "public",
+                handleUploadUrl: "/api/upload",
+                contentType: "application/pdf",
+              });
+              url = uploadedPdfBlob.url;
+              key = uploadedPdfBlob.pathname;
+            }
+            return { url, key };
           },
+          { retries: 3, delayMs: 1200 }
         );
-        coverUrl = uploadedCoverBlob.url;
-        coverBlobKey = uploadedCoverBlob.pathname;
-      } else if (parsedPDF.cover && parsedPDF.cover.startsWith("data:image")) {
-        try {
-          const response = await fetch(parsedPDF.cover);
-          const blob = await response.blob();
+      };
 
-          const uploadedCoverBlob = await upload(
-            `${fileTitle}_cover.png`,
-            blob,
-            {
-              access: "public",
-              handleUploadUrl: "/api/upload",
-              contentType: "image/png",
-            },
-          );
-          coverUrl = uploadedCoverBlob.url;
-          coverBlobKey = uploadedCoverBlob.pathname;
-        } catch (coverErr) {
-          console.warn("Cover upload failed, using fallback:", coverErr);
-          coverUrl = "https://covers.openlibrary.org/b/isbn/9780132350884-L.jpg";
-          coverBlobKey = "";
+      // Task B: Cover Upload with Retry
+      const uploadCoverTask = async () => {
+        let coverUrl = "https://covers.openlibrary.org/b/isbn/9780132350884-L.jpg";
+        let coverBlobKey = "";
+
+        if (data.coverImage) {
+          try {
+            const coverFile = data.coverImage;
+            const reader = new FileReader();
+            const base64Promise = new Promise<string>((resolve, reject) => {
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(coverFile);
+            });
+            const base64Data = await base64Promise;
+            const coverRes = await saveCoverImageAction(base64Data, `${fileTitle}_cover.png`);
+            if (coverRes.success && coverRes.data) {
+              coverUrl = coverRes.data.url;
+              coverBlobKey = coverRes.data.key;
+            }
+          } catch {
+            const uploadedCoverBlob = await upload(
+              `${fileTitle}_cover.png`,
+              data.coverImage,
+              {
+                access: "public",
+                handleUploadUrl: "/api/upload",
+                contentType: data.coverImage.type || "image/png",
+              },
+            );
+            coverUrl = uploadedCoverBlob.url;
+            coverBlobKey = uploadedCoverBlob.pathname;
+          }
+        } else if (parsedPDF.cover && parsedPDF.cover.startsWith("data:image")) {
+          try {
+            const coverRes = await saveCoverImageAction(parsedPDF.cover, `${fileTitle}_cover.webp`);
+            if (coverRes.success && coverRes.data) {
+              coverUrl = coverRes.data.url;
+              coverBlobKey = coverRes.data.key;
+            }
+          } catch (coverErr) {
+            console.warn("Cover upload failed, using fallback:", coverErr);
+          }
         }
-      } else {
-        coverUrl = "https://covers.openlibrary.org/b/isbn/9780132350884-L.jpg";
-        coverBlobKey = "";
-      }
+        return { coverUrl, coverBlobKey };
+      };
 
-      setStatusMessage("Creating your interactive book record...");
+      // Task C: AI Deep Source Digestion
+      const digestTask = async () => {
+        try {
+          const digestRes = await fetch("/api/books/digest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: data.title,
+              author: data.author || "Author Unknown",
+              totalPages: parsedPDF.numPages,
+              textPreview: parsedPDF.textPreview,
+            }),
+          });
+          if (digestRes.ok) {
+            const d = await digestRes.json();
+            return d?.blueprint || null;
+          }
+        } catch (dErr) {
+          console.warn("AI digestion non-fatal warning:", dErr);
+        }
+        return null;
+      };
+
+      const [pdfUploadRes, coverUploadRes, digestBlueprint] = await Promise.all([
+        uploadPdfTask(),
+        uploadCoverTask(),
+        digestTask(),
+      ]);
+
+      setStatusMessage("Creating your interactive study space...");
       const book = await createBook({
         clerkId: userId,
         title: data.title,
-        author: data.author,
+        author: data.author || "Author Unknown",
         persona: data.persona || defaultVoiceId,
-        fileURL: uploadedPdfBlob.url,
-        fileBlobKey: uploadedPdfBlob.pathname,
-        coverURL: coverUrl,
-        coverBlobKey: coverBlobKey,
+        fileURL: pdfUploadRes.url,
+        fileBlobKey: pdfUploadRes.key,
+        coverURL: coverUploadRes.coverUrl,
+        coverBlobKey: coverUploadRes.coverBlobKey,
         fileSize: pdfFile.size,
+        totalPages: parsedPDF.numPages,
+        totalSegments: parsedPDF.content.length,
+        topic: digestBlueprint?.topic || "General",
+        summary: digestBlueprint?.summary || "",
+        blueprint: digestBlueprint || {},
       });
 
       if (!book.success) {
@@ -174,16 +251,36 @@ const UploadForm = () => {
         return;
       }
 
-      setStatusMessage("Synthesizing learning segments & search index...");
-      const segments = await saveBookSegments(
-        book.data._id,
-        userId,
-        parsedPDF.content,
-      );
+      setStatusMessage("Synthesizing learning pages & knowledge index...");
+      const allSegments = parsedPDF.content;
+      const CHUNK_SIZE = 60;
+      const totalChunks = Math.ceil(allSegments.length / CHUNK_SIZE);
 
-      if (!segments.success) {
-        toast.error("Failed to save book segments");
-        throw new Error("Failed to save book segments");
+      for (let c = 0; c < totalChunks; c++) {
+        const chunk = allSegments.slice(c * CHUNK_SIZE, (c + 1) * CHUNK_SIZE);
+        if (totalChunks > 1) {
+          setStatusMessage(
+            `Synthesizing learning pages (${Math.min((c + 1) * CHUNK_SIZE, allSegments.length)} of ${allSegments.length})...`,
+          );
+        }
+
+        await withRetry(
+          async () => {
+            const res = await saveBookSegments(book.data._id, userId, chunk, {
+              isAppend: c > 0,
+              totalExpectedSegments: allSegments.length,
+            });
+
+            if (!res.success) {
+              throw new Error(
+                typeof res.error === "string"
+                  ? res.error
+                  : "Failed to save book segments",
+              );
+            }
+          },
+          { retries: 3, delayMs: 1000 }
+        );
       }
 
       toast.success("Book uploaded successfully! Opening interactive study...");

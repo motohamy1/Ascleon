@@ -20,6 +20,8 @@ const BookSchema = new Schema<IBook>(
     coverBlobKey: { type: String },
     fileSize: { type: Number, required: true },
     totalSegments: { type: Number, default: 0 },
+    totalPages: { type: Number, default: 0 },
+    blueprint: { type: Schema.Types.Mixed, default: {} },
     topic: { type: String, default: "General" },
     readingStatus: {
       type: String,
@@ -31,8 +33,9 @@ const BookSchema = new Schema<IBook>(
     isFavorite: { type: Boolean, default: false },
     year: { type: Number },
     summary: { type: String },
+      language: { type: String, default: "en" },
   },
-  { timestamps: true },
+    { timestamps: true },
 );
 
 const Book = models.Book || model<IBook>("Book", BookSchema);

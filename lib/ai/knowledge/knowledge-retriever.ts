@@ -44,38 +44,64 @@ export async function retrieveEnrichedContext(
   }
 
   const combined = `${bookTitle} ${bookTopic} ${text} ${query}`.toLowerCase();
-
+  
   // 1. DYNAMIC DOMAIN DETECTION
+  // Priority order: specific medical subdomains > broad medicine > other technical domains > general
   let domain: "cardiology" | "medicine" | "cs_architecture" | "ai_ml" | "law" | "finance" | "general" = "general";
-
-  if (
+  
+// Enhanced cardiology detection: heart + broader clinical terms
+if (
     combined.includes("heart") ||
     combined.includes("cardio") ||
     combined.includes("murmur") ||
     combined.includes("stenosis") ||
     combined.includes("auscultat") ||
     combined.includes("s1") ||
-    combined.includes("s2") ||
-    combined.includes("mrcp")
+  combined.includes("s2") ||
+    combined.includes("mrcp") ||
+  combined.includes("ekg") ||
+    combined.includes("ecg") ||
+    combined.includes("arrhythmia") ||
+    combined.includes("failure") ||
+    combined.includes("myocardial") ||
+    combined.includes("heart failure") ||
+    combined.includes("cardiomyopathy")
   ) {
     domain = "cardiology";
-  } else if (
+  }
+// Enhanced medicine detection: clinical + pharmacology + pathology + usmle + broader terms
+else if (
     combined.includes("patient") ||
     combined.includes("clinical") ||
     combined.includes("syndrome") ||
     combined.includes("patholog") ||
     combined.includes("pharmacology") ||
-    combined.includes("usmle")
+  combined.includes("usmle") ||
+    combined.includes("diagnosis") ||
+  combined.includes("treatment") ||
+    combined.includes("management") ||
+    combined.includes("medication") ||
+    combined.includes("therapy") ||
+    combined.includes("clinical") ||
+    combined.includes("bedside") ||
+  combined.includes("ward") ||
+    combined.includes("rounds")
   ) {
     domain = "medicine";
-  } else if (
+} else if (
     combined.includes("software") ||
     combined.includes("distributed") ||
     combined.includes("database") ||
-    combined.includes("concurrency") ||
+  combined.includes("concurrency") ||
     combined.includes("architecture") ||
-    combined.includes("api") ||
-    combined.includes("microservice")
+  combined.includes("api") ||
+    combined.includes("microservice") ||
+    combined.includes("system design") ||
+    combined.includes("design pattern") ||
+    combined.includes("interface") ||
+    combined.includes("service") ||
+  combined.includes("rest") ||
+    combined.includes("endpoint")
   ) {
     domain = "cs_architecture";
   } else if (
@@ -83,7 +109,14 @@ export async function retrieveEnrichedContext(
     combined.includes("transformer") ||
     combined.includes("neural") ||
     combined.includes("gradient descent") ||
-    combined.includes("deep learning")
+    combined.includes("deep learning") ||
+    combined.includes("ai") ||
+    combined.includes("artificial intelligence") ||
+    combined.includes("llm") ||
+    combined.includes("large language") ||
+    combined.includes("prompt") ||
+    combined.includes("token") ||
+    combined.includes("training")
   ) {
     domain = "ai_ml";
   } else if (
@@ -91,7 +124,11 @@ export async function retrieveEnrichedContext(
     combined.includes("tort") ||
     combined.includes("constitutional") ||
     combined.includes("statute") ||
-    combined.includes("court")
+    combined.includes("court") ||
+    combined.includes("legal") ||
+    combined.includes("law") ||
+    combined.includes("precedent") ||
+    combined.includes("regulation")
   ) {
     domain = "law";
   } else if (
@@ -99,9 +136,44 @@ export async function retrieveEnrichedContext(
     combined.includes("derivative") ||
     combined.includes("cfa") ||
     combined.includes("equity") ||
-    combined.includes("valuation")
+    combined.includes("valuation") ||
+    combined.includes("asset") ||
+    combined.includes("risk management") ||
+    combined.includes("investment") ||
+    combined.includes("financial")
   ) {
     domain = "finance";
+  }
+  // If bookTopic is provided and matches a known domain, prefer that over detected domain
+  if (bookTopic && bookTopic.trim()) {
+    const topicLower = bookTopic.trim().toLowerCase();
+    const topicDomainMap: Record<string, "cardiology" | "medicine" | "cs_architecture" | "ai_ml" | "law" | "finance" | "general"> = {
+      cardiology: "cardiology",
+      heart: "cardiology",
+      cardiovascular: "cardiology",
+      circulation: "cardiology",
+      medicine: "medicine",
+      clinical: "medicine",
+      pharmacology: "medicine",
+      pathology: "medicine",
+      anatomy: "medicine",
+      usmle: "medicine",
+      cs_architecture: "cs_architecture",
+      software: "cs_architecture",
+      distributed: "cs_architecture",
+      architecture: "cs_architecture",
+      ai_ml: "ai_ml",
+      "machine learning": "ai_ml",
+      "artificial intelligence": "ai_ml",
+      law: "law",
+      legal: "law",
+      finance: "finance",
+      cfa: "finance",
+      portfolio: "finance",
+    };
+    if (topicDomainMap[topicLower]) {
+      domain = topicDomainMap[topicLower];
+    }
   }
 
   let focalTopic = bookTopic || "Foundational First Principles";

@@ -7,8 +7,8 @@ import Vapi from "@vapi-ai/web";
 import { useAuth } from "@clerk/nextjs";
 
 import { usePlan } from "@/hooks/usePlan";
-import { ASSISTANT_ID, DEFAULT_VOICE, VOICE_SETTINGS } from "@/lib/constants";
-import { getVoice } from "@/lib/utils";
+import { ASSISTANT_ID, DEFAULT_VOICE, DEFAULT_VOICE_LANGUAGE, VOICE_SETTINGS, VoiceLanguage } from "@/lib/constants";
+import { resolveVoiceId } from "@/lib/utils";
 import { IBook, Messages } from "@/types";
 import {
   startVoiceSession,
@@ -68,7 +68,7 @@ export interface VapiContextOptions {
   selectedText?: string;
 }
 
-export function useVapi(book: IBook, contextOptions?: VapiContextOptions) {
+export function useVapi(book: IBook, contextOptions?: VapiContextOptions, language?: VoiceLanguage) {
   const { userId } = useAuth();
   const { limits } = usePlan();
 
@@ -87,6 +87,7 @@ export function useVapi(book: IBook, contextOptions?: VapiContextOptions) {
   const isStoppingRef = useRef(false);
 
   const contextRef = useLatestRef(contextOptions);
+  const languageRef = useLatestRef(language);
 
   const getVapi = useCallback(() => {
     if (!vapiRef.current) {
@@ -392,10 +393,11 @@ export function useVapi(book: IBook, contextOptions?: VapiContextOptions) {
           currentSection: String(sectionNum),
           selectedText: currentCtx?.selectedText || "",
           activeContent: currentCtx?.currentSegmentContent?.slice(0, 800) || "",
+            language: languageRef.current?.code || DEFAULT_VOICE_LANGUAGE.code,
         },
-        voice: {
+          voice: {
           provider: "11labs" as const,
-          voiceId: getVoice(voice).id,
+          voiceId: resolveVoiceId(voice, languageRef.current),
           model: "eleven_turbo_v2_5" as const,
           stability: VOICE_SETTINGS.stability,
           similarityBoost: VOICE_SETTINGS.similarityBoost,
@@ -408,7 +410,7 @@ export function useVapi(book: IBook, contextOptions?: VapiContextOptions) {
       setStatus("idle");
       setLimitError("Failed to start voice session. Please try again.");
     }
-  }, [book._id, book.title, book.author, voice, userId, contextRef]);
+  }, [book._id, book.title, book.author, voice, userId, contextRef, languageRef]);
 
   const stop = useCallback(() => {
     isStoppingRef.current = true;

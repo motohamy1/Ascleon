@@ -9,12 +9,15 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1161.0",
+    "@aws-sdk/s3-request-presigner": "^3.1161.0",
     "@clerk/nextjs": "^6.39.0",
     "@google/genai": "^2.31.0",
     "@hookform/resolvers": "^5.2.2",
     "@vapi-ai/web": "^2.7.1",
     "@vercel/blob": "^2.3.1",
     "class-variance-authority": "^0.7.1",
+    "cloudinary": "^2.11.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.575.0",
     "mongodb": "^7.1.0",

@@ -1,7 +1,7 @@
 import { TextSegment } from "@/types";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { DEFAULT_VOICE, voiceOptions } from "./constants";
+import { DEFAULT_VOICE, voiceOptions, voiceLanguages, DEFAULT_VOICE_LANGUAGE, VoiceLanguage } from "./constants";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -14,11 +14,12 @@ export const serializeData = <T>(data: T): T =>
 // Auto generate slug
 export function generateSlug(text: string): string {
   return text
-    .replace(/\.[^/.]+$/, "") // Remove file extension (.pdf, .txt, etc.)
+    .replace(/\.(pdf|epub|txt|docx?|mobi|azw3?|djvu|png|jpe?g|webp)$/i, "") // Remove document/image file extension
     .toLowerCase() // Convert to lowercase
     .trim() // Remove whitespace from both ends
     .replace(/[^\w\s-]/g, "") // Remove special characters (keep letters, numbers, spaces, hyphens)
     .replace(/[\s_]+/g, "-") // Replace spaces and underscores with hyphens
+    .replace(/-+/g, "-") // Collapse consecutive hyphens
     .replace(/^-+|-+$/g, ""); // Remove leading/trailing hyphens
 }
 
@@ -68,19 +69,19 @@ export const splitIntoSegments = (
 };
 
 // Get voice data by persona key or voice ID
-export const getVoice = (persona?: string) => {
-  if (!persona) return voiceOptions[DEFAULT_VOICE];
+export const getVoice = (persona?: string, language?: VoiceLanguage) => {
+        if (!persona) return voiceOptions[DEFAULT_VOICE];
 
-  // Find by voice ID
-  const voiceEntry = Object.values(voiceOptions).find((v) => v.id === persona);
-  if (voiceEntry) return voiceEntry;
+        // Find by voice ID
+        const voiceEntry = Object.values(voiceOptions).find((v) => v.id === persona);
+        if (voiceEntry) return voiceEntry;
 
-  // Find by key
-  const voiceByKey = voiceOptions[persona as keyof typeof voiceOptions];
-  if (voiceByKey) return voiceByKey;
+        // Find by key
+        const voiceByKey = voiceOptions[persona as keyof typeof voiceOptions];
+        if (voiceByKey) return voiceByKey;
 
-  // Default fallback
-  return voiceOptions[DEFAULT_VOICE];
+        // Default fallback
+        return voiceOptions[DEFAULT_VOICE];
 };
 
 // Format duration in seconds to MM:SS format
@@ -89,6 +90,37 @@ export const formatDuration = (seconds: number): string => {
   const secs = seconds % 60;
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 };
+
+// Exponential backoff retry utility for resilient network uploads and AI requests
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  options: {
+    retries?: number;
+    delayMs?: number;
+    backoffFactor?: number;
+    onRetry?: (error: unknown, attempt: number) => void;
+  } = {}
+): Promise<T> {
+  const { retries = 3, delayMs = 1000, backoffFactor = 2, onRetry } = options;
+  let attempt = 0;
+  let currentDelay = delayMs;
+
+  while (true) {
+    try {
+      return await fn();
+    } catch (error) {
+      attempt++;
+      if (attempt > retries) {
+        throw error;
+      }
+      if (onRetry) {
+        onRetry(error, attempt);
+      }
+      await new Promise((resolve) => setTimeout(resolve, currentDelay));
+      currentDelay *= backoffFactor;
+    }
+  }
+}
 
 export async function parsePDFFile(file: File) {
   // Guard against server-side execution
@@ -112,12 +144,13 @@ export async function parsePDFFile(file: File) {
       useSystemFonts: true,
     });
     const pdfDocument = await loadingTask.promise;
+    const numPages = pdfDocument.numPages;
 
-    // Render first page as cover image (with fallback if canvas context fails)
+    // Render first page as lightweight WebP cover image
     let coverDataURL = "";
     try {
       const firstPage = await pdfDocument.getPage(1);
-      const viewport = firstPage.getViewport({ scale: 2 });
+      const viewport = firstPage.getViewport({ scale: 1.25 });
 
       const canvas = document.createElement("canvas");
       canvas.width = viewport.width;
@@ -130,52 +163,65 @@ export async function parsePDFFile(file: File) {
           viewport: viewport,
           canvas: canvas,
         }).promise;
-        coverDataURL = canvas.toDataURL("image/png");
+        try {
+          coverDataURL = canvas.toDataURL("image/webp", 0.82);
+        } catch {
+          coverDataURL = canvas.toDataURL("image/jpeg", 0.8);
+        }
       }
     } catch (coverErr) {
       console.warn("Cover extraction warning (fallback will be used):", coverErr);
     }
 
-    // Extract text from all pages
-    let fullText = "";
+    // Extract text 1:1 per page to eliminate page count mismatches
+    const segments: TextSegment[] = [];
+    const previewTexts: string[] = [];
 
-    for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
       try {
         const page = await pdfDocument.getPage(pageNum);
         const textContent = await page.getTextContent();
         const pageText = textContent.items
           .filter((item) => "str" in item)
           .map((item) => (item as { str: string }).str)
-          .join(" ");
-        fullText += pageText + "\n";
+          .join(" ")
+          .trim();
+
+        const words = pageText ? pageText.split(/\s+/).filter(Boolean) : [];
+        const cleanContent = pageText || `[Page ${pageNum}: Visual diagram or scanned page]`;
+
+        segments.push({
+          text: cleanContent,
+          segmentIndex: pageNum - 1,
+          pageNumber: pageNum,
+          wordCount: Math.max(words.length, 1),
+        });
+
+        if (pageNum <= 4 && pageText) {
+          previewTexts.push(`--- PAGE ${pageNum} ---\n${pageText}`);
+        }
       } catch (pageErr) {
         console.warn(`Error extracting text on page ${pageNum}:`, pageErr);
+        segments.push({
+          text: `[Page ${pageNum} content unavailable]`,
+          segmentIndex: pageNum - 1,
+          pageNumber: pageNum,
+          wordCount: 1,
+        });
       }
     }
 
-    // Split text into segments for search
-    let segments = splitIntoSegments(fullText.trim());
-
-    // If text was minimal (e.g. image-only/scanned PDF), provide initial fallback segment
-    if (segments.length === 0) {
-      const cleanDocTitle = file.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
-      segments = [
-        {
-          text: `Study Material: ${cleanDocTitle}.\n\nThis document is ready for interactive reading, voice questions, and active recall.`,
-          segmentIndex: 0,
-          wordCount: 18,
-        },
-      ];
-    }
+    const textPreview = previewTexts.join("\n\n").slice(0, 4000);
 
     // Clean up PDF document resources
-    const numPages = pdfDocument.numPages;
     await pdfDocument.destroy();
 
     return {
       content: segments,
       cover: coverDataURL,
       numPages,
+      totalPages: numPages,
+      textPreview,
     };
   } catch (error) {
     console.error("Error parsing PDF:", error);
@@ -238,3 +284,42 @@ export function getBookYear(book: {
   if (book.createdAt) return new Date(book.createdAt).getFullYear();
   return 2024;
 }
+// Map an Ascleon multilingual language to a voice preset
+// Ascleon supports reading, listening, and chatting in multiple languages
+// (English, Arabic, Spanish, German, French, Chinese, ...).
+export const getVoiceByLanguage = (language?: VoiceLanguage) => {
+  const lang = language || DEFAULT_VOICE_LANGUAGE;
+  switch (lang.code) {
+    case "ar":
+      // Warm, clear female Arabic voice — calm & articulate
+      return { id: "21m00Tcm4TlvDq8ikWAM", name: "Amira", description: "Female, Arabic, calm & clear" };
+    case "es":
+      // Friendly, natural female Spanish voice
+      return { id: "EXAVITQu4vr4xnSDxMaL", name: "Sofia", description: "Female, Spanish, warm & natural" };
+    case "de":
+      // Clear, measured female German voice
+      return { id: "iP95p4xoKVk53GoZ742B", name: "Ingrid", description: "Female, German, clear & measured" };
+    case "fr":
+      // Smooth, expressive female French voice
+      return { id: "CYw3kZ02Hs0563khs1Fj", name: "Camille", description: "Female, French, smooth & expressive" };
+    case "zh":
+      // Measured, articulate female Mandarin voice
+      return { id: "onwK4e9ZLuTAKqWW03F9", name: "Mei", description: "Female, Mandarin, measured & articulate" };
+    case "en":
+    default:
+      return voiceOptions[DEFAULT_VOICE];
+  }
+};
+
+// Resolve voice ID for a given persona key/ID, falling back to the
+// language preset when no persona is supplied (Ascleon multilingual mode).
+export const resolveVoiceId = (
+  persona?: string,
+  language?: VoiceLanguage
+): string => {
+  if (persona) {
+    const voice = getVoice(persona);
+    if (voice && voice.id) return voice.id;
+  }
+  return getVoiceByLanguage(language).id;
+};

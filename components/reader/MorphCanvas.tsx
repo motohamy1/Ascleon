@@ -1,13 +1,15 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   MorphArtifactData,
   RoadmapCardItem,
   SimulatorPreset,
   DiagramNode,
   SpatialLandmark,
+  MindMapNode,
 } from "@/types/morph";
+import { ConceptMapCanvas } from "./ConceptMapCanvas";
 import {
   Sparkles,
   ArrowRight,
@@ -38,6 +40,9 @@ interface MorphCanvasProps {
   onNavigateSegment?: (segmentIndex: number) => void;
   onResetToBoot?: () => void;
   isLoading?: boolean;
+  onAskAI?: (prompt: string) => void;
+  onQuizNode?: (concept: string) => void;
+  onPinNode?: (title: string, details: string) => void;
 }
 
 export const MorphCanvas: React.FC<MorphCanvasProps> = ({
@@ -45,6 +50,9 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
   onNavigateSegment,
   onResetToBoot,
   isLoading,
+  onAskAI,
+  onQuizNode,
+  onPinNode,
 }) => {
   const [activeTab, setActiveTab] = useState<
     "all" | "cards" | "diagram" | "anatomy" | "matrix" | "simulator"
@@ -52,11 +60,11 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
   const [activeSimulatorPreset, setActiveSimulatorPreset] =
     useState<string>("clean");
   const [selectedCard, setSelectedCard] = useState<RoadmapCardItem | null>(null);
-  const [selectedNode, setSelectedNode] = useState<DiagramNode | null>(null);
   const [selectedLandmark, setSelectedLandmark] =
     useState<SpatialLandmark | null>(null);
 
   const roadmapBlock = artifact.blocks.find((b) => b.type === "roadmap_cards");
+  const mindMapBlock = artifact.blocks.find((b) => b.type === "mind_map");
   const diagramBlock = artifact.blocks.find(
     (b) => b.type === "interactive_diagram",
   );
@@ -69,6 +77,88 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
   const simulatorBlock = artifact.blocks.find(
     (b) => b.type === "animated_simulator",
   );
+
+  // Synthesize or extract hierarchical concept mind map nodes
+  const mindMapNodes: MindMapNode[] = useMemo(() => {
+    if (mindMapBlock?.mindMapData?.nodes && mindMapBlock.mindMapData.nodes.length > 0) {
+      return mindMapBlock.mindMapData.nodes;
+    }
+
+    if (mindMapBlock?.mindMapNodes && mindMapBlock.mindMapNodes.length > 0) {
+      return mindMapBlock.mindMapNodes.map((n, idx) => ({
+        id: n.id || `node-${idx}`,
+        label: n.label,
+        details: n.detail || "",
+        category: idx === 0 ? "root" : "pillar",
+        color: n.color || (idx === 0 ? "#ff4c00" : "#43a08f"),
+        parent: n.parent,
+        level: (n.parent ? 1 : 0) as 0 | 1 | 2,
+      }));
+    }
+
+    // High-yield fallback: convert diagramBlock or roadmap cards into interactive Mind Map
+    if (diagramBlock?.diagramData?.nodes && diagramBlock.diagramData.nodes.length > 0) {
+      const rootId = "root-principle";
+      const rootNode: MindMapNode = {
+        id: rootId,
+        label: artifact.focalConcept || "Core Principles",
+        sublabel: "Core Architecture",
+        details: artifact.contextSummary?.subsequentBridge || "Primary conceptual mechanisms synthesized from the active study source.",
+        category: "root",
+        color: "#ff4c00",
+        level: 0,
+        x: 30,
+        y: 80,
+      };
+
+      const pillarNodes: MindMapNode[] = diagramBlock.diagramData.nodes.map((n, idx) => ({
+        id: n.id,
+        label: n.label,
+        sublabel: n.sublabel,
+        details: n.details || n.sublabel || `High-yield mechanism for ${n.label}`,
+        category: (n.category as any) || "pillar",
+        color: n.color || (idx % 2 === 0 ? "#43a08f" : "#ff4c00"),
+        parent: rootId,
+        level: 1,
+        x: 250,
+        y: 25 + idx * 95,
+      }));
+
+      return [rootNode, ...pillarNodes];
+    }
+
+    if (roadmapBlock?.roadmapCards && roadmapBlock.roadmapCards.length > 0) {
+      const rootId = "root-principle";
+      const rootNode: MindMapNode = {
+        id: rootId,
+        label: artifact.focalConcept || "Core Principles",
+        sublabel: "Synthesized Concept",
+        details: "Central foundation governing the clinical differentiations below.",
+        category: "root",
+        color: "#ff4c00",
+        level: 0,
+        x: 30,
+        y: 80,
+      };
+
+      const cardNodes: MindMapNode[] = roadmapBlock.roadmapCards.map((c, idx) => ({
+        id: c.id,
+        label: c.title,
+        sublabel: c.badge,
+        details: c.subtitle || c.bulletPoints?.join(" • ") || "",
+        category: "pillar",
+        color: idx === 0 ? "#ff4c00" : idx === 1 ? "#43a08f" : "#e0459a",
+        parent: rootId,
+        level: 1,
+        x: 250,
+        y: 25 + idx * 95,
+      }));
+
+      return [rootNode, ...cardNodes];
+    }
+
+    return [];
+  }, [mindMapBlock, diagramBlock, roadmapBlock, artifact.focalConcept, artifact.contextSummary]);
 
   const presets = simulatorBlock?.simulatorData?.presets || [];
   const currentPreset =
@@ -132,7 +222,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
           >
             Overview (All)
           </button>
-          {diagramBlock && (
+          {mindMapNodes.length > 0 && (
             <button
               type="button"
               onClick={() => setActiveTab("diagram")}
@@ -144,7 +234,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
               )}
             >
               <Workflow className="size-3" />
-              <span>Visual Flow Map</span>
+              <span>Concept Mind Map</span>
             </button>
           )}
           {spatialBlock && (
@@ -196,152 +286,16 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 1. VISUAL FLOW DIAGRAM / DRAWING (SVG CAUSAL MAP) */}
+      {/* 1. CONCEPT MIND MAP CANVAS (GEMINI NOTEBOOKLM PRINCIPLES)                */}
       {/* ========================================================================= */}
-      {diagramBlock && diagramBlock.diagramData && (activeTab === "all" || activeTab === "diagram") && (
-        <div className="flex flex-col gap-3 rounded-[20px] border-2 border-white/10 bg-[color:var(--ink-soft)] p-4 shadow-chip">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[#7fd8c9]">
-              <Workflow className="size-4 text-[color:var(--teal)]" />
-              <span>{diagramBlock.title}</span>
-            </div>
-            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9.5px] font-mono text-[color:var(--cream)]/60">
-              Interactive SVG Conduits
-            </span>
-          </div>
-          <p className="text-[11px] text-[color:var(--cream)]/70 -mt-1">
-            {diagramBlock.subtitle} (Click any node to inspect causal mechanisms)
-          </p>
-
-          {/* Interactive SVG Diagram Canvas */}
-          <div className="relative overflow-hidden rounded-[14px] border border-white/10 bg-black/60 p-3">
-            <svg
-              viewBox="0 0 520 180"
-              className="h-auto w-full select-none"
-            >
-              <defs>
-                <linearGradient id="edgeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#ff4c00" stopOpacity="0.8" />
-                  <stop offset="100%" stopColor="#43a08f" stopOpacity="0.8" />
-                </linearGradient>
-                <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-                  <feGaussianBlur stdDeviation="3" result="blur" />
-                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                </filter>
-              </defs>
-
-              {/* Connecting Edges */}
-              {diagramBlock.diagramData.edges.map((edge, idx) => {
-                const source = diagramBlock.diagramData?.nodes.find((n) => n.id === edge.from);
-                const target = diagramBlock.diagramData?.nodes.find((n) => n.id === edge.to);
-                if (!source || !target) return null;
-
-                const sx = (source.x ?? 50) + 55;
-                const sy = (source.y ?? 75) + 18;
-                const tx = (target.x ?? 300) - 5;
-                const ty = (target.y ?? 75) + 18;
-                const midX = (sx + tx) / 2;
-
-                const pathData = `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
-
-                return (
-                  <g key={`edge-${idx}`}>
-                    <path
-                      d={pathData}
-                      fill="none"
-                      stroke={edge.animated ? "url(#edgeGrad)" : "rgba(246, 215, 161, 0.25)"}
-                      strokeWidth={edge.animated ? "2.5" : "1.5"}
-                      strokeDasharray={edge.animated ? "4 3" : undefined}
-                      className={edge.animated ? "animate-pulse" : undefined}
-                    />
-                    {edge.label && (
-                      <text
-                        x={midX}
-                        y={(sy + ty) / 2 - 4}
-                        textAnchor="middle"
-                        fill="#f6d7a1"
-                        fontSize="8.5"
-                        fontWeight="bold"
-                        className="bg-black/80 px-1"
-                      >
-                        {edge.label}
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-
-              {/* Render Diagram Nodes */}
-              {diagramBlock.diagramData.nodes.map((node) => {
-                const isSelected = selectedNode?.id === node.id;
-                const nx = (node.x ?? 50) - 45;
-                const ny = (node.y ?? 75) - 5;
-                const color = node.color || "#ff4c00";
-
-                return (
-                  <g
-                    key={node.id}
-                    onClick={() => setSelectedNode(isSelected ? null : node)}
-                    className="cursor-pointer transition-transform duration-200 hover:scale-105"
-                    style={{ transformOrigin: `${nx + 50}px ${ny + 25}px` }}
-                  >
-                    <rect
-                      x={nx}
-                      y={ny}
-                      width="100"
-                      height="46"
-                      rx="8"
-                      fill="#151419"
-                      stroke={isSelected ? "#ff4c00" : color}
-                      strokeWidth={isSelected ? "2.5" : "1.5"}
-                      filter={isSelected ? "url(#glow)" : undefined}
-                    />
-                    <circle cx={nx + 10} cy={ny + 12} r="3" fill={color} />
-                    <text
-                      x={nx + 18}
-                      y={ny + 15}
-                      fill="#f6d7a1"
-                      fontSize="8.5"
-                      fontWeight="bold"
-                      className="select-none"
-                    >
-                      {node.label.slice(0, 14)}
-                    </text>
-                    <text
-                      x={nx + 8}
-                      y={ny + 30}
-                      fill="rgba(246, 215, 161, 0.7)"
-                      fontSize="7.5"
-                      className="select-none"
-                    >
-                      {(node.sublabel || "").slice(0, 19)}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
-          </div>
-
-          {/* Node Detail Drawer */}
-          {selectedNode && (
-            <div className="flex items-start gap-2.5 rounded-xl border border-[color:var(--orange)]/30 bg-[color:var(--orange)]/[0.06] p-3 text-xs animate-in fade-in">
-              <Lightbulb className="size-4 shrink-0 text-[color:var(--orange)] mt-0.5" />
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <div className="flex items-center justify-between">
-                  <strong className="text-[color:var(--cream)] font-black">
-                    {selectedNode.label}
-                  </strong>
-                  <span className="text-[10px] font-mono text-[color:var(--cream)]/50 uppercase">
-                    {selectedNode.category}
-                  </span>
-                </div>
-                <p className="text-[11px] text-[color:var(--cream)]/85 leading-relaxed">
-                  {selectedNode.details}
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
+      {mindMapNodes.length > 0 && (activeTab === "all" || activeTab === "diagram") && (
+        <ConceptMapCanvas
+          rootLabel={artifact.focalConcept}
+          nodes={mindMapNodes}
+          onAskAI={onAskAI}
+          onQuizNode={onQuizNode}
+          onPinNode={onPinNode}
+        />
       )}
 
       {/* ========================================================================= */}
@@ -500,23 +454,23 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Left: Anti-Pattern Column */}
-            <div className="flex flex-col gap-2 rounded-xl border border-[#e0459a]/30 bg-[#e0459a]/[0.05] p-3.5">
+            {/* Left: Distinctive Accent Column (Orange Fill) */}
+            <div className="flex flex-col gap-2 rounded-[18px] border-2 border-[color:var(--ink)] bg-[#ff4c00] text-[color:var(--ink)] p-4 shadow-chip">
               <div className="flex items-center justify-between">
-                <span className="rounded-full bg-[#e0459a]/20 px-2 py-0.5 text-[10px] font-bold text-[#f08dc7]">
+                <span className="rounded-full bg-[color:var(--ink)] px-2.5 py-0.5 text-[10px] font-black text-[#f6d7a1] uppercase tracking-wider">
                   {comparisonBlock.comparisonData.left.badge}
                 </span>
-                <span className="text-[10px] font-mono text-[#f08dc7]/70">Critical Trap</span>
+                <span className="text-[10px] font-mono font-bold text-[color:var(--ink)]/80 uppercase">Primary Focus</span>
               </div>
-              <h4 className="text-xs font-black text-[color:var(--cream)]">
+              <h4 className="text-sm font-black text-[color:var(--ink)]">
                 {comparisonBlock.comparisonData.left.title}
               </h4>
 
-              <div className="flex flex-col gap-1.5 pt-2 border-t border-white/10 text-[11px]">
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-[color:var(--ink)]/20 text-[11px]">
                 {comparisonBlock.comparisonData.left.characteristics.map((c, i) => (
                   <div key={i} className="flex items-start gap-1.5 leading-snug">
-                    <span className="text-[#e0459a] font-bold">✕</span>
-                    <span className="text-[color:var(--cream)]/80">
+                    <span className="text-[color:var(--ink)] font-black">✦</span>
+                    <span className="text-[color:var(--ink)]">
                       <strong>{c.label}:</strong> {c.value}
                     </span>
                   </div>
@@ -524,29 +478,29 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
               </div>
 
               {comparisonBlock.comparisonData.left.visualSnippet && (
-                <div className="mt-2 rounded-lg bg-black/60 p-2 font-mono text-[10px] text-[#f08dc7]/90 border border-[#e0459a]/20 overflow-x-auto whitespace-pre">
+                <div className="mt-2 rounded-lg bg-[color:var(--ink)] p-2 font-mono text-[10px] text-[#f6d7a1] border border-[color:var(--ink)] overflow-x-auto whitespace-pre">
                   {comparisonBlock.comparisonData.left.visualSnippet}
                 </div>
               )}
             </div>
 
-            {/* Right: Clean Standard Column */}
-            <div className="flex flex-col gap-2 rounded-xl border border-[#43a08f]/30 bg-[#43a08f]/[0.05] p-3.5">
+            {/* Right: Clean Standard Column (Mint/Teal Fill) */}
+            <div className="flex flex-col gap-2 rounded-[18px] border-2 border-[color:var(--ink)] bg-[#7fd8c9] text-[color:var(--ink)] p-4 shadow-chip">
               <div className="flex items-center justify-between">
-                <span className="rounded-full bg-[#43a08f]/20 px-2 py-0.5 text-[10px] font-bold text-[#7fd8c9]">
+                <span className="rounded-full bg-[color:var(--ink)] px-2.5 py-0.5 text-[10px] font-black text-[#7fd8c9] uppercase tracking-wider">
                   {comparisonBlock.comparisonData.right.badge}
                 </span>
-                <span className="text-[10px] font-mono text-[#7fd8c9]/70">Mastery Target</span>
+                <span className="text-[10px] font-mono font-bold text-[color:var(--ink)]/80 uppercase">Differential Target</span>
               </div>
-              <h4 className="text-xs font-black text-[color:var(--cream)]">
+              <h4 className="text-sm font-black text-[color:var(--ink)]">
                 {comparisonBlock.comparisonData.right.title}
               </h4>
 
-              <div className="flex flex-col gap-1.5 pt-2 border-t border-white/10 text-[11px]">
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-[color:var(--ink)]/20 text-[11px]">
                 {comparisonBlock.comparisonData.right.characteristics.map((c, i) => (
                   <div key={i} className="flex items-start gap-1.5 leading-snug">
-                    <span className="text-[#43a08f] font-bold">✓</span>
-                    <span className="text-[color:var(--cream)]/80">
+                    <span className="text-[color:var(--ink)] font-black">✓</span>
+                    <span className="text-[color:var(--ink)]">
                       <strong>{c.label}:</strong> {c.value}
                     </span>
                   </div>
@@ -554,7 +508,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
               </div>
 
               {comparisonBlock.comparisonData.right.visualSnippet && (
-                <div className="mt-2 rounded-lg bg-black/60 p-2 font-mono text-[10px] text-[#7fd8c9]/90 border border-[#43a08f]/20 overflow-x-auto whitespace-pre">
+                <div className="mt-2 rounded-lg bg-[color:var(--ink)] p-2 font-mono text-[10px] text-[#7fd8c9] border border-[color:var(--ink)] overflow-x-auto whitespace-pre">
                   {comparisonBlock.comparisonData.right.visualSnippet}
                 </div>
               )}
@@ -578,22 +532,38 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {roadmapBlock.roadmapCards.map((card: RoadmapCardItem) => {
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+            {roadmapBlock.roadmapCards.map((card: RoadmapCardItem, cardIdx: number) => {
               const isSelected = selectedCard?.id === card.id;
 
-              let badgeColor = "text-[color:var(--orange)] bg-[color:var(--orange)]/20 border-[color:var(--orange)]/30";
-              let cardBorder = "border-[color:var(--orange)]/30 bg-[color:var(--orange)]/[0.04]";
+              // Alternating rich fill from design system: #ff4c00, #f6d7a1, #7fd8c9, #e0459a
+              const paletteCycle = ["accent-orange", "accent-cream", "accent-teal", "accent-magenta"];
+              const effectiveBadgeType = card.badgeType || paletteCycle[cardIdx % paletteCycle.length];
 
-              if (card.badgeType === "accent-magenta") {
-                badgeColor = "text-[#f08dc7] bg-[#e0459a]/25 border-[#e0459a]/30";
-                cardBorder = "border-[#e0459a]/30 bg-[#e0459a]/[0.04]";
-              } else if (card.badgeType === "accent-teal") {
-                badgeColor = "text-[#7fd8c9] bg-[#43a08f]/25 border-[#43a08f]/30";
-                cardBorder = "border-[#43a08f]/30 bg-[#43a08f]/[0.04]";
-              } else if (card.badgeType === "accent-cream") {
-                badgeColor = "text-[color:var(--cream)] bg-[color:var(--cream)]/20 border-[color:var(--cream)]/30";
-                cardBorder = "border-[color:var(--cream)]/30 bg-[color:var(--cream)]/[0.04]";
+              let cardBg = "bg-[#ff4c00] text-[color:var(--ink)] border-2 border-[color:var(--ink)] shadow-chip";
+              let badgeStyle = "bg-[color:var(--ink)] text-[#f6d7a1] border-[color:var(--ink)]";
+              let bulletBullet = "text-[color:var(--ink)]";
+              let dividerStyle = "border-[color:var(--ink)]/20";
+              let subStyle = "text-[color:var(--ink)]/85";
+
+              if (effectiveBadgeType === "accent-teal") {
+                cardBg = "bg-[#7fd8c9] text-[color:var(--ink)] border-2 border-[color:var(--ink)] shadow-chip";
+                badgeStyle = "bg-[color:var(--ink)] text-[#7fd8c9] border-[color:var(--ink)]";
+                bulletBullet = "text-[color:var(--ink)]";
+                dividerStyle = "border-[color:var(--ink)]/20";
+                subStyle = "text-[color:var(--ink)]/85";
+              } else if (effectiveBadgeType === "accent-cream") {
+                cardBg = "bg-[#f6d7a1] text-[color:var(--ink)] border-2 border-[color:var(--ink)] shadow-chip";
+                badgeStyle = "bg-[#ff4c00] text-[color:var(--ink)] border-[color:var(--ink)]";
+                bulletBullet = "text-[#ff4c00]";
+                dividerStyle = "border-[color:var(--ink)]/20";
+                subStyle = "text-[color:var(--ink)]/85";
+              } else if (effectiveBadgeType === "accent-magenta") {
+                cardBg = "bg-[#e0459a] text-[color:var(--ink)] border-2 border-[color:var(--ink)] shadow-chip";
+                badgeStyle = "bg-[color:var(--ink)] text-[#f6d7a1] border-[color:var(--ink)]";
+                bulletBullet = "text-[color:var(--ink)]";
+                dividerStyle = "border-[color:var(--ink)]/20";
+                subStyle = "text-[color:var(--ink)]/90";
               }
 
               return (
@@ -601,11 +571,11 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                   key={card.id}
                   onClick={() => setSelectedCard(isSelected ? null : card)}
                   className={cn(
-                    "group relative flex cursor-pointer flex-col justify-between rounded-[18px] border-2 p-3.5 transition-all duration-200 min-w-0 overflow-hidden",
-                    cardBorder,
+                    "group relative flex cursor-pointer flex-col justify-between rounded-[18px] p-4 transition-all duration-200 min-w-0 overflow-hidden",
+                    cardBg,
                     isSelected
-                      ? "ring-2 ring-[color:var(--orange)] bg-white/10 shadow-chip -translate-y-0.5"
-                      : "hover:-translate-y-0.5 hover:border-white/20",
+                      ? "ring-4 ring-[color:var(--ink)] -translate-y-1 scale-[1.01]"
+                      : "hover:-translate-y-0.5",
                   )}
                 >
                   <div className="flex flex-col gap-2 min-w-0">
@@ -613,30 +583,30 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                       <span
                         className={cn(
                           "rounded-full border px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider shrink-0",
-                          badgeColor,
+                          badgeStyle,
                         )}
                       >
                         {card.badge}
                       </span>
                       {card.contextLink && (
-                        <span className="truncate text-[10px] font-mono text-[color:var(--cream)]/40">
+                        <span className="truncate text-[10px] font-mono font-bold text-[color:var(--ink)]/60">
                           Section {card.contextLink.targetPageOrSegment}
                         </span>
                       )}
                     </div>
 
-                    <h4 className="text-sm font-black leading-snug text-[color:var(--cream)] break-words">
+                    <h4 className="text-sm font-black leading-snug text-[color:var(--ink)] break-words">
                       {card.title}
                     </h4>
 
-                    <p className="text-xs font-medium text-[color:var(--cream)]/75 leading-relaxed break-words">
+                    <p className={cn("text-xs font-semibold leading-relaxed break-words", subStyle)}>
                       {card.subtitle}
                     </p>
 
-                    <ul className="flex flex-col gap-1.5 pt-2 border-t border-white/10 text-[11px] text-[color:var(--cream)]/85">
+                    <ul className={cn("flex flex-col gap-1.5 pt-2 border-t text-[11px] font-medium text-[color:var(--ink)]", dividerStyle)}>
                       {card.bulletPoints.map((pt, idx) => (
                         <li key={idx} className="flex items-start gap-1.5 leading-relaxed">
-                          <span className="text-[color:var(--orange)] shrink-0 font-bold">›</span>
+                          <span className={cn("shrink-0 font-black", bulletBullet)}>›</span>
                           <span className="break-words">{pt}</span>
                         </li>
                       ))}
@@ -644,7 +614,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                   </div>
 
                   {card.contextLink && (
-                    <div className="mt-3 border-t border-white/10 pt-2 text-[10px]">
+                    <div className="mt-3 border-t border-[color:var(--ink)]/20 pt-2 text-[10px]">
                       <button
                         type="button"
                         onClick={(e) => {
@@ -658,7 +628,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                             );
                           }
                         }}
-                        className="flex w-full items-center justify-between text-left text-[color:var(--cream)] hover:text-[color:var(--orange)] transition-colors"
+                        className="flex w-full items-center justify-between text-left text-[color:var(--ink)] font-bold hover:underline transition-colors cursor-pointer"
                       >
                         <span className="font-bold flex items-center gap-1 truncate">
                           <span>🔗</span>

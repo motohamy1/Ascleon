@@ -9,12 +9,12 @@ import {
   getBookDomainContext,
 } from "@/lib/ai/knowledge/sample-book-data";
 import { MorphCanvas } from "@/components/reader/MorphCanvas";
-import { SinaiVoiceStudio } from "@/components/reader/SinaiVoiceStudio";
+import { AscleonVoiceStudio } from "@/components/reader/AscleonVoiceStudio";
 import {
   SourceSelectionToolbar,
   ScannedPinItem,
 } from "@/components/reader/SourceSelectionToolbar";
-import { StudyVaultDrawer } from "@/components/reader/StudyVaultDrawer";
+import OriginalPdfViewer from "./OriginalPdfViewer";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -45,9 +45,11 @@ import {
   ScanLine,
   BookmarkPlus,
   X,
+  Crop,
+  Workflow,
 } from "lucide-react";
-import useVapi from "@/hooks/useVapi";
 import { cn } from "@/lib/utils";
+import { VoiceLanguage, DEFAULT_VOICE_LANGUAGE } from "@/lib/constants";
 
 interface LivingReaderProps {
   book: IBook;
@@ -57,7 +59,7 @@ interface LivingReaderProps {
 
 type ThemeMode = "paper" | "ink";
 type FitMode = "normal" | "fit-width" | "fit-page";
-type StudyIntent = "morph" | "chat" | "voice" | "summary" | "quiz" | "vault";
+type StudyIntent = "morph" | "chat" | "voice" | "summary" | "quiz";
 
 interface ChatMessage {
   sender: "user" | "ai";
@@ -68,13 +70,14 @@ interface ChatMessage {
   toolsUsed?: string[];
   citations?: string[];
   authoritativeReferences?: ReferenceResource[];
+  imageUrl?: string;
 }
 
 const CHAT_SUGGESTION_CHIPS = [
   "Explain core mechanism",
-  "High-yield board pearls",
-  "Dynamic auscultation maneuvers",
-  "Differential diagnosis",
+  "High-yield exam pearls",
+  "Step-by-step breakdown",
+  "Key invariants & trade-offs",
 ];
 
 export default function LivingReader({
@@ -88,8 +91,25 @@ export default function LivingReader({
   const [fitMode, setFitMode] = useState<FitMode>("normal");
   const [paragraphInteractiveMode, setParagraphInteractiveMode] = useState(true);
 
+  // Dual-Track View Mode: Original Authentic PDF vs Structured Reflow
+  const [readerViewMode, setReaderViewMode] = useState<"original_pdf" | "reflow">(
+    book.fileURL ? "original_pdf" : "reflow"
+  );
+  const [activePdfPage, setActivePdfPage] = useState<number>(1);
+  const [totalPdfPages, setTotalPdfPages] = useState<number>(
+    book.totalPages || initialSegments.length || 1
+  );
+  const [activePageLiveText, setActivePageLiveText] = useState<string>("");
+  const [snippedDiagram, setSnippedDiagram] = useState<{
+    url: string;
+    pageNumber: number;
+  } | null>(null);
+
   // Right Panel: All Controls & Study Studio
   const [activeIntent, setActiveIntent] = useState<StudyIntent>("morph");
+  const [language, setLanguage] = useState<VoiceLanguage>(
+    (book.language as VoiceLanguage) || DEFAULT_VOICE_LANGUAGE,
+  );
 
   // Morph Engine State
   const [morphArtifacts, setMorphArtifacts] = useState<
@@ -97,7 +117,18 @@ export default function LivingReader({
   >({});
   const [isMorphLoading, setIsMorphLoading] = useState(false);
 
-  // Source Selection & Page Scan State
+  // Dynamic QBank State
+  const [dynamicQBankList, setDynamicQBankList] = useState<QBankVignette[]>([]);
+  const [isQBankLoading, setIsQBankLoading] = useState(false);
+  const [activeQBankIdx, setActiveQBankIdx] = useState(0);
+  const [quizAnswer, setQuizAnswer] = useState<number | null>(null);
+  const [quizSubmitted, setQuizSubmitted] = useState(false);
+
+  // Dynamic Summary State
+  const [dynamicSummary, setDynamicSummary] = useState<any>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
+
+  // Source Selection & Background Sync
   const [selectedText, setSelectedText] = useState<string>("");
   const [selectionPos, setSelectionPos] = useState<{ x: number; y: number } | null>(null);
   const [pinnedVaultItems, setPinnedVaultItems] = useState<ScannedPinItem[]>([]);
@@ -116,17 +147,14 @@ export default function LivingReader({
     () => initialDomainContext.mnemonics
   );
 
-  // QBank State
-  const [qbankList, setQbankList] = useState<QBankVignette[]>(
-    () => initialDomainContext.qbankVignettes
-  );
-
   // Synchronize domain context when book changes
   useEffect(() => {
     const dc = getBookDomainContext(book);
     setActiveReferences(dc.authoritativeReferences);
     setActiveMnemonics(dc.mnemonics);
-    setQbankList(dc.qbankVignettes);
+    if (dc.qbankVignettes.length > 0 && dynamicQBankList.length === 0) {
+      setDynamicQBankList(dc.qbankVignettes);
+    }
   }, [book]);
 
   const isMedicalBook = useMemo(() => {
@@ -143,18 +171,15 @@ export default function LivingReader({
       raw.includes("pharmac") ||
       raw.includes("patient") ||
       raw.includes("auscultat") ||
-      raw.includes("sinai")
+      raw.includes("ascleon")
     );
   }, [book.title, book.topic, book.slug, book.summary]);
-  const [activeQBankIdx, setActiveQBankIdx] = useState(0);
-  const [quizAnswer, setQuizAnswer] = useState<number | null>(null);
-  const [quizSubmitted, setQuizSubmitted] = useState(false);
 
   // Chat State
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       sender: "ai",
-      text: `Welcome to the living study studio for "${book.title}". I am your grounded AI clinical mentor, backed by Braunwald's Heart Disease, Oxford Handbook of Clinical Medicine, and Passmedicine QBanks. Highlight any passage on the left page or click a paragraph block to immediately Morph, Quiz, or Viva it.`,
+      text: `Welcome to the living study studio for "${book.title}". I am your grounded Ascleon mentor, backed by canonical domain references and active page analysis. Highlight any passage on the left page or click a paragraph block to immediately Morph, Quiz, or Viva it.`,
       time: "Just now",
       provider: "grounded-mentor",
     },
@@ -217,23 +242,6 @@ export default function LivingReader({
       .filter(Boolean);
   }, [currentSegment]);
 
-  // Real Vapi WebRTC Integration with dynamic reading context
-  const {
-    status: vapiStatus,
-    isActive: isVoiceActive,
-    duration: voiceDuration,
-    start: startVoice,
-    stop: stopVoice,
-    currentMessage: vapiAssistantMessage,
-    currentUserMessage: vapiUserMessage,
-    messages: vapiMessages,
-    maxDurationSeconds,
-  } = useVapi(book, {
-    currentSegmentIndex: currentIdx,
-    currentSegmentContent: currentSegment?.content || "",
-    selectedText: selectedText || undefined,
-  });
-
   // Capture text selection on left reader & position floating action bar
   const handleTextSelection = useCallback(() => {
     const sel = window.getSelection();
@@ -263,9 +271,13 @@ export default function LivingReader({
     }
   }, []);
 
-  // Trigger real Morph generation via /api/morph (supports custom override text)
-  const handleRunMorph = async (overrideSelection?: string) => {
+  // Trigger real Morph generation via /api/morph (supports custom override text & diagram)
+  const handleRunMorph = async (overrideSelection?: string, diagramUrl?: string) => {
     const targetSelection = overrideSelection ?? selectedText;
+    const activeKey = book.fileURL ? activePdfPage : currentIdx;
+    const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+    const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
+
     setActiveIntent("morph");
     setIsMorphLoading(true);
     try {
@@ -281,11 +293,13 @@ export default function LivingReader({
           bookTitle: book.title,
           segmentIndex: currentIdx,
           currentSegmentIndex: currentIdx,
-          focalText: currentSegment?.content || "",
-          currentSegmentContent: currentSegment?.content || "",
-          pageNumber: currentSegment?.pageNumber || currentIdx + 1,
+          focalText: activeText,
+          currentSegmentContent: activeText,
+          pageNumber: activePage,
           precedingSegments,
           selectedText: targetSelection || undefined,
+          snippedDiagram: diagramUrl || snippedDiagram?.url || null,
+          forceRefresh: true,
         }),
       });
 
@@ -301,7 +315,7 @@ export default function LivingReader({
       if (artifact) {
         setMorphArtifacts((prev) => ({
           ...prev,
-          [currentIdx]: artifact,
+          [activeKey]: artifact,
         }));
       }
     } catch (err) {
@@ -312,7 +326,71 @@ export default function LivingReader({
     }
   };
 
-  // Pin active selection into Study Vault
+  // Dynamic QBank generator
+  const loadDynamicQBank = useCallback(async (diagramUrl?: string) => {
+    setIsQBankLoading(true);
+    setQuizSubmitted(false);
+    setQuizAnswer(null);
+    try {
+      const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+      const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
+
+      const res = await fetch("/api/qbank", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookTitle: book.title,
+          pageNumber: activePage,
+          pageText: activeText,
+          selectedText: selectedText || undefined,
+          snippedDiagram: diagramUrl || snippedDiagram?.url || null,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.questions && data.questions.length > 0) {
+          setDynamicQBankList(data.questions);
+          setActiveQBankIdx(0);
+        }
+      }
+    } catch (e) {
+      console.warn("Dynamic QBank load warning:", e);
+    } finally {
+      setIsQBankLoading(false);
+    }
+  }, [book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, snippedDiagram]);
+
+  // Dynamic Summary generator
+  const loadDynamicSummary = useCallback(async () => {
+    setIsSummaryLoading(true);
+    try {
+      const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+      const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
+
+      const res = await fetch("/api/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookTitle: book.title,
+          pageNumber: activePage,
+          pageText: activeText,
+          selectedText: selectedText || undefined,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.summary) {
+          setDynamicSummary(data.summary);
+        }
+      }
+    } catch (e) {
+      console.warn("Dynamic Summary load warning:", e);
+    } finally {
+      setIsSummaryLoading(false);
+    }
+  }, [book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText]);
+
+  // Pin active selection into Study Vault (background storage)
   const handlePinSelectionToVault = useCallback(
     (customText?: string) => {
       const target = customText || selectedText;
@@ -321,7 +399,7 @@ export default function LivingReader({
       const newPin: ScannedPinItem = {
         id: `pin-${Date.now()}`,
         sectionIndex: currentIdx,
-        pageNumber: currentSegment.pageNumber || currentIdx + 1,
+        pageNumber: currentSegment?.pageNumber || currentIdx + 1,
         text: target,
         type: "selection",
         timestamp: new Date().toLocaleTimeString([], {
@@ -332,18 +410,15 @@ export default function LivingReader({
 
       saveVaultItems([newPin, ...pinnedVaultItems]);
       setSelectionPos(null);
-      setActiveIntent("vault");
     },
     [selectedText, currentIdx, currentSegment, pinnedVaultItems, saveVaultItems]
   );
 
-  // Smart Scan entire current page into Study Vault with extracted entities
+  // Background page scan
   const handleScanCurrentPage = async () => {
     setIsScanningPage(true);
-    setActiveIntent("vault");
-
     setTimeout(() => {
-      const lines = currentSegment.content
+      const lines = (currentSegment?.content || "")
         .split("\n")
         .map((l) => l.trim())
         .filter((l) => l.length > 15);
@@ -353,8 +428,8 @@ export default function LivingReader({
       const scannedItem: ScannedPinItem = {
         id: `scan-${Date.now()}`,
         sectionIndex: currentIdx,
-        pageNumber: currentSegment.pageNumber || currentIdx + 1,
-        text: currentSegment.content.slice(0, 340) + (currentSegment.content.length > 340 ? "..." : ""),
+        pageNumber: currentSegment?.pageNumber || currentIdx + 1,
+        text: (currentSegment?.content || "").slice(0, 340) + ((currentSegment?.content || "").length > 340 ? "..." : ""),
         type: "full-page-scan",
         extractedPearls,
         timestamp: new Date().toLocaleTimeString([], {
@@ -365,7 +440,7 @@ export default function LivingReader({
 
       saveVaultItems([scannedItem, ...pinnedVaultItems]);
       setIsScanningPage(false);
-    }, 450);
+    }, 400);
   };
 
   // Trigger AI Chat directly from selection or paragraph
@@ -377,11 +452,36 @@ export default function LivingReader({
     setSelectionPos(null);
     setActiveIntent("chat");
 
-    const prompt = `Break down the exact mechanism and board-exam significance of this passage: "${target.slice(0, 180)}${target.length > 180 ? "..." : ""}"`;
+    const prompt = `Break down the exact mechanism and significance of this passage: "${target.slice(0, 180)}${target.length > 180 ? "..." : ""}"`;
     await triggerDirectAIQuery(prompt, target);
   };
 
-  const triggerDirectAIQuery = async (queryText: string, contextSelection?: string) => {
+  // Handle diagram / visual figure capture from OriginalPdfViewer with 1-click action routing
+  const handleSnipDiagram = (
+    imageDataUrl: string,
+    pageNumber: number,
+    targetFeature?: "morph" | "chat" | "qbank"
+  ) => {
+    setSnippedDiagram({ url: imageDataUrl, pageNumber });
+
+    if (targetFeature === "morph") {
+      setActiveIntent("morph");
+      handleRunMorph(undefined, imageDataUrl);
+    } else if (targetFeature === "qbank") {
+      setActiveIntent("quiz");
+      loadDynamicQBank(imageDataUrl);
+    } else {
+      setActiveIntent("chat");
+      const prompt = `Please analyze and explain this captured diagram from Page ${pageNumber} of "${book.title}". What are its core structures, key mechanisms, and high-yield takeaways?`;
+      triggerDirectAIQuery(prompt, undefined, imageDataUrl);
+    }
+  };
+
+  const triggerDirectAIQuery = async (
+    queryText: string,
+    contextSelection?: string,
+    imagePayload?: string
+  ) => {
     const historyPayload = messages.slice(-6).map((m) => ({
       sender: m.sender,
       text: m.text,
@@ -392,6 +492,7 @@ export default function LivingReader({
       {
         sender: "user",
         text: queryText,
+        imageUrl: imagePayload || undefined,
         time: new Date().toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
@@ -408,10 +509,12 @@ export default function LivingReader({
           query: queryText,
           bookId: book._id,
           bookTitle: book.title,
+          bookTopic: book.topic || "",
           currentSegmentIndex: currentIdx,
-          currentPageNumber: currentSegment.pageNumber || currentIdx + 1,
-          currentSegmentContent: currentSegment.content,
+          currentPageNumber: currentSegment?.pageNumber || currentIdx + 1,
+          currentSegmentContent: currentSegment?.content || "",
           selectedText: contextSelection || selectedText || undefined,
+          selectedImage: imagePayload || snippedDiagram?.url || undefined,
           history: historyPayload,
         }),
       });
@@ -423,7 +526,7 @@ export default function LivingReader({
         setActiveReferences(data.authoritativeReferences);
       }
       if (data.qbankVignettes?.length) {
-        setQbankList(data.qbankVignettes);
+        setDynamicQBankList(data.qbankVignettes);
       }
       if (data.mnemonics?.length) {
         setActiveMnemonics(data.mnemonics);
@@ -480,8 +583,9 @@ export default function LivingReader({
     });
   };
 
-  const activeMorphArtifact = morphArtifacts[currentIdx];
-  const activeQBankQuestion = qbankList[activeQBankIdx % qbankList.length];
+  const activeMorphArtifact =
+    morphArtifacts[book.fileURL ? activePdfPage : currentIdx];
+  const activeQBankQuestion = dynamicQBankList.length > 0 ? dynamicQBankList[activeQBankIdx % dynamicQBankList.length] : null;
 
   // Resizable Splitter State
   const [splitRatio, setSplitRatio] = useState<number>(54);
@@ -582,74 +686,119 @@ export default function LivingReader({
     setFitMode("fit-page");
   };
 
-  const formatVoiceDuration = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s < 10 ? "0" : ""}${s}`;
-  };
-
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[color:var(--ink)] pt-20 text-[color:var(--cream)] select-none">
-      {/* HEADER / NAVIGATION BAR */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 px-4">
-        <div className="flex items-center gap-3">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[color:var(--ink)] pt-0 text-[color:var(--cream)] select-none">
+      {/* COMPACT UNIFIED TOP BAR (44px) */}
+      <header className="flex h-11 shrink-0 items-center justify-between border-b border-white/10 bg-[#141318] px-3 z-30">
+        <div className="flex items-center gap-2.5 min-w-0">
           <Link
             href="/library"
-            className="flex size-9 items-center justify-center rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5"
+            className="flex size-7 items-center justify-center rounded-full border border-[color:var(--ink)] bg-[color:var(--cream)] text-[color:var(--ink)] shadow-xs transition-transform hover:-translate-y-0.5 cursor-pointer shrink-0"
             title="Return to library"
           >
-            <ArrowLeft className="size-4" />
+            <ArrowLeft className="size-3.5 stroke-[2.5]" />
           </Link>
-          <div className="flex flex-col">
-            <h1 className="display line-clamp-1 text-sm text-[color:var(--cream)] sm:text-base">
+          <div className="flex items-center gap-2 min-w-0">
+            <h1 className="display line-clamp-1 text-xs font-bold text-[color:var(--cream)] sm:text-sm">
               {book.title}
             </h1>
-            <span className="text-[11px] text-[color:var(--cream)]/60">
-              {book.author} • Section {currentIdx + 1} of {segments.length}
+            {(book.blueprint?.domain || book.topic) && (
+              <span className="hidden sm:inline-flex shrink-0 items-center rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[9.5px] font-bold text-emerald-300">
+                {book.blueprint?.domain || book.topic}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Center Page Tracking & Progress */}
+        <div className="flex items-center gap-3">
+          <div className="hidden md:flex w-36 items-center gap-2">
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full bg-[color:var(--orange)] transition-all duration-300"
+                style={{
+                  width: `${(((book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1))) / (book.fileURL ? totalPdfPages : (book.totalPages || segments.length || 1))) * 100}%`,
+                }}
+              />
+            </div>
+            <span className="font-mono text-[10px] text-[color:var(--cream)]/60">
+              {Math.round((((book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1))) / (book.fileURL ? totalPdfPages : (book.totalPages || segments.length || 1))) * 100)}%
             </span>
           </div>
-        </div>
 
-        {/* Center Progress Bar */}
-        <div className="hidden max-w-xs flex-1 items-center gap-2 px-4 md:flex">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
-            <div
-              className="h-full bg-[color:var(--orange)] transition-all duration-300"
-              style={{
-                width: `${((currentIdx + 1) / segments.length) * 100}%`,
-              }}
-            />
+          <div className="flex items-center gap-1 font-mono text-[11px] font-bold">
+            <span className="text-[color:var(--orange)]">
+              Page {book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
+            </span>
+            <span className="opacity-40">/</span>
+            <span className="opacity-70">{book.fileURL ? totalPdfPages : (book.totalPages || segments.length)}</span>
           </div>
-          <span className="font-mono text-xs text-[color:var(--cream)]/60">
-            {Math.round(((currentIdx + 1) / segments.length) * 100)}%
-          </span>
         </div>
 
-        {/* Global Nav Tools */}
-        <div className="flex items-center gap-2 font-mono text-xs">
-          <button
-            type="button"
-            disabled={currentIdx === 0}
-            onClick={() => setCurrentIdx((prev) => Math.max(0, prev - 1))}
-            className="flex size-8 items-center justify-center rounded-full border border-white/15 bg-white/5 transition-colors hover:bg-white/15 disabled:cursor-default disabled:opacity-30"
-            title="Previous page (←)"
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          <span className="px-1 text-[11px] text-[color:var(--cream)]/80">
-            {currentIdx + 1}/{segments.length}
-          </span>
-          <button
-            type="button"
-            disabled={currentIdx === segments.length - 1}
-            onClick={() =>
-              setCurrentIdx((prev) => Math.min(segments.length - 1, prev + 1))
-            }
-            className="flex size-8 items-center justify-center rounded-full border border-white/15 bg-white/5 transition-colors hover:bg-white/15 disabled:cursor-default disabled:opacity-30"
-            title="Next page (→)"
-          >
-            <ChevronRight className="size-4" />
-          </button>
+        {/* Right Active Scope Badges & Navigation */}
+        <div className="flex items-center gap-2">
+          {selectedText && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--orange)]/60 bg-[color:var(--orange)]/20 px-2 py-0.5 text-[10px] font-bold text-[color:var(--orange)] animate-pulse">
+              <Sparkles className="size-2.5" />
+              <span>Selection Locked</span>
+              <button
+                type="button"
+                onClick={handleClearSelection}
+                className="hover:opacity-75 cursor-pointer ml-0.5"
+                title="Clear selection"
+              >
+                <X className="size-2.5" />
+              </button>
+            </span>
+          )}
+
+          {snippedDiagram && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/60 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">
+              <Crop className="size-2.5" />
+              <span>Diagram Locked</span>
+              <button
+                type="button"
+                onClick={() => setSnippedDiagram(null)}
+                className="hover:opacity-75 cursor-pointer ml-0.5"
+                title="Clear diagram"
+              >
+                <X className="size-2.5" />
+              </button>
+            </span>
+          )}
+
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              disabled={book.fileURL ? activePdfPage <= 1 : currentIdx <= 0}
+              onClick={() => {
+                if (book.fileURL) {
+                  setActivePdfPage((prev) => Math.max(1, prev - 1));
+                } else {
+                  setCurrentIdx((prev) => Math.max(0, prev - 1));
+                }
+              }}
+              className="flex size-6.5 cursor-pointer items-center justify-center rounded-md border border-white/10 bg-white/5 transition-colors hover:bg-white/15 disabled:cursor-default disabled:opacity-30"
+              title="Previous page (←)"
+            >
+              <ChevronLeft className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              disabled={book.fileURL ? activePdfPage >= totalPdfPages : currentIdx >= segments.length - 1}
+              onClick={() => {
+                if (book.fileURL) {
+                  setActivePdfPage((prev) => Math.min(totalPdfPages, prev + 1));
+                } else {
+                  setCurrentIdx((prev) => Math.min(segments.length - 1, prev + 1));
+                }
+              }}
+              className="flex size-6.5 cursor-pointer items-center justify-center rounded-md border border-white/10 bg-white/5 transition-colors hover:bg-white/15 disabled:cursor-default disabled:opacity-30"
+              title="Next page (→)"
+            >
+              <ChevronRight className="size-3.5" />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -658,243 +807,231 @@ export default function LivingReader({
       {/* ================================================================= */}
       <div
         ref={containerRef}
-        className="flex flex-1 overflow-hidden p-3 pt-2"
+        className="flex flex-1 overflow-hidden p-2 gap-2"
         style={{ cursor: isDraggingSplit ? "col-resize" : "default" }}
       >
         <div className="flex h-full w-full gap-2 overflow-hidden">
           {/* ============================================================== */}
-          {/* LEFT PANEL: INTERACTIVE SOURCE DOCUMENT & PAGE SCANNER         */}
+          {/* LEFT PANEL: AUTHENTIC PDF READER (CLEAN, NO REDUNDANT TOOLBARS)*/}
           {/* ============================================================== */}
           <div
-            className="relative flex h-full flex-col overflow-hidden rounded-[20px] border-2 border-[color:var(--ink)] shadow-frame transition-[width] duration-75"
+            className="relative flex h-full flex-col overflow-hidden rounded-[18px] border border-white/10 shadow-frame transition-[width] duration-75 bg-[#17161b]"
             style={{ width: `${splitRatio}%` }}
           >
-            {/* Source Viewport Action Bar */}
-            <div className="flex h-11 shrink-0 items-center justify-between border-b border-white/10 bg-[#17161b] px-4 text-xs font-medium text-[color:var(--cream)]">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[11px] font-bold text-[color:var(--cream)]/80">
-                  SECTION {currentIdx + 1}
-                </span>
+            {/* Left Panel Body: Authentic PDF Viewer */}
+            {book.fileURL ? (
+              <div className="relative flex flex-1 overflow-hidden">
+                <SourceSelectionToolbar
+                  selectedText={selectedText}
+                  position={selectionPos}
+                  onMorphSelection={() => handleRunMorph(selectedText)}
+                  onAskAI={() => handleAskAISelection(selectedText)}
+                  onVoiceViva={() => {
+                    setSelectionPos(null);
+                    setActiveIntent("voice");
+                  }}
+                  onQuizSelection={() => {
+                    setSelectionPos(null);
+                    setActiveIntent("quiz");
+                    loadDynamicQBank();
+                  }}
+                  onPinToBoard={() => handlePinSelectionToVault(selectedText)}
+                  onClearSelection={handleClearSelection}
+                />
+                <OriginalPdfViewer
+                  fileURL={book.fileURL}
+                  currentPage={activePdfPage}
+                  onTotalPagesLoaded={(total) => setTotalPdfPages(total)}
+                  onPageChange={(page, text) => {
+                    setActivePdfPage(page);
+                    if (text) setActivePageLiveText(text);
+                    const matchedIdx = segments.findIndex(
+                      (s) => s.pageNumber === page
+                    );
+                    if (matchedIdx !== -1 && matchedIdx !== currentIdx) {
+                      setCurrentIdx(matchedIdx);
+                    }
+                  }}
+                  onTextSelection={(text, pos) => {
+                    setSelectedText(text);
+                    setSelectionPos(pos);
+                  }}
+                  onClearSelection={handleClearSelection}
+                  onSnipDiagram={handleSnipDiagram}
+                  zoomLevel={zoomLevel}
+                  fitMode={fitMode}
+                  theme={theme}
+                  className="flex-1"
+                />
+              </div>
+            ) : (
+              /* Document Reading Surface */
+              <div
+                ref={scrollViewportRef}
+                onMouseUp={handleTextSelection}
+                onTouchEnd={handleTextSelection}
+                className={cn(
+                  "custom-scrollbar relative flex-1 overflow-y-auto px-6 py-8 transition-colors sm:px-12 sm:py-10 select-text",
+                  theme === "paper" &&
+                  "bg-[#FAF4EB] text-[color:var(--ink)] font-serif",
+                  theme === "ink" &&
+                  "bg-[color:var(--ink)] text-[color:var(--cream)] font-serif",
+                )}
+              >
+                {/* Floating Selection Action Toolbar inside Left Panel */}
+                <SourceSelectionToolbar
+                  selectedText={selectedText}
+                  position={selectionPos}
+                  onMorphSelection={() => handleRunMorph(selectedText)}
+                  onAskAI={() => handleAskAISelection(selectedText)}
+                  onVoiceViva={() => {
+                    setSelectionPos(null);
+                    setActiveIntent("voice");
+                  }}
+                  onQuizSelection={() => {
+                    setSelectionPos(null);
+                    setActiveIntent("quiz");
+                    setQuizAnswer(null);
+                    setQuizSubmitted(false);
+                  }}
+                  onPinToBoard={() => handlePinSelectionToVault(selectedText)}
+                  onClearSelection={handleClearSelection}
+                />
 
-                {selectedText ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--orange)]/50 bg-[color:var(--orange)]/20 px-2.5 py-0.5 text-[10px] font-bold text-[color:var(--orange)]">
-                    <Sparkles className="size-3 animate-pulse" />
-                    <span>Selection Locked to AI ({selectedText.split(/\s+/).length}w)</span>
+                <div
+                  className={cn(
+                    "mx-auto transition-transform duration-150 origin-top",
+                    fitMode === "normal" && "max-w-2xl",
+                    fitMode === "fit-width" && "max-w-full px-2",
+                    fitMode === "fit-page" && "max-w-xl text-sm leading-normal",
+                  )}
+                  style={
+                    fitMode === "normal"
+                      ? { transform: `scale(${zoomLevel / 100})` }
+                      : undefined
+                  }
+                >
+                  {/* Book & Page Header */}
+                  <div className="mb-6 flex items-center justify-between border-b border-current/15 pb-3 font-sans text-xs tracking-wider uppercase opacity-60">
+                    <span>{book.title}</span>
+                    <span>
+                      Page {currentSegment.pageNumber || currentIdx + 1} • {currentSegment.wordCount || 300}w
+                    </span>
+                  </div>
+
+                  {/* Interactive Document Blocks or Continuous Article */}
+                  {paragraphInteractiveMode ? (
+                    <div className="flex flex-col gap-5">
+                      {pageParagraphs.map((para, pIdx) => {
+                        const isParaSelected = selectedText === para;
+                        return (
+                          <div
+                            key={pIdx}
+                            className={cn(
+                              "group/para relative rounded-2xl border p-3.5 transition-all duration-150",
+                              isParaSelected
+                                ? "border-[color:var(--orange)] bg-[color:var(--orange)]/10 shadow-sm"
+                                : "border-transparent hover:border-current/15 hover:bg-current/[0.03]"
+                            )}
+                          >
+                            {/* Paragraph Action Gutter Bar on Hover */}
+                            <div className="mb-2 flex items-center justify-between font-sans text-[10px] opacity-0 transition-opacity group-hover/para:opacity-100">
+                              <span className="font-mono font-bold uppercase tracking-wider opacity-50">
+                                Block {pIdx + 1}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedText(para);
+                                    handleRunMorph(para);
+                                  }}
+                                  className="flex cursor-pointer items-center gap-1 rounded-full bg-[color:var(--orange)] px-2 py-0.5 font-bold text-[color:var(--ink)] shadow-xs hover:scale-105 transition-transform"
+                                  title="Morph this paragraph into interactive cards"
+                                >
+                                  <Sparkles className="size-2.5" />
+                                  <span>Morph Block</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleAskAISelection(para)}
+                                  className="flex cursor-pointer items-center gap-1 rounded-full border border-current/20 bg-current/5 px-2 py-0.5 font-bold hover:bg-current/15"
+                                  title="Explain this block in AI Chat"
+                                >
+                                  <MessageSquare className="size-2.5" />
+                                  <span>Ask AI</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedText(para);
+                                    setActiveIntent("voice");
+                                  }}
+                                  className="flex cursor-pointer items-center gap-1 rounded-full border border-current/20 bg-current/5 px-2 py-0.5 font-bold hover:bg-current/15"
+                                  title="Oral Viva on this block"
+                                >
+                                  <Mic className="size-2.5" />
+                                  <span>Viva</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handlePinSelectionToVault(para)}
+                                  className="flex cursor-pointer items-center gap-1 rounded-full border border-current/20 bg-current/5 px-2 py-0.5 font-bold hover:bg-current/15"
+                                  title="Pin this block to Study Vault"
+                                >
+                                  <BookmarkPlus className="size-2.5" />
+                                  <span>Pin</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            <p className="text-base leading-loose whitespace-pre-line sm:text-lg">
+                              {para}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <article className="max-w-none text-base leading-loose whitespace-pre-line sm:text-lg">
+                      {currentSegment.content}
+                    </article>
+                  )}
+
+                  {/* Page Navigation at Document Bottom */}
+                  <div className="mt-12 flex items-center justify-between border-t border-current/10 pt-6 font-sans text-xs">
                     <button
                       type="button"
-                      onClick={handleClearSelection}
-                      className="ml-0.5 rounded-full hover:bg-black/30 p-0.5"
-                      title="Clear selection"
+                      disabled={currentIdx === 0}
+                      onClick={() => setCurrentIdx((prev) => Math.max(0, prev - 1))}
+                      className="flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-current/20 px-3.5 py-1.5 transition-colors hover:bg-current/5 disabled:cursor-default disabled:opacity-30"
                     >
-                      <X className="size-2.5" />
+                      <ChevronLeft className="size-4" />
+                      <span>Previous section</span>
                     </button>
-                  </span>
-                ) : (
-                  <span className="hidden text-[10.5px] text-[color:var(--cream)]/50 sm:inline">
-                    Select any text or hover a block to target AI
-                  </span>
-                )}
-              </div>
-
-              {/* Source-Level Smart Actions: Scan Page / Interactive Blocks */}
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setParagraphInteractiveMode((prev) => !prev)}
-                  className={cn(
-                    "cursor-pointer rounded-full border px-2.5 py-1 text-[10px] font-bold transition-colors",
-                    paragraphInteractiveMode
-                      ? "border-[#43a08f]/50 bg-[#43a08f]/20 text-[#7fd8c9]"
-                      : "border-white/10 bg-white/5 text-[color:var(--cream)]/60 hover:text-[color:var(--cream)]"
-                  )}
-                  title="Toggle paragraph-level quick AI actions"
-                >
-                  Block Actions: {paragraphInteractiveMode ? "ON" : "OFF"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleScanCurrentPage}
-                  disabled={isScanningPage}
-                  className="flex cursor-pointer items-center gap-1 rounded-full border border-[color:var(--ink)] bg-[color:var(--orange)] px-2.5 py-1 text-[10.5px] font-black text-[color:var(--ink)] shadow-sm transition-transform hover:-translate-y-0.5"
-                  title="Scan & Extract this entire page into your Study Vault"
-                >
-                  <ScanLine className={cn("size-3", isScanningPage && "animate-spin")} />
-                  <span>{isScanningPage ? "Scanning..." : "Scan Page to Vault"}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Document Reading Surface */}
-            <div
-              ref={scrollViewportRef}
-              onMouseUp={handleTextSelection}
-              onTouchEnd={handleTextSelection}
-              className={cn(
-                "custom-scrollbar relative flex-1 overflow-y-auto px-6 py-8 transition-colors sm:px-12 sm:py-10 select-text",
-                theme === "paper" &&
-                  "bg-[#FAF4EB] text-[color:var(--ink)] font-serif",
-                theme === "ink" &&
-                  "bg-[color:var(--ink)] text-[color:var(--cream)] font-serif",
-              )}
-            >
-              {/* Floating Selection Action Toolbar inside Left Panel */}
-              <SourceSelectionToolbar
-                selectedText={selectedText}
-                position={selectionPos}
-                onMorphSelection={() => handleRunMorph(selectedText)}
-                onAskAI={() => handleAskAISelection(selectedText)}
-                onVoiceViva={() => {
-                  setSelectionPos(null);
-                  setActiveIntent("voice");
-                  startVoice(
-                    `Let's do a focused oral viva on this passage you highlighted: "${selectedText.slice(0, 120)}"`
-                  );
-                }}
-                onQuizSelection={() => {
-                  setSelectionPos(null);
-                  setActiveIntent("quiz");
-                  setQuizAnswer(null);
-                  setQuizSubmitted(false);
-                }}
-                onPinToBoard={() => handlePinSelectionToVault(selectedText)}
-                onClearSelection={handleClearSelection}
-              />
-
-              <div
-                className={cn(
-                  "mx-auto transition-transform duration-150 origin-top",
-                  fitMode === "normal" && "max-w-2xl",
-                  fitMode === "fit-width" && "max-w-full px-2",
-                  fitMode === "fit-page" && "max-w-xl text-sm leading-normal",
-                )}
-                style={
-                  fitMode === "normal"
-                    ? { transform: `scale(${zoomLevel / 100})` }
-                    : undefined
-                }
-              >
-                {/* Book & Page Header */}
-                <div className="mb-6 flex items-center justify-between border-b border-current/15 pb-3 font-sans text-xs tracking-wider uppercase opacity-60">
-                  <span>{book.title}</span>
-                  <span>
-                    Page {currentSegment.pageNumber || currentIdx + 1} • {currentSegment.wordCount || 300}w
-                  </span>
-                </div>
-
-                {/* Interactive Document Blocks or Continuous Article */}
-                {paragraphInteractiveMode ? (
-                  <div className="flex flex-col gap-5">
-                    {pageParagraphs.map((para, pIdx) => {
-                      const isParaSelected = selectedText === para;
-                      return (
-                        <div
-                          key={pIdx}
-                          className={cn(
-                            "group/para relative rounded-2xl border p-3.5 transition-all duration-150",
-                            isParaSelected
-                              ? "border-[color:var(--orange)] bg-[color:var(--orange)]/10 shadow-sm"
-                              : "border-transparent hover:border-current/15 hover:bg-current/[0.03]"
-                          )}
-                        >
-                          {/* Paragraph Action Gutter Bar on Hover */}
-                          <div className="mb-2 flex items-center justify-between font-sans text-[10px] opacity-0 transition-opacity group-hover/para:opacity-100">
-                            <span className="font-mono font-bold uppercase tracking-wider opacity-50">
-                              Block {pIdx + 1}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedText(para);
-                                  handleRunMorph(para);
-                                }}
-                                className="flex cursor-pointer items-center gap-1 rounded-full bg-[color:var(--orange)] px-2 py-0.5 font-bold text-[color:var(--ink)] shadow-xs hover:scale-105 transition-transform"
-                                title="Morph this paragraph into interactive cards"
-                              >
-                                <Sparkles className="size-2.5" />
-                                <span>Morph Block</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => handleAskAISelection(para)}
-                                className="flex cursor-pointer items-center gap-1 rounded-full border border-current/20 bg-current/5 px-2 py-0.5 font-bold hover:bg-current/15"
-                                title="Explain this block in AI Chat"
-                              >
-                                <MessageSquare className="size-2.5" />
-                                <span>Ask AI</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedText(para);
-                                  setActiveIntent("voice");
-                                  startVoice(`Quiz me orally on this paragraph: "${para.slice(0, 100)}"`);
-                                }}
-                                className="flex cursor-pointer items-center gap-1 rounded-full border border-current/20 bg-current/5 px-2 py-0.5 font-bold hover:bg-current/15"
-                                title="Oral Viva on this block"
-                              >
-                                <Mic className="size-2.5" />
-                                <span>Viva</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => handlePinSelectionToVault(para)}
-                                className="flex cursor-pointer items-center gap-1 rounded-full border border-current/20 bg-current/5 px-2 py-0.5 font-bold hover:bg-current/15"
-                                title="Pin this block to Study Vault"
-                              >
-                                <BookmarkPlus className="size-2.5" />
-                                <span>Pin</span>
-                              </button>
-                            </div>
-                          </div>
-
-                          <p className="text-base leading-loose whitespace-pre-line sm:text-lg">
-                            {para}
-                          </p>
-                        </div>
-                      );
-                    })}
+                    <span className="hidden text-[11px] opacity-60 sm:block">
+                      Tip: Highlight any phrase or hover a block for instant AI actions
+                    </span>
+                    <button
+                      type="button"
+                      disabled={currentIdx === segments.length - 1}
+                      onClick={() =>
+                        setCurrentIdx((prev) =>
+                          Math.min(segments.length - 1, prev + 1),
+                        )
+                      }
+                      className="flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-3.5 py-1.5 font-bold text-[color:var(--ink)] transition-transform hover:-translate-y-0.5 disabled:cursor-default disabled:opacity-30 disabled:hover:translate-y-0"
+                    >
+                      <span>Next section</span>
+                      <ChevronRight className="size-4" />
+                    </button>
                   </div>
-                ) : (
-                  <article className="max-w-none text-base leading-loose whitespace-pre-line sm:text-lg">
-                    {currentSegment.content}
-                  </article>
-                )}
-
-                {/* Page Navigation at Document Bottom */}
-                <div className="mt-12 flex items-center justify-between border-t border-current/10 pt-6 font-sans text-xs">
-                  <button
-                    type="button"
-                    disabled={currentIdx === 0}
-                    onClick={() => setCurrentIdx((prev) => Math.max(0, prev - 1))}
-                    className="flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-current/20 px-3.5 py-1.5 transition-colors hover:bg-current/5 disabled:cursor-default disabled:opacity-30"
-                  >
-                    <ChevronLeft className="size-4" />
-                    <span>Previous section</span>
-                  </button>
-                  <span className="hidden text-[11px] opacity-60 sm:block">
-                    Tip: Highlight any phrase or hover a block for instant AI actions
-                  </span>
-                  <button
-                    type="button"
-                    disabled={currentIdx === segments.length - 1}
-                    onClick={() =>
-                      setCurrentIdx((prev) =>
-                        Math.min(segments.length - 1, prev + 1),
-                      )
-                    }
-                    className="flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-3.5 py-1.5 font-bold text-[color:var(--ink)] transition-transform hover:-translate-y-0.5 disabled:cursor-default disabled:opacity-30 disabled:hover:translate-y-0"
-                  >
-                    <span>Next section</span>
-                    <ChevronRight className="size-4" />
-                  </button>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* ADJUSTABLE SPLITTER */}
@@ -994,33 +1131,21 @@ export default function LivingReader({
                 ))}
               </div>
 
-              {/* Sinai Live Voice Button */}
+              {/* Ascleon Live Voice Button */}
               <button
                 type="button"
                 onClick={() => {
                   setActiveIntent("voice");
-                  if (!isVoiceActive && vapiStatus !== "connecting") {
-                    startVoice();
-                  } else if (isVoiceActive) {
-                    stopVoice();
-                  }
                 }}
-                disabled={vapiStatus === "connecting"}
                 className={cn(
                   "flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] px-3 py-1.5 text-xs font-bold transition-all",
-                  isVoiceActive
-                    ? "bg-[#43a08f] text-[color:var(--ink)] shadow-chip animate-pulse"
+                  activeIntent === "voice"
+                    ? "bg-[#43a08f] text-[color:var(--ink)] shadow-chip"
                     : "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip hover:-translate-y-0.5",
                 )}
               >
                 <Mic className="size-3.5" />
-                <span>
-                  {isVoiceActive
-                    ? `Sinai Voice (${formatVoiceDuration(voiceDuration)})`
-                    : vapiStatus === "connecting"
-                      ? "Connecting..."
-                      : "Talk Hands-Free"}
-                </span>
+                <span>Ascleon Voice</span>
               </button>
             </div>
 
@@ -1060,8 +1185,8 @@ export default function LivingReader({
               </div>
             )}
 
-            {/* STUDIO SWITCHER TABS (6 TABS INCLUDING STUDY VAULT) */}
-            <div className="grid shrink-0 grid-cols-6 gap-1 border-b border-white/10 bg-black/40 p-1.5 text-[11px]">
+            {/* STUDIO SWITCHER TABS (5 CORE TABS) */}
+            <div className="grid shrink-0 grid-cols-5 gap-1 border-b border-white/10 bg-black/40 p-1.5 text-[11px]">
               <button
                 type="button"
                 onClick={() => setActiveIntent("morph")}
@@ -1100,12 +1225,7 @@ export default function LivingReader({
                     : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
                 )}
               >
-                <div className="relative">
-                  <Mic className="size-3" />
-                  {isVoiceActive && (
-                    <span className="absolute -top-1 -right-1 size-1.5 rounded-full bg-[#43a08f] animate-ping" />
-                  )}
-                </div>
+                <Mic className="size-3" />
                 <span className="truncate">Voice</span>
               </button>
 
@@ -1113,8 +1233,9 @@ export default function LivingReader({
                 type="button"
                 onClick={() => {
                   setActiveIntent("quiz");
-                  setQuizAnswer(null);
-                  setQuizSubmitted(false);
+                  if (dynamicQBankList.length === 0) {
+                    loadDynamicQBank();
+                  }
                 }}
                 className={cn(
                   "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1.5 font-bold transition-all",
@@ -1129,23 +1250,12 @@ export default function LivingReader({
 
               <button
                 type="button"
-                onClick={() => setActiveIntent("vault")}
-                className={cn(
-                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1.5 font-bold transition-all",
-                  activeIntent === "vault"
-                    ? "border-2 border-[color:var(--ink)] bg-[#43a08f] text-[color:var(--ink)] shadow-chip"
-                    : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
-                )}
-              >
-                <ScanLine className="size-3" />
-                <span className="truncate">
-                  Vault {pinnedVaultItems.length > 0 ? `(${pinnedVaultItems.length})` : ""}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveIntent("summary")}
+                onClick={() => {
+                  setActiveIntent("summary");
+                  if (!dynamicSummary) {
+                    loadDynamicSummary();
+                  }
+                }}
                 className={cn(
                   "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1.5 font-bold transition-all",
                   activeIntent === "summary"
@@ -1167,8 +1277,19 @@ export default function LivingReader({
                     <MorphCanvas
                       artifact={activeMorphArtifact}
                       onNavigateSegment={(idx) => setCurrentIdx(idx)}
-                      onResetToBoot={() => handleResetMorph(currentIdx)}
+                      onResetToBoot={() => handleResetMorph(book.fileURL ? activePdfPage : currentIdx)}
                       isLoading={isMorphLoading}
+                      onAskAI={(prompt) => {
+                        setActiveIntent("chat");
+                        triggerDirectAIQuery(prompt);
+                      }}
+                      onQuizNode={(concept) => {
+                        setActiveIntent("quiz");
+                        loadDynamicQBank();
+                      }}
+                      onPinNode={(title, details) => {
+                        handlePinSelectionToVault(`${title}: ${details}`);
+                      }}
                     />
                   ) : (
                     <div className="flex flex-1 flex-col items-center justify-center py-6">
@@ -1182,7 +1303,9 @@ export default function LivingReader({
                           <span>
                             {selectedText
                               ? "Passage Highlighted • Ready to Morph Selection"
-                              : `Section ${currentIdx + 1} Context Window Ready`}
+                              : book.fileURL
+                                ? `Page ${activePdfPage} Context Window Ready`
+                                : `Section ${currentIdx + 1} Context Window Ready`}
                           </span>
                         </div>
 
@@ -1201,35 +1324,33 @@ export default function LivingReader({
                           </p>
                         </div>
 
-                          <div className="grid grid-cols-3 gap-2 w-full pt-1 text-left">
-                            <div className="flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-2.5">
-                              <Layers className="size-3.5 text-[color:var(--orange)]" />
+                        <div className="grid grid-cols-3 gap-2 w-full pt-1 text-left">
+                          <div className="flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-2.5">
+                            <Workflow className="size-3.5 text-[color:var(--orange)]" />
                             <span className="text-[10px] font-bold text-[color:var(--cream)]">
-                                Colorized Cards
-                              </span>
-                            <span className="text-[9px] text-[color:var(--cream)]/60">
-                                {isMedicalBook
-                                ? "Chronological roadmaps"
-                                  : `${book.topic || "Domain"} roadmaps`}
+                              Concept Mind Map
                             </span>
-                            </div>
-
-                            <div className="flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-2.5">
-                            <Activity className="size-3.5 text-[#43a08f]" />
-                              <span className="text-[10px] font-bold text-[color:var(--cream)]">
-                                {isMedicalBook ? "Phonocardiograms" : "Dynamic Simulators"}
-                              </span>
                             <span className="text-[9px] text-[color:var(--cream)]/60">
-                                {isMedicalBook
-                                  ? "Interactive S1/S2 loops"
-                                  : "Interactive state models"}
-                              </span>
-                            </div>
+                              Core principles canvas
+                            </span>
+                          </div>
 
-                            <div className="flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-2.5">
+                          <div className="flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-2.5">
+                            <Activity className="size-3.5 text-[#43a08f]" />
+                            <span className="text-[10px] font-bold text-[color:var(--cream)]">
+                              {isMedicalBook ? "Phonocardiograms" : "Dynamic Simulators"}
+                            </span>
+                            <span className="text-[9px] text-[color:var(--cream)]/60">
+                              {isMedicalBook
+                                ? "Interactive S1/S2 loops"
+                                : "Interactive state models"}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-2.5">
                             <MapPin className="size-3.5 text-[color:var(--magenta)]" />
-                              <span className="text-[10px] font-bold text-[color:var(--cream)]">
-                                {isMedicalBook ? "Bedside Map" : "Visual Roadmap"}
+                            <span className="text-[10px] font-bold text-[color:var(--cream)]">
+                              {isMedicalBook ? "Bedside Map" : "Visual Roadmap"}
                             </span>
                             <span className="text-[9px] text-[color:var(--cream)]/60">
                               {isMedicalBook
@@ -1358,35 +1479,46 @@ export default function LivingReader({
                       <div
                         key={idx}
                         className={cn(
-                          "flex flex-col gap-1.5 rounded-[16px] p-3 text-xs leading-relaxed",
+                          "flex flex-col gap-1.5 rounded-[18px] p-3.5 text-xs leading-relaxed",
                           m.sender === "user"
-                            ? "self-end max-w-[85%] border border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] font-medium"
-                            : "self-start max-w-[95%] border border-white/10 bg-white/[0.05] text-[color:var(--cream)]",
+                            ? "self-end max-w-[85%] border-2 border-[color:var(--ink)] bg-[#ff4c00] text-[color:var(--ink)] font-bold shadow-chip"
+                            : "self-start max-w-[95%] border-2 border-[color:var(--ink)] bg-[#f6d7a1] text-[color:var(--ink)] font-medium shadow-chip",
                         )}
                       >
                         {m.sender === "ai" && (
-                          <div className="flex items-center justify-between gap-2 pb-1 border-b border-white/10 text-[10px] text-[color:var(--cream)]/60">
-                            <span className="flex items-center gap-1 font-bold text-[#7fd8c9]">
-                              <Bot className="size-3" />
-                              {m.provider ? `⚡ ${m.provider.toUpperCase()}` : "⚡ Grounded Clinical Agent"}
+                          <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-[color:var(--ink)]/20 text-[10.5px]">
+                            <span className="flex items-center gap-1 font-black text-[color:var(--ink)]">
+                              <span className="rounded-full bg-[#ff4c00] text-[color:var(--ink)] px-2 py-0.5 text-[9.5px] font-black uppercase">
+                                Ascleon AI
+                              </span>
+                              {m.provider ? `⚡ ${m.provider.toUpperCase()}` : "⚡ Grounded Mentor"}
                               {m.model ? ` (${m.model})` : ""}
                             </span>
-                            <span>{m.time}</span>
+                            <span className="font-mono font-bold text-[color:var(--ink)]/60">{m.time}</span>
                           </div>
                         )}
-                        <p className="whitespace-pre-line">{m.text}</p>
+                        {m.imageUrl && (
+                          <div className="my-1.5 overflow-hidden rounded-xl border-2 border-[color:var(--ink)] bg-black/80 max-h-52">
+                            <img
+                              src={m.imageUrl}
+                              alt="Captured Study Diagram"
+                              className="max-h-52 w-full object-contain rounded-lg"
+                            />
+                          </div>
+                        )}
+                        <p className="whitespace-pre-line font-medium text-[color:var(--ink)]">{m.text}</p>
 
                         {/* Transparency Pills: Tools Used & Citations */}
                         {m.toolsUsed && m.toolsUsed.length > 0 && (
                           <div className="mt-1 flex flex-wrap items-center gap-1 pt-1 text-[9.5px]">
-                            <span className="text-[color:var(--cream)]/50 flex items-center gap-0.5">
+                            <span className="text-[color:var(--ink)]/70 font-bold flex items-center gap-0.5">
                               <Wrench className="size-2.5" />
                               Tools:
                             </span>
                             {m.toolsUsed.map((tool, ti) => (
                               <span
                                 key={ti}
-                                className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[9px] text-[#7fd8c9]"
+                                className="rounded border border-[color:var(--ink)]/30 bg-[#7fd8c9] px-1.5 py-0.5 font-mono text-[9px] font-bold text-[color:var(--ink)]"
                               >
                                 {tool}
                               </span>
@@ -1396,11 +1528,11 @@ export default function LivingReader({
 
                         {m.citations && m.citations.length > 0 && (
                           <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[9.5px]">
-                            <span className="text-[color:var(--cream)]/50">Citing:</span>
+                            <span className="text-[color:var(--ink)]/70 font-bold">Citing:</span>
                             {m.citations.map((cite, ci) => (
                               <span
                                 key={ci}
-                                className="rounded border border-white/10 bg-black/30 px-1.5 py-0.5 text-[9px] text-[color:var(--orange)]"
+                                className="rounded border border-[color:var(--ink)]/30 bg-[#ff4c00]/20 px-1.5 py-0.5 text-[9px] font-bold text-[color:var(--ink)]"
                               >
                                 {cite}
                               </span>
@@ -1410,217 +1542,264 @@ export default function LivingReader({
                       </div>
                     ))}
                     {isAiLoading && (
-                      <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-[color:var(--cream)]/70">
-                        <RefreshCw className="size-3.5 animate-spin text-[color:var(--orange)]" />
-                        <span>Querying deep textbook corpus &amp; synthesizing Socratic response...</span>
+                      <div className="flex items-center gap-2 rounded-xl border-2 border-[color:var(--ink)] bg-[#f6d7a1] p-3 text-xs font-bold text-[color:var(--ink)] shadow-chip">
+                        <RefreshCw className="size-3.5 animate-spin text-[#ff4c00]" />
+                        <span>Querying deep textbook corpus &amp; synthesizing grounded response...</span>
                       </div>
                     )}
-                      <div ref={chatEndRef} />
+                    <div ref={chatEndRef} />
                   </div>
                 </div>
               )}
 
-              {/* TAB 3: SINAI LIVE VOICE VIVA PRECEPTOR */}
+              {/* TAB 3: ASCLEON LIVE ORAL MENTOR */}
               {activeIntent === "voice" && (
                 <div className="flex animate-in fade-in flex-col h-full duration-150">
-                  <SinaiVoiceStudio
-                    status={vapiStatus}
-                    isActive={isVoiceActive}
-                    currentMessage={vapiAssistantMessage}
-                    currentUserMessage={vapiUserMessage}
-                    messages={vapiMessages}
-                    duration={voiceDuration}
-                    maxDurationSeconds={maxDurationSeconds}
+                  <AscleonVoiceStudio
                     bookTitle={book.title}
-                    currentSectionNumber={currentIdx + 1}
-                    selectedText={selectedText}
-                    onStart={(customPrompt) => startVoice(customPrompt)}
-                    onStop={stopVoice}
+                    currentPageNumber={currentSegment?.pageNumber || currentIdx + 1}
+                    currentSectionText={currentSegment?.content || ""}
+                    selectedText={selectedText || undefined}
+                    authoritativeReferences={activeReferences}
+                    language={language}
+                    onLanguageChange={setLanguage}
                   />
                 </div>
               )}
 
-              {/* TAB 4: STUDY VAULT & SMART PAGE SCANNER */}
-              {activeIntent === "vault" && (
-                <div className="flex animate-in fade-in flex-col gap-3 duration-150">
-                  <StudyVaultDrawer
-                    bookTitle={book.title}
-                    pins={pinnedVaultItems}
-                    onRemovePin={(id) =>
-                      saveVaultItems(pinnedVaultItems.filter((item) => item.id !== id))
-                    }
-                    onJumpToSection={(idx) => setCurrentIdx(idx)}
-                    onMorphPin={(pin) => {
-                      setCurrentIdx(pin.sectionIndex);
-                      setSelectedText(pin.text);
-                      handleRunMorph(pin.text);
-                    }}
-                    onDiscussPin={(pin) => {
-                      setCurrentIdx(pin.sectionIndex);
-                      handleAskAISelection(pin.text);
-                    }}
-                    onVoicePin={(pin) => {
-                      setCurrentIdx(pin.sectionIndex);
-                      setSelectedText(pin.text);
-                      setActiveIntent("voice");
-                      startVoice(`Let's discuss this pinned excerpt from Section ${pin.sectionIndex + 1}: "${pin.text.slice(0, 100)}"`);
-                    }}
-                    onScanCurrentPage={handleScanCurrentPage}
-                    isScanningPage={isScanningPage}
-                  />
-                </div>
-              )}
-
-              {/* TAB 5: SUMMARY & HIGH-YIELD CLINICAL MNEMONICS */}
+              {/* TAB 4: DEEP STRUCTURED SUMMARY & MNEMONICS */}
               {activeIntent === "summary" && (
                 <div className="flex animate-in fade-in flex-col gap-4 duration-200">
-                  <div className="rounded-[18px] border border-white/10 bg-white/[0.04] p-4 text-xs leading-relaxed">
-                    <h4 className="mb-2 font-black uppercase tracking-wider text-[color:var(--orange)]">
-                      Section {currentIdx + 1} Core Synthesis
-                    </h4>
-                    <p className="text-[color:var(--cream)]/90">
-                      {getBookDomainContext(book, currentIdx).sectionSummary}
+                  <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                    <span className="font-mono text-xs font-bold text-[color:var(--orange)]">
+                      Page {currentSegment?.pageNumber || currentIdx + 1} Synthesis
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isSummaryLoading}
+                      onClick={() => loadDynamicSummary()}
+                      className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[10.5px] font-bold text-[color:var(--cream)] hover:bg-white/10 cursor-pointer disabled:opacity-40"
+                    >
+                      <RefreshCw className={cn("size-3", isSummaryLoading && "animate-spin text-[color:var(--orange)]")} />
+                      <span>{isSummaryLoading ? "Synthesizing..." : "Re-Synthesize"}</span>
+                    </button>
+                  </div>
+
+                  {/* Executive Summary */}
+                  <div className="rounded-[18px] border-2 border-[color:var(--ink)] bg-[#f6d7a1] p-4 text-xs leading-relaxed text-[color:var(--ink)] shadow-chip">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="rounded-full bg-[#ff4c00] text-[color:var(--ink)] px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider">
+                        Executive Overview
+                      </span>
+                      <span className="text-[10px] font-mono font-bold text-[color:var(--ink)]/60">Page {currentSegment?.pageNumber || currentIdx + 1}</span>
+                    </div>
+                    <p className="font-semibold text-[color:var(--ink)] leading-relaxed">
+                      {dynamicSummary?.executiveSummary ||
+                        (currentSegment?.content
+                          ? `${currentSegment.content.slice(0, 240)}...`
+                          : "Extracting core thesis for this page...")}
                     </p>
                   </div>
 
-                  {/* Clinical Mnemonics Card */}
-                  <div className="flex flex-col gap-2 rounded-[18px] border border-[#43a08f]/30 bg-black/40 p-4 text-xs">
-                    <div className="flex items-center gap-2 font-bold text-[#7fd8c9]">
-                      <BookmarkCheck className="size-4" />
-                      <span>Clinical Memory Anchors &amp; Mnemonics</span>
+                  {/* Key Takeaways */}
+                  {dynamicSummary?.keyTakeaways && dynamicSummary.keyTakeaways.length > 0 && (
+                    <div className="flex flex-col gap-2 rounded-[18px] border-2 border-[color:var(--ink)] bg-[#7fd8c9] p-4 text-xs text-[color:var(--ink)] shadow-chip">
+                      <span className="font-black text-[color:var(--ink)] text-[11px] uppercase tracking-wider">
+                        Core Principles &amp; Invariants
+                      </span>
+                      <ul className="flex flex-col gap-1.5 list-disc list-inside font-medium text-[color:var(--ink)]">
+                        {dynamicSummary.keyTakeaways.map((point: string, i: number) => (
+                          <li key={i} className="leading-relaxed">
+                            {point}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
-                    {activeMnemonics.map((mn, idx) => (
+                  )}
+
+                  {/* Pro Tips / Practical Insights */}
+                  {dynamicSummary?.proTips && dynamicSummary.proTips.length > 0 && (
+                    <div className="flex flex-col gap-2 rounded-[18px] border-2 border-[color:var(--ink)] bg-[#ff4c00] p-4 text-xs text-[color:var(--ink)] shadow-chip">
+                      <span className="font-black text-[11px] uppercase tracking-wider text-[color:var(--ink)]">
+                        Exam Tips &amp; High-Yield Pitfalls
+                      </span>
+                      {dynamicSummary.proTips.map((tip: string, i: number) => (
+                        <p key={i} className="leading-relaxed text-[11.5px] font-semibold">
+                          ✦ {tip}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Memory Anchors / Mnemonics */}
+                  <div className="flex flex-col gap-2.5 rounded-[18px] border-2 border-[color:var(--ink)] bg-[#f6d7a1] p-4 text-xs text-[color:var(--ink)] shadow-chip">
+                    <div className="flex items-center gap-2 font-black text-[color:var(--ink)] text-[11px] uppercase tracking-wider">
+                      <BookmarkCheck className="size-4 text-[#ff4c00]" />
+                      <span>Memory Anchors &amp; Mnemonics</span>
+                    </div>
+                    {(dynamicSummary?.mnemonics || activeMnemonics).map((mn: any, idx: number) => (
                       <div
                         key={idx}
-                        className="flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-2.5"
+                        className="flex flex-col gap-1 rounded-xl border-2 border-[color:var(--ink)] bg-white p-3 text-[color:var(--ink)] shadow-xs"
                       >
-                        <span className="font-bold text-[color:var(--orange)]">
-                          • {mn.mnemonic}: <span className="font-normal text-[color:var(--cream)]/80">{mn.expansion}</span>
+                        <span className="font-black text-[#ff4c00]">
+                          • {mn.mnemonic}: <span className="font-bold text-[color:var(--ink)]">{mn.expansion}</span>
                         </span>
-                        <span className="text-[10px] text-[color:var(--cream)]/65">{mn.rule}</span>
+                        <span className="text-[11px] font-medium text-[color:var(--ink)]/80">{mn.notes || mn.rule}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* TAB 6: REALISTIC EXAM-GRADE QBANK VIGNETTE */}
+              {/* TAB 5: DYNAMIC QBANK PRACTICE */}
               {activeIntent === "quiz" && (
-                <div className="flex animate-in fade-in flex-col gap-3.5 rounded-[18px] border border-white/10 bg-white/[0.04] p-4 shadow-xl duration-150">
+                <div className="flex animate-in fade-in flex-col gap-3.5 rounded-[18px] border-2 border-[color:var(--ink)] bg-[#f6d7a1] p-4 text-[color:var(--ink)] shadow-chip duration-150">
                   {/* QBank Header */}
-                  <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center justify-between text-xs border-b border-[color:var(--ink)]/20 pb-2.5">
                     <div className="flex items-center gap-2">
-                      <span className="flex items-center gap-1 font-bold text-[#7fd8c9]">
-                        <Award className="size-4" />
-                        {activeQBankQuestion.examType}
-                      </span>
-                      <span className="rounded-full bg-white/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[color:var(--cream)]/75">
-                        {activeQBankQuestion.sourceQBank}
+                      <span className="flex items-center gap-1 font-black text-[color:var(--ink)]">
+                        <Award className="size-4 text-[#ff4c00]" />
+                        <span>{dynamicQBankList[activeQBankIdx]?.examType || "Clinical / Academic QBank"}</span>
                       </span>
                     </div>
-                    <span className="rounded-full border border-[color:var(--orange)]/40 bg-[color:var(--orange)]/10 px-2 py-0.5 text-[10px] font-bold text-[color:var(--orange)]">
-                      Case {((activeQBankIdx % qbankList.length) + 1)} / {qbankList.length}
-                    </span>
-                  </div>
 
-                  {/* Vignette Presentation */}
-                  <div className="rounded-[14px] border border-white/10 bg-black/40 p-3.5">
-                    <p className="font-serif text-xs leading-relaxed text-[color:var(--cream)]">
-                      {activeQBankQuestion.vignette}
-                    </p>
-                  </div>
-
-                  {/* Multiple Choice Options */}
-                  <div className="flex flex-col gap-2">
-                    {activeQBankQuestion.options.map((option, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => !quizSubmitted && setQuizAnswer(idx)}
-                        className={cn(
-                          "flex cursor-pointer items-start gap-2 rounded-[14px] border p-2.5 text-left text-xs transition-all",
-                          quizAnswer === idx
-                            ? "border-[color:var(--orange)] bg-[color:var(--orange)]/15 text-[color:var(--cream)] font-semibold"
-                            : "border-white/10 bg-black/30 text-[color:var(--cream)]/75 hover:bg-white/5",
-                          quizSubmitted &&
-                            idx === activeQBankQuestion.correctIndex &&
-                            "border-[#43a08f] bg-[#43a08f]/20 text-[#7fd8c9] font-bold",
-                          quizSubmitted &&
-                            quizAnswer === idx &&
-                            idx !== activeQBankQuestion.correctIndex &&
-                            "border-[#ff4c00] bg-[#ff4c00]/20 text-[#ff6e33]",
-                        )}
-                      >
-                        <span className="shrink-0 font-mono font-bold text-[color:var(--cream)]/50">
-                          {String.fromCharCode(65 + idx)}.
-                        </span>
-                        <span>{option}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {!quizSubmitted ? (
                     <button
                       type="button"
-                      disabled={quizAnswer === null}
-                      onClick={() => setQuizSubmitted(true)}
-                      className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-2.5 text-xs font-bold text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 disabled:cursor-default disabled:opacity-40 disabled:hover:translate-y-0"
+                      disabled={isQBankLoading}
+                      onClick={() => loadDynamicQBank()}
+                      className="inline-flex items-center gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-2.5 py-1 text-[10.5px] font-bold text-[color:var(--ink)] shadow-xs hover:-translate-y-0.5 cursor-pointer disabled:opacity-40"
                     >
-                      Submit Answer &amp; Reveal Rationale
+                      <RefreshCw className={cn("size-3", isQBankLoading && "animate-spin text-[color:var(--ink)]")} />
+                      <span>{isQBankLoading ? "Generating..." : "New Questions"}</span>
                     </button>
-                  ) : (
-                    <div className="flex animate-in fade-in flex-col gap-3 rounded-[16px] border border-[#43a08f]/40 bg-black/70 p-4 text-xs">
-                      {/* Answer Banner */}
-                      <div className="flex items-center gap-2 font-bold text-[#7fd8c9]">
-                        {quizAnswer === activeQBankQuestion.correctIndex ? (
-                          <>
-                            <CheckCircle2 className="size-5 text-[#43a08f]" />
-                            <span>Correct! ({String.fromCharCode(65 + activeQBankQuestion.correctIndex)})</span>
-                          </>
-                        ) : (
-                          <>
-                            <XCircle className="size-5 text-[#ff4c00]" />
-                            <span className="text-[#ff6e33]">Incorrect. Correct choice is ({String.fromCharCode(65 + activeQBankQuestion.correctIndex)})</span>
-                          </>
-                        )}
+                  </div>
+
+                  {dynamicQBankList.length > 0 ? (
+                    <>
+                      <div className="flex items-center justify-between text-[11px] font-bold">
+                        <span className="text-[color:var(--ink)]/80">
+                          {dynamicQBankList[activeQBankIdx]?.topic || `Question on Page ${currentSegment?.pageNumber || currentIdx + 1}`}
+                        </span>
+                        <span className="rounded-full border-2 border-[color:var(--ink)] bg-[#ff4c00] px-2.5 py-0.5 text-[10px] font-black text-[color:var(--ink)] shadow-xs">
+                          Case {((activeQBankIdx % dynamicQBankList.length) + 1)} / {dynamicQBankList.length}
+                        </span>
                       </div>
 
-                      {/* Distractor Breakdown */}
-                      <div className="flex flex-col gap-1.5 border-t border-white/10 pt-2 text-[11px] leading-relaxed text-[color:var(--cream)]/85">
-                        <strong className="text-[color:var(--cream)]">Distractor Analysis &amp; Clinical Reasoning:</strong>
-                        {Object.entries(activeQBankQuestion.distractorRationales).map(([optIdx, rationale]) => (
-                          <div
-                            key={optIdx}
+                      {/* Vignette Presentation */}
+                      <div className="rounded-[14px] border-2 border-[color:var(--ink)] bg-white p-4 shadow-xs">
+                        <p className="font-serif text-xs leading-relaxed text-[color:var(--ink)] font-medium">
+                          {dynamicQBankList[activeQBankIdx]?.vignette}
+                        </p>
+                      </div>
+
+                      {/* Multiple Choice Options */}
+                      <div className="flex flex-col gap-2">
+                        {(dynamicQBankList[activeQBankIdx]?.options || []).map((option, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => !quizSubmitted && setQuizAnswer(idx)}
                             className={cn(
-                              "rounded-lg p-2 text-[10.5px]",
-                              Number(optIdx) === activeQBankQuestion.correctIndex
-                                ? "border border-[#43a08f]/40 bg-[#43a08f]/10 text-[#7fd8c9]"
-                                : "bg-white/[0.03] text-[color:var(--cream)]/70"
+                              "flex cursor-pointer items-start gap-2 rounded-[14px] border-2 border-[color:var(--ink)] p-3 text-left text-xs transition-all shadow-xs",
+                              quizAnswer === idx
+                                ? "bg-[#ff4c00] text-[color:var(--ink)] font-black"
+                                : "bg-white text-[color:var(--ink)] hover:bg-[#7fd8c9]/25",
+                              quizSubmitted &&
+                              idx === dynamicQBankList[activeQBankIdx]?.correctIndex &&
+                              "bg-[#7fd8c9] text-[color:var(--ink)] font-black ring-2 ring-[color:var(--ink)]",
+                              quizSubmitted &&
+                              quizAnswer === idx &&
+                              idx !== dynamicQBankList[activeQBankIdx]?.correctIndex &&
+                              "bg-[#ff6e33]/30 text-[color:var(--ink)]",
                             )}
                           >
-                            <span className="font-bold">({String.fromCharCode(65 + Number(optIdx))}): </span>
-                            <span>{rationale}</span>
-                          </div>
+                            <span className="shrink-0 font-mono font-black text-[color:var(--ink)]">
+                              {String.fromCharCode(65 + idx)}.
+                            </span>
+                            <span className="font-medium">{option}</span>
+                          </button>
                         ))}
                       </div>
 
-                      {/* High Yield Takeaway Box */}
-                      <div className="rounded-xl border border-[color:var(--orange)]/30 bg-[color:var(--orange)]/10 p-2.5 text-[11px] text-[color:var(--cream)]">
-                        <span className="font-bold text-[color:var(--orange)]">🎯 High-Yield Board Takeaway: </span>
-                        <span>{activeQBankQuestion.highYieldTakeaway}</span>
-                      </div>
+                      {!quizSubmitted ? (
+                        <button
+                          type="button"
+                          disabled={quizAnswer === null}
+                          onClick={() => setQuizSubmitted(true)}
+                          className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-2.5 text-xs font-black uppercase text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 disabled:cursor-default disabled:opacity-40 disabled:hover:translate-y-0"
+                        >
+                          Submit Answer &amp; Reveal Rationale
+                        </button>
+                      ) : (
+                        <div className="flex animate-in fade-in flex-col gap-3 rounded-[16px] border-2 border-[color:var(--ink)] bg-white p-4 text-xs text-[color:var(--ink)] shadow-chip">
+                          {/* Answer Banner */}
+                          <div className="flex items-center gap-2 font-black text-[color:var(--ink)] text-sm">
+                            {quizAnswer === dynamicQBankList[activeQBankIdx]?.correctIndex ? (
+                              <>
+                                <CheckCircle2 className="size-5 text-[#2e6f68]" />
+                                <span>Correct! ({String.fromCharCode(65 + dynamicQBankList[activeQBankIdx]?.correctIndex)})</span>
+                              </>
+                            ) : (
+                              <>
+                                <XCircle className="size-5 text-[#ff4c00]" />
+                                <span className="text-[#ff4c00]">Incorrect. Correct choice is ({String.fromCharCode(65 + dynamicQBankList[activeQBankIdx]?.correctIndex)})</span>
+                              </>
+                            )}
+                          </div>
 
-                      {/* Next Question Navigation */}
+                          {/* Distractor Breakdown */}
+                          {dynamicQBankList[activeQBankIdx]?.distractorRationales && (
+                            <div className="flex flex-col gap-1.5 border-t border-[color:var(--ink)]/20 pt-2 text-[11px] leading-relaxed text-[color:var(--ink)]">
+                              <strong className="text-[color:var(--ink)]">Distractor Analysis &amp; Clinical Reasoning:</strong>
+                              {Object.entries(dynamicQBankList[activeQBankIdx].distractorRationales).map(([optIdx, rationale]) => (
+                                <div
+                                  key={optIdx}
+                                  className={cn(
+                                    "rounded-lg p-2.5 text-[10.5px] border border-[color:var(--ink)]/20",
+                                    Number(optIdx) === dynamicQBankList[activeQBankIdx].correctIndex
+                                      ? "bg-[#7fd8c9] font-bold text-[color:var(--ink)]"
+                                      : "bg-[#f6d7a1]/40 text-[color:var(--ink)]/90"
+                                  )}
+                                >
+                                  <span className="font-black">({String.fromCharCode(65 + Number(optIdx))}): </span>
+                                  <span>{rationale}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* High Yield Takeaway Box */}
+                          <div className="rounded-xl border-2 border-[color:var(--ink)] bg-[#ff4c00] p-3 text-[11px] text-[color:var(--ink)] shadow-xs">
+                            <span className="font-black text-[color:var(--ink)]">🎯 High-Yield Exam Takeaway: </span>
+                            <span className="font-medium">{dynamicQBankList[activeQBankIdx]?.highYieldTakeaway}</span>
+                          </div>
+
+                          {/* Next Question Navigation */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQuizSubmitted(false);
+                              setQuizAnswer(null);
+                              setActiveQBankIdx((prev) => (prev + 1) % dynamicQBankList.length);
+                            }}
+                            className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-2 text-xs font-bold text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5"
+                          >
+                            <span>Next Question →</span>
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-2 py-8 text-center text-xs text-white/60">
+                      <HelpCircle className="size-8 text-[color:var(--orange)]/60" />
+                      <p>Generate board-grade questions grounded in Page {currentSegment?.pageNumber || currentIdx + 1}.</p>
                       <button
                         type="button"
-                        onClick={() => {
-                          setQuizSubmitted(false);
-                          setQuizAnswer(null);
-                          setActiveQBankIdx((prev) => prev + 1);
-                        }}
-                        className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-2 text-xs font-bold text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5"
+                        onClick={() => loadDynamicQBank()}
+                        className="mt-2 rounded-full bg-[color:var(--orange)] px-4 py-1.5 font-bold text-[color:var(--ink)] cursor-pointer"
                       >
-                        <span>Next QBank Question →</span>
+                        Generate Practice Questions
                       </button>
                     </div>
                   )}

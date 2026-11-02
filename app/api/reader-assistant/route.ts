@@ -13,11 +13,13 @@ export async function POST(request: Request) {
   const {
     bookId,
     bookTitle,
+    bookTopic,
     query,
     currentSegmentIndex = 0,
     currentPageNumber,
     currentSegmentContent = "",
     selectedText = "",
+    selectedImage = "",
     history = [],
   } = body || {};
 
@@ -39,10 +41,12 @@ export async function POST(request: Request) {
   const context = {
     bookId: String(bookId || ""),
     bookTitle: String(bookTitle || "Active Document"),
+    bookTopic: String(bookTopic || ""),
     currentSegmentIndex: Number(currentSegmentIndex) || 0,
     currentPageNumber: currentPageNumber ? Number(currentPageNumber) : undefined,
     currentSegmentContent: String(currentSegmentContent || ""),
     selectedText: String(selectedText || ""),
+    selectedImage: typeof selectedImage === "string" && selectedImage ? selectedImage : undefined,
     history: historyArray,
   };
 

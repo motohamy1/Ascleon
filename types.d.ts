@@ -5,6 +5,7 @@ import { LucideIcon } from "lucide-react";
 import z from "zod";
 import { UploadSchema } from "@/lib/zod";
 import { PlanType } from "@/lib/subscription-constants";
+import { VoiceLanguage } from "@/lib/constants";
 
 // ============================================
 // DATABASE MODELS
@@ -25,6 +26,16 @@ export interface IBook extends Document {
   coverBlobKey?: string;
   fileSize: number;
   totalSegments: number;
+  totalPages?: number;
+  blueprint?: {
+    domain?: string;
+    subspecialty?: string;
+    authoritativeReferences?: string[];
+    initialQBank?: any[];
+    initialMnemonics?: any[];
+    chapterMap?: any[];
+    [key: string]: any;
+  };
   topic?: string;
   readingStatus?: ReadingStatus;
   readingTimeMinutes?: number;
@@ -32,6 +43,7 @@ export interface IBook extends Document {
   isFavorite?: boolean;
   year?: number;
   summary?: string;
+  language?: VoiceLanguage;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -87,6 +99,9 @@ export interface CreateBook {
   coverURL?: string;
   coverBlobKey?: string;
   fileSize: number;
+  totalSegments?: number;
+  totalPages?: number;
+  blueprint?: any;
   topic?: string;
   readingTimeMinutes?: number;
   color?: string;

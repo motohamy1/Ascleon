@@ -19,10 +19,12 @@ export interface AgentMessage {
 export interface AgentContext {
   bookId: string;
   bookTitle: string;
+  bookTopic?: string;
   currentSegmentIndex: number;
   currentPageNumber?: number;
   currentSegmentContent: string;
   selectedText?: string;
+  selectedImage?: string;
   history?: { sender: "user" | "ai"; text: string }[];
 }
 

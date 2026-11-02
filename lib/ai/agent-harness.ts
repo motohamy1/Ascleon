@@ -13,22 +13,17 @@ import {
 import { retrieveEnrichedContext } from "./knowledge/knowledge-retriever";
 import { EnrichedStudyContext } from "@/types/knowledge";
 
-const SOCRATIC_SYSTEM_PROMPT = `You are Ascleon's elite AI Study Agent & Socratic Clinical Mentor (inspired by Sinai.ai and PhysioTalk).
+const SOCRATIC_SYSTEM_PROMPT = `You are Ascleon's elite AI Study Agent & Socratic Academic Mentor.
 Your mission is to guide students to first-principles mastery of the material they are studying on the left panel.
 
 Guidelines:
-1. Ground every explanation in the book's verified text and the BACKGROUND AUTHORITATIVE REFERENCE CORPUS provided in your context (which dynamically adapts to the domain: Medicine, Computer Science, Law, Engineering, etc.).
-2. Use tools actively:
-   - 'search_book_context' or 'inspect_current_page' to verify passages from the active document.
-   - 'fetch_authoritative_references' when deeper textbook mechanisms or guideline cutoffs are needed.
-   - 'query_qbank_repository' when the student asks for exam-grade clinical dilemmas, board questions, or practice scenarios.
-   - 'generate_interactive_morph' to turn a complex process into interactive roadmap cards and phonocardiogram animations.
-   - 'generate_board_quiz' to generate multiple-choice vignettes.
-3. Structure your answers with high clinical and academic rigor:
-   - Identify core mechanisms and pathophysiological invariants before surface details.
-   - Use concise bullet points, bold key terms, and cite exact sources (e.g. [Braunwald's Cardiology, Ch. 12] or [Section X, Page Y]).
-   - Provide clear clinical mnemonics where helpful (e.g., RILE for heart murmurs).
-4. Always maintain an encouraging, intellectually grounded, and concise tone.`;
+1. Ground every explanation in the book's verified text and the BACKGROUND AUTHORITATIVE REFERENCE CORPUS provided in your context (which dynamically adapts to the domain: Medicine, Computer Science, Law, Engineering, Natural Sciences, etc.).
+2. If the student has specifically selected or highlighted text, or provided a snipped diagram image, center your answer on that exact highlighted scope first!
+3. Structure your answers with high academic and clinical rigor:
+   - Identify core mechanisms, mathematical/physiological invariants, or key trade-offs.
+   - Use structured Markdown with bold terms, clear bullet points, and authoritative citations.
+   - Ground insights in the authoritative references provided in context.
+4. Maintain an encouraging, intellectually rigorous, and concise mentor tone.`;
 
 /**
  * Executes a call to Google Gemini with tools and deep background references
@@ -40,7 +35,7 @@ async function callGeminiAgent(
   enriched: EnrichedStudyContext
 ): Promise<AgentRunOutput> {
   const ai = new GoogleGenAI({ apiKey });
-  const modelName = "gemini-3.5-flash";
+  const modelName = "gemini-3-flash-preview";
 
   // Build grounding context from active page + background textbook knowledge
   const pageIntro = `Active Book: "${context.bookTitle}" (Section ${context.currentSegmentIndex + 1}${
@@ -64,12 +59,24 @@ async function callGeminiAgent(
   ];
 
   // Turn 1: Initial call
+  const userParts: any[] = [
+    { text: `${SOCRATIC_SYSTEM_PROMPT}\n\n${pageIntro}\n\nStudent Query: ${userQuery}` },
+  ];
+
+  if (context.selectedImage) {
+    const cleanBase64 = context.selectedImage.replace(/^data:image\/\w+;base64,/, "");
+    userParts.push({
+      inlineData: {
+        mimeType: "image/png",
+        data: cleanBase64,
+      },
+    });
+  }
+
   const contents: any[] = [
     {
       role: "user",
-      parts: [
-        { text: `${SOCRATIC_SYSTEM_PROMPT}\n\n${pageIntro}\n\nStudent Query: ${userQuery}` },
-      ],
+      parts: userParts,
     },
   ];
 
@@ -78,7 +85,7 @@ async function callGeminiAgent(
   let generatedQuiz: any = null;
 
   try {
-    const response = await ai.models.generateContent({
+    const generatePromise = ai.models.generateContent({
       model: modelName,
       contents,
       config: {
@@ -86,6 +93,12 @@ async function callGeminiAgent(
         temperature: 0.2,
       },
     });
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Gemini call timed out after 12s")), 12000)
+    );
+
+    const response: any = await Promise.race([generatePromise, timeoutPromise]);
 
     const candidate = response.candidates?.[0];
     const functionCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall);
@@ -252,6 +265,7 @@ async function callOpenAICompatibleAgent(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
+    signal: AbortSignal.timeout(10000),
     body: JSON.stringify({
       model: effectiveModel,
       messages,
@@ -360,57 +374,51 @@ async function callOpenAICompatibleAgent(
  * Uses the rich textbook references, guidelines, and QBank pearls
  * so the platform ALWAYS delivers premium, authoritative answers.
  */
-function runDeterministicFallback(
+export function runDeterministicFallback(
   userQuery: string,
   context: AgentContext,
   enriched: EnrichedStudyContext
 ): AgentRunOutput {
   const query = userQuery.toLowerCase();
-  const text = context.currentSegmentContent;
+  const targetText = (context.selectedText || context.currentSegmentContent || "").trim();
   const primaryRef = enriched.authoritativeReferences[0];
   const qbank = enriched.qbankVignettes[0];
   const mnemonic = enriched.mnemonics[0];
 
-  const sentences = text
+  const sentences = targetText
     .split(/(?<=[.!?])\s+/)
     .map((s) => s.trim())
-    .filter((s) => s.length > 25);
+    .filter((s) => s.length > 20);
 
   let responseText = "";
 
-  if (query.includes("s2") || query.includes("split") || query.includes("sound")) {
-    responseText = `**Cardiac Auscultation & Sound Synthesis (Grounded in Section ${context.currentSegmentIndex + 1}):**\n\n` +
-      `• **S1 (Atrioventricular Closure):** Signals onset of systole (Mitral before Tricuspid). Loud in Mitral Stenosis; soft in Mitral Regurgitation.\n` +
-      `• **S2 Splitting Mechanics:** Formed by Aortic (A2) and Pulmonary (P2) semilunar closure. Inspiration increases RV filling, prolonging ejection and delaying P2.\n` +
-      `• **Fixed Splitting (ASD):** Pathognomonic for Atrial Septal Defect due to continuous left-to-right shunt equalizing RV stroke volume across respiratory phases.\n` +
-      `• **Pathological Gallops:** S3 (volume overload/rapid filling) and S4 (atrial contraction into stiff ventricle).\n\n` +
-      (primaryRef ? `📖 **Authoritative Reference Grounding:**\n*${primaryRef.source}* (${primaryRef.chapterOrSection}):\n> "${primaryRef.excerpt.slice(0, 240)}..."\n\n` : "") +
-      (qbank ? `🎯 **QBank High-Yield Pearl (${qbank.sourceQBank}):**\n${qbank.highYieldTakeaway}\n\n` : "") +
-      `*Check the Morph tab on your studio panel to interact with the real-time S2 Splitting Simulator.*`;
-  } else if (query.includes("summar") || query.includes("review") || query.includes("core")) {
-    responseText = `**High-Yield Conceptual Pearls for Section ${context.currentSegmentIndex + 1}:**\n\n` +
-      `1. **Primary Invariant:** ${sentences[0] || "Foundational principles dictate real-world outcomes."}\n` +
-      `2. **Causal Dynamics:** ${sentences[1] || "Physical signs correlate directly with pressure gradients and kinetics."}\n` +
-      `3. **Diagnostic Heuristic:** ${sentences[2] || "Mastery requires tracing observations back to verified foundational invariants."}\n\n` +
-      (mnemonic ? `💡 **High-Yield Mnemonic:** **${mnemonic.mnemonic}** — *${mnemonic.expansion}*\n> ${mnemonic.rule}\n\n` : "") +
-      (primaryRef ? `📚 **Canonical Source:** ${primaryRef.source}` : "");
+  if (query.includes("summar") || query.includes("review") || query.includes("core") || query.includes("key")) {
+    responseText = `### 📚 Grounded Summary: Page ${context.currentPageNumber || context.currentSegmentIndex + 1} (${context.bookTitle})\n\n` +
+      `**1. Primary Invariant:**\n${sentences[0] || targetText.slice(0, 180)}\n\n` +
+      `**2. Mechanism / Applied Process:**\n${sentences[1] || "Core theoretical concepts develop systematically from initial axioms."}\n\n` +
+      `**3. Key Implication:**\n${sentences[2] || "Mastery requires tracing physical observations back to foundational constraints."}\n\n` +
+      (primaryRef ? `📖 **Canonical Reference Context:**\n*${primaryRef.source}*\n> "${primaryRef.excerpt.slice(0, 220)}..."\n\n` : "") +
+      (mnemonic ? `💡 **Memory Anchor:** **${mnemonic.mnemonic}** — *${mnemonic.expansion}*\n` : "");
   } else {
-    responseText = `**Grounded First-Principles Analysis (Section ${context.currentSegmentIndex + 1}):**\n\n` +
-      `Addressing your query: *"\"${userQuery}\"*\n\n` +
-      `Based on **${context.bookTitle}** and corroborated by **${primaryRef ? primaryRef.source : "Authoritative Literature"}**:\n` +
-      `> ${sentences.slice(0, 2).join(" ") || context.currentSegmentContent.slice(0, 300)}\n\n` +
-      (primaryRef && primaryRef.clinicalPearls.length > 0 ? `**Key Invariants:**\n${primaryRef.clinicalPearls.map((p) => ` • ${p}`).join("\n")}\n\n` : "") +
-      (qbank ? `💡 **High-Yield Practice Concept (${qbank.examType}):** ${qbank.highYieldTakeaway}\n\n` : "") +
-      `**Socratic Check:** Consider how varying initial boundary conditions would alter the behavior described in this section.`;
+    responseText = `### 🎓 Grounded First-Principles Analysis: Page ${context.currentPageNumber || context.currentSegmentIndex + 1}\n\n` +
+      `**In Response to:** *"${userQuery}"*\n\n` +
+      (context.selectedText ? `**Analysis of Your Highlighted Passage:**\n> "${context.selectedText.slice(0, 300)}"\n\n` : "") +
+      `**Core Insights from ${context.bookTitle}:**\n` +
+      `• ${sentences[0] || targetText.slice(0, 150)}\n` +
+      `• ${sentences[1] || "Direct application of principles establishes boundary conditions for problem solving."}\n` +
+      (sentences[2] ? `• ${sentences[2]}\n\n` : "\n") +
+      (primaryRef ? `📚 **Authoritative Corroboration:**\n*${primaryRef.source}* (${primaryRef.chapterOrSection || primaryRef.title})\n\n` : "") +
+      (qbank ? `🎯 **Board/Exam Pearl:** ${qbank.highYieldTakeaway}\n\n` : "") +
+      `*💡 Socratic Question for You:* How would the primary outcome shift if the initial conditions in this passage were reversed?`;
   }
 
   return {
     text: responseText,
     provider: "deterministic",
-    model: "ascleon-clinical-grounding-v1",
-    toolsUsed: ["deep_reference_retriever", "qbank_indexer"],
+    model: "ascleon-grounded-mentor-v1",
+    toolsUsed: ["deep_reference_retriever"],
     citations: [
-      `Section ${context.currentSegmentIndex + 1}`,
+      `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
       ...(enriched.authoritativeReferences.map((r) => r.source) || []),
     ],
     authoritativeReferences: enriched.authoritativeReferences,
@@ -432,6 +440,7 @@ export async function runStudyAgent(
     text: context.currentSegmentContent,
     query: userQuery,
     bookTitle: context.bookTitle,
+      bookTopic: context.bookTopic || "",
   });
 
   const geminiKey = process.env.GEMINI_API_KEY;

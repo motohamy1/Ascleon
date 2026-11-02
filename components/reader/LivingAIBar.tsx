@@ -17,8 +17,9 @@ import { cn } from "@/lib/utils";
 interface LivingAIBarProps {
   bookId: string;
   bookTitle: string;
+  bookTopic?: string;
   currentSegmentContent: string;
-  onOpenVoiceMode?: () => void;
+    onOpenVoiceMode?: () => void;
 }
 
 interface Message {
@@ -30,7 +31,8 @@ interface Message {
 export default function LivingAIBar({
   bookId,
   bookTitle,
-  currentSegmentContent,
+  bookTopic,
+    currentSegmentContent,
 }: LivingAIBarProps) {
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
@@ -53,6 +55,7 @@ export default function LivingAIBar({
         body: JSON.stringify({
           bookId,
           bookTitle,
+          bookTopic,
           query: q,
           currentSegmentContent,
         }),
@@ -105,7 +108,7 @@ export default function LivingAIBar({
             <div className="flex items-center justify-between pb-2 border-b border-white/10">
               <div className="flex items-center gap-2 text-xs font-semibold tracking-wide uppercase text-amber-300/90">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Living Reader Companion • Sinai & Gloss AI</span>
+                <span>Living Reader Companion • Ascleon AI</span>
               </div>
               <div className="flex items-center gap-2">
                 {messages.length > 0 && (

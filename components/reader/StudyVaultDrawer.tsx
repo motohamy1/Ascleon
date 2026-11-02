@@ -155,12 +155,18 @@ export function StudyVaultDrawer({
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wider",
-                      pin.type === "full-page-scan"
+                      pin.type === "diagram-snip"
+                        ? "bg-[color:var(--magenta)]/25 text-[#ff80bf] border border-[color:var(--magenta)]/40"
+                        : pin.type === "full-page-scan"
                         ? "bg-[#43a08f]/20 text-[#7fd8c9]"
                         : "bg-[color:var(--orange)]/20 text-[color:var(--orange)]"
                     )}
                   >
-                    {pin.type === "full-page-scan" ? "Full Page Scan" : "Selected Clip"}
+                    {pin.type === "diagram-snip"
+                      ? "Diagram Snip"
+                      : pin.type === "full-page-scan"
+                      ? "Full Page Scan"
+                      : "Selected Clip"}
                   </span>
                   <button
                     type="button"
@@ -195,6 +201,17 @@ export function StudyVaultDrawer({
                   </button>
                 </div>
               </div>
+
+              {/* Snipped Image / Diagram Preview */}
+              {pin.imageUrl && (
+                <div className="relative overflow-hidden rounded-xl border border-white/20 bg-black/60 my-1 max-h-56">
+                  <img
+                    src={pin.imageUrl}
+                    alt="Captured Study Diagram"
+                    className="w-full h-auto object-contain max-h-56 rounded-lg"
+                  />
+                </div>
+              )}
 
               {/* Excerpt Text */}
               <p className="line-clamp-4 font-serif text-[11.5px] leading-relaxed text-[color:var(--cream)]/90 italic border-l-2 border-[color:var(--orange)] pl-2.5">

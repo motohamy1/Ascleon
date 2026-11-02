@@ -3,14 +3,20 @@
 import { Mic, MicOff } from "lucide-react";
 import useVapi from "@/hooks/useVapi";
 import { IBook } from "@/types";
+import { VoiceLanguage } from "@/lib/constants";
 import Image from "next/image";
 import Transcript from "@/components/Transcript";
 import { toast } from "sonner";
 
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { DEFAULT_VOICE_LANGUAGE } from "@/lib/constants";
+import { LanguageSelector } from "@/components/LanguageSelector";
 
 const VapiControls = ({ book }: { book: IBook }) => {
+  const [language, setLanguage] = useState<VoiceLanguage>(
+    (book.language as VoiceLanguage) || DEFAULT_VOICE_LANGUAGE,
+  );
   const {
     status,
     isActive,
@@ -24,7 +30,7 @@ const VapiControls = ({ book }: { book: IBook }) => {
     limitError,
     isBillingError,
     maxDurationSeconds,
-  } = useVapi(book);
+  } = useVapi(book, undefined, language);
   const router = useRouter();
 
   useEffect(() => {
@@ -120,6 +126,14 @@ const VapiControls = ({ book }: { book: IBook }) => {
                   {formatDuration(maxDurationSeconds)}
                 </span>
               </div>
+            </div>
+
+              <div className="mt-2 max-w-xs">
+              <LanguageSelector
+                value={language}
+                onChange={setLanguage}
+                disabled={isActive}
+              />
             </div>
           </div>
         </div>

@@ -19,8 +19,9 @@ export interface ScannedPinItem {
   sectionIndex: number;
   pageNumber: number;
   text: string;
-  type: "selection" | "full-page-scan";
+  type: "selection" | "full-page-scan" | "diagram-snip";
   extractedPearls?: string[];
+  imageUrl?: string;
   timestamp: string;
 }
 
@@ -109,7 +110,7 @@ export function SourceSelectionToolbar({
           <span>Explain</span>
         </button>
 
-        {/* 3. Sinai Oral Viva */}
+        {/* 3. Ascleon Oral Viva */}
         <button
           type="button"
           onClick={onVoiceViva}

@@ -68,6 +68,19 @@ export interface ComparisonColumn {
   visualSnippet?: string;
 }
 
+export interface MindMapNode {
+  id: string;
+  label: string;
+  sublabel?: string;
+  category: "root" | "pillar" | "mechanism" | "clinical" | "diagnostic";
+  color?: string;
+  details: string;
+  parent?: string;
+  level: number; // 0 = root, 1 = branch/pillar, 2 = leaf
+  x?: number;
+  y?: number;
+}
+
 export interface MorphBlock {
   id: string;
   type: MorphBlockType;
@@ -87,6 +100,11 @@ export interface MorphBlock {
     color: string;
     detail: string;
   }[];
+  mindMapData?: {
+    rootLabel: string;
+    nodes: MindMapNode[];
+    edges?: { from: string; to: string; label?: string }[];
+  };
   spatialLandmarks?: SpatialLandmark[];
   diagramData?: {
     nodes: DiagramNode[];

@@ -43,6 +43,12 @@ const Navbar = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Collapse marketing navbar inside the dedicated Study Space to maximize vertical viewing canvas
+  const isStudySpace = pathname?.startsWith('/books/') || pathname === '/space/active';
+  if (isStudySpace) {
+    return null;
+  }
+
   // Auth-gated tabs open the Clerk sign-in modal for guests; public tabs navigate
   const guardClick = (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
     if (!isLoaded) {

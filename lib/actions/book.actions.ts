@@ -144,7 +144,9 @@ export const createBook = async (data: CreateBook) => {
       ...data,
       clerkId: userId,
       slug,
-      totalSegments: 0,
+      totalSegments: data.totalSegments || 0,
+      totalPages: data.totalPages || data.totalSegments || 0,
+      blueprint: data.blueprint || {},
     });
 
     return {
@@ -188,38 +190,60 @@ export const saveBookSegments = async (
   bookId: string,
   clerkId: string,
   segments: TextSegment[],
+  options?: { isAppend?: boolean; totalExpectedSegments?: number },
 ) => {
   try {
     await connectToDatabase();
 
-    console.log("Saving book segments...");
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      return { success: false, error: "Invalid bookId provided" };
+    }
+
+    const bookObjectId = new mongoose.Types.ObjectId(bookId);
+
+    // If starting fresh (not an append chunk), clear any previous/stale segments for this book
+    if (!options?.isAppend) {
+      await BookSegment.deleteMany({ bookId: bookObjectId });
+    }
 
     const segmentsToInsert = segments.map(
       ({ text, segmentIndex, pageNumber, wordCount }) => ({
         clerkId,
-        bookId,
+        bookId: bookObjectId,
         content: text,
         segmentIndex,
         pageNumber,
-        wordCount,
+        wordCount: wordCount || 500,
       }),
     );
 
-    await BookSegment.insertMany(segmentsToInsert);
+    // Insert in batches of 100 to ensure fast and resilient ingestion in MongoDB
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < segmentsToInsert.length; i += BATCH_SIZE) {
+      const batch = segmentsToInsert.slice(i, i + BATCH_SIZE);
+      await BookSegment.insertMany(batch, { ordered: false });
+    }
 
-    const totalWords = segments.reduce((sum, s) => sum + (s.wordCount || 0), 0);
-    const estimatedMinutes = Math.max(5, Math.round(totalWords / 200));
+    // Determine current total saved segments
+    const currentTotalSegments = await BookSegment.countDocuments({
+      bookId: bookObjectId,
+    });
+
+    const totalSegments = options?.totalExpectedSegments || currentTotalSegments;
+    const estimatedMinutes = Math.max(5, Math.round((totalSegments * 450) / 200));
 
     await Book.findByIdAndUpdate(bookId, {
-      totalSegments: segments.length,
+      totalSegments,
+      totalPages: totalSegments,
       readingTimeMinutes: estimatedMinutes,
     });
 
-    console.log("Book segments saved successfully.");
-
     return {
       success: true,
-      data: { segmentsCreated: segments.length },
+      data: {
+        segmentsCreated: segments.length,
+        totalSegments: currentTotalSegments,
+      },
     };
   } catch (e) {
     console.error("Error saving book segments", e);

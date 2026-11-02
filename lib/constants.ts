@@ -180,6 +180,20 @@ export const voiceCategories = {
 // Default voice
 export const DEFAULT_VOICE = 'rachel';
 
+// Multilingual voice languages (Ascleon: read/listen/chat in dozens of languages)
+export const voiceLanguages = {
+  en: { code: 'en', label: 'English', nativeLabel: 'English' },
+  ar: { code: 'ar', label: 'Arabic', nativeLabel: 'العربية' },
+  es: { code: 'es', label: 'Spanish', nativeLabel: 'Español' },
+  de: { code: 'de', label: 'German', nativeLabel: 'Deutsch' },
+  fr: { code: 'fr', label: 'French', nativeLabel: 'Français' },
+  zh: { code: 'zh', label: 'Chinese', nativeLabel: '中文' },
+} as const;
+
+export type VoiceLanguage = (typeof voiceLanguages)[keyof typeof voiceLanguages];
+
+export const DEFAULT_VOICE_LANGUAGE: VoiceLanguage = voiceLanguages.en;
+
 // ElevenLabs voice settings optimized for conversational AI
 export const VOICE_SETTINGS = {
     stability: 0.45, // Lower for more emotional, dynamic delivery (0.30-0.50 is natural)
