@@ -15,6 +15,7 @@ import {
   ScannedPinItem,
 } from "@/components/reader/SourceSelectionToolbar";
 import OriginalPdfViewer from "./OriginalPdfViewer";
+import RichStudyMessage from "./RichStudyMessage";
 import { AscleonLogo } from "@/components/ui/AscleonLogo";
 import Link from "next/link";
 import {
@@ -545,6 +546,13 @@ export default function LivingReader({
 
     setIsAiLoading(true);
     try {
+      const activePageNum = book.fileURL
+        ? activePdfPage
+        : (currentSegment?.pageNumber || currentIdx + 1);
+      const activeContent = (book.fileURL && activePageLiveText)
+        ? activePageLiveText
+        : (currentSegment?.content || "");
+
       const res = await fetch("/api/reader-assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -554,8 +562,8 @@ export default function LivingReader({
           bookTitle: book.title,
           bookTopic: book.topic || "",
           currentSegmentIndex: currentIdx,
-          currentPageNumber: currentSegment?.pageNumber || currentIdx + 1,
-          currentSegmentContent: currentSegment?.content || "",
+          currentPageNumber: activePageNum,
+          currentSegmentContent: activeContent,
           selectedText: contextSelection || selectedText || undefined,
           selectedImage: imagePayload || snippedDiagram?.url || undefined,
           history: historyPayload,
@@ -1689,12 +1697,13 @@ export default function LivingReader({
                       >
                         {m.sender === "ai" && (
                           <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-[color:var(--ink)]/20 text-[10.5px]">
-                            <span className="flex items-center gap-1 font-black text-[color:var(--ink)]">
-                              <span className="rounded-full bg-[#ff4c00] text-[color:var(--ink)] px-2 py-0.5 text-[9.5px] font-black uppercase">
+                            <span className="flex items-center gap-1.5 font-black text-[color:var(--ink)]">
+                              <span className="rounded-full bg-[#ff4c00] text-[color:var(--ink)] px-2.5 py-0.5 text-[9.5px] font-black uppercase tracking-wider shadow-sm">
                                 Ascleon AI
                               </span>
-                              {m.provider ? `⚡ ${m.provider.toUpperCase()}` : "⚡ Grounded Mentor"}
-                              {m.model ? ` (${m.model})` : ""}
+                              <span className="text-[10px] font-bold text-[color:var(--ink)]/80">
+                                Grounded Study Mentor
+                              </span>
                             </span>
                             <span className="font-mono font-bold text-[color:var(--ink)]/60">{m.time}</span>
                           </div>
@@ -1708,7 +1717,11 @@ export default function LivingReader({
                             />
                           </div>
                         )}
-                        <p className="whitespace-pre-line font-medium text-[color:var(--ink)]">{m.text}</p>
+                        {m.sender === "ai" ? (
+                          <RichStudyMessage content={m.text} />
+                        ) : (
+                          <p className="whitespace-pre-line font-bold text-[color:var(--ink)]">{m.text}</p>
+                        )}
 
                         {/* Transparency Pills: Tools Used & Citations */}
                         {m.toolsUsed && m.toolsUsed.length > 0 && (

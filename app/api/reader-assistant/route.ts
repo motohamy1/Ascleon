@@ -56,8 +56,6 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       answer: output.text,
-      provider: output.provider,
-      model: output.model,
       toolsUsed: output.toolsUsed,
       citations: output.citations,
       generatedMorph: output.generatedMorph,

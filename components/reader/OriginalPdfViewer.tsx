@@ -108,14 +108,18 @@ const PdfPageItem = React.memo(function PdfPageItem({
         const entry = entries[0];
         if (entry) {
           onVisibleChange(pageNum, entry.isIntersecting, entry.intersectionRatio);
-          if (entry.isIntersecting) {
-            setShouldRender(true);
+          setShouldRender(entry.isIntersecting);
+          if (!entry.isIntersecting && canvasRef.current) {
+            // Free canvas GPU memory when scrolled far away to prevent browser black screens
+            canvasRef.current.width = 0;
+            canvasRef.current.height = 0;
+            setIsRendered(false);
           }
         }
       },
       {
         root: null,
-        rootMargin: "1000px 0px 1000px 0px",
+        rootMargin: "1200px 0px 1200px 0px",
         threshold: [0, 0.2, 0.4, 0.6, 0.8, 1.0],
       }
     );

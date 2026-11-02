@@ -75,9 +75,9 @@ async function callGeminiAgent(
     },
   ] : undefined;
 
-  // Turn 1: Initial call
+  // Turn 1: Initial call with prompt injected as system instruction
   const userParts: any[] = [
-    { text: `${SOCRATIC_SYSTEM_PROMPT}\n\n${pageIntro}\n\nStudent Query: ${userQuery}` },
+    { text: `${pageIntro}\n\nStudent Question / Query:\n${userQuery}` },
   ];
 
   if (context.selectedImage) {
@@ -113,6 +113,7 @@ async function callGeminiAgent(
       model: modelName,
       contents,
       config: {
+        systemInstruction: SOCRATIC_SYSTEM_PROMPT,
         tools: toolsDeclaration as any,
         temperature: 0.2,
         thinkingConfig: {

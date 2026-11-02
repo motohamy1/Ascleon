@@ -153,7 +153,7 @@ export default function DirectBookUpload({
         setProgress(45);
         setStatusText("Digesting study source & uploading to secure cloud...");
 
-        // Task A: PDF Cloud Upload
+        // Task A: PDF Cloud Upload with 45-second timeout guard
         const uploadPdfTask = async () => {
           if (cp.uploadedPdfUrl && cp.uploadedPdfKey) {
             return { url: cp.uploadedPdfUrl, key: cp.uploadedPdfKey };
@@ -169,13 +169,19 @@ export default function DirectBookUpload({
                   file.type || "application/pdf"
                 );
                 if (presigned.success && presigned.data) {
+                  const controller = new AbortController();
+                  const timeoutId = setTimeout(() => controller.abort(), 45000);
+
                   const r2Res = await fetch(presigned.data.uploadUrl, {
                     method: "PUT",
                     body: file,
                     headers: {
                       "Content-Type": file.type || "application/pdf",
                     },
+                    signal: controller.signal,
                   });
+                  clearTimeout(timeoutId);
+
                   if (r2Res.ok) {
                     url = presigned.data.publicUrl;
                     key = presigned.data.key;
@@ -201,65 +207,61 @@ export default function DirectBookUpload({
               return { url, key };
             },
             {
-              retries: 3,
+              retries: 2,
               delayMs: 1200,
               onRetry: (_err, attempt) => {
-                setStatusText(`Network blip, retrying cloud upload (attempt ${attempt}/3)...`);
+                setStatusText(`Retrying cloud upload (attempt ${attempt}/2)...`);
               },
             }
           );
         };
 
-        // Task B: Cover Upload
+        // Task B: Cover Upload (completely non-blocking, times out after 10s)
         const uploadCoverTask = async () => {
           if (cp.coverUrl) {
             return { url: cp.coverUrl, key: cp.coverBlobKey || "" };
           }
 
-          let url = "https://covers.openlibrary.org/b/isbn/9780132350884-L.jpg";
-          let key = "";
+          const defaultCover = "https://covers.openlibrary.org/b/isbn/9780132350884-L.jpg";
 
-          if (parsedPDF!.cover && parsedPDF!.cover.startsWith("data:image")) {
-            try {
-              const coverRes = await saveCoverImageAction(
-                parsedPDF!.cover,
-                `${file.name}_cover.webp`
-              );
-              if (coverRes.success && coverRes.data) {
-                url = coverRes.data.url;
-                key = coverRes.data.key;
-              }
-            } catch (coverErr) {
-              console.warn("Cloudinary cover upload fallback:", coverErr);
-              try {
-                const res = await fetch(parsedPDF!.cover);
-                const blob = await res.blob();
-                const fileSlug = file.name.replace(/\s+/g, "-").toLowerCase();
-                const uploadedCover = await upload(`${fileSlug}_cover.webp`, blob, {
-                  access: "public",
-                  handleUploadUrl: "/api/upload",
-                  contentType: "image/webp",
-                });
-                url = uploadedCover.url;
-                key = uploadedCover.pathname;
-              } catch (fallbackCoverErr) {
-                console.warn("Cover fallback failed:", fallbackCoverErr);
-              }
-            }
+          if (!parsedPDF!.cover || !parsedPDF!.cover.startsWith("data:image")) {
+            return { url: defaultCover, key: "" };
           }
 
-          cp.coverUrl = url;
-          cp.coverBlobKey = key;
-          return { url, key };
+          try {
+            const coverPromise = saveCoverImageAction(
+              parsedPDF!.cover,
+              `${file.name}_cover.webp`
+            );
+            const timeoutPromise = new Promise<{ success: boolean; data?: any }>((resolve) =>
+              setTimeout(() => resolve({ success: false }), 10000)
+            );
+
+            const coverRes = await Promise.race([coverPromise, timeoutPromise]);
+            if (coverRes.success && coverRes.data) {
+              cp.coverUrl = coverRes.data.url;
+              cp.coverBlobKey = coverRes.data.key;
+              return { url: coverRes.data.url, key: coverRes.data.key };
+            }
+          } catch (coverErr) {
+            console.warn("Cover image upload non-fatal warning:", coverErr);
+          }
+
+          cp.coverUrl = defaultCover;
+          cp.coverBlobKey = "";
+          return { url: defaultCover, key: "" };
         };
 
-        // Task C: AI Deep Source Digestion
+        // Task C: AI Deep Source Digestion (times out after 15s to never stall the upload)
         const digestTask = async () => {
           if (cp.blueprint) {
             return cp.blueprint;
           }
 
           try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
             const digestRes = await fetch("/api/books/digest", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -269,7 +271,9 @@ export default function DirectBookUpload({
                 totalPages: parsedPDF!.numPages,
                 textPreview: parsedPDF!.textPreview,
               }),
+              signal: controller.signal,
             });
+            clearTimeout(timeoutId);
 
             if (digestRes.ok) {
               const data = await digestRes.json();

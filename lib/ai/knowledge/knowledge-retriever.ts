@@ -243,11 +243,8 @@ else if (
         if (rile) matchingMnemonics.push(rile);
         if (handgrip) matchingMnemonics.push(handgrip);
       } else {
-        focalTopic = "Clinical Cardiology & Bedside Hemodynamics";
-        matchingRefs.push(
-          CLINICAL_AUTHORITATIVE_REFERENCES[0],
-          CLINICAL_AUTHORITATIVE_REFERENCES[2]
-        );
+        focalTopic = "Clinical Medicine & Bedside Foundations";
+        // Do not inject random heart sound / S2 splitting distractors if the active topic is different
       }
 
       // Add matching QBank vignette
