@@ -102,10 +102,10 @@ const Welcome = () => {
           </div>
 
           {/* Chrome cluster — decorative, sits on the card surface */}
-          <div className="pointer-events-none absolute hidden items-end gap-3 sm:flex sm:-bottom-10 sm:-right-8">
-            <div className="chrome-sphere mb-10 size-12" />
-            <div className="chrome-sphere-violet mb-5 size-18" />
-            <div className="chrome-sphere size-32" />
+          <div className="pointer-events-none absolute bottom-0 right-2 sm:-bottom-4 sm:right-0 flex items-end gap-2 sm:gap-3 z-10">
+            <div className="chrome-sphere mb-4 sm:mb-6 w-10 h-10 sm:w-12 sm:h-12 shrink-0" />
+            <div className="chrome-sphere-violet mb-2 sm:mb-3 w-14 h-14 sm:w-[72px] sm:h-[72px] shrink-0" />
+            <div className="chrome-sphere w-24 h-24 sm:w-32 sm:h-32 shrink-0" />
           </div>
         </div>
 
@@ -142,7 +142,7 @@ const Welcome = () => {
             </div>
             <div className="swatch-ramp mt-4 h-9 rounded-full border-2 border-[color:var(--ink)]" />
             <div className="meta-label mt-2 flex justify-between text-[color:var(--ink)]/60 text-xs">
-              <span className="font-bold text-[#2e6f68]">#7fd8c9 · Mint</span>
+              <span>Magenta sample</span>
               <span>Read · Re-read</span>
             </div>
           </div>

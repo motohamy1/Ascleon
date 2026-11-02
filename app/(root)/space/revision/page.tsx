@@ -88,10 +88,10 @@ const RevisionPage = () => {
             </div>
 
             {/* Decorative Y2K Chrome Accent */}
-            <div className="pointer-events-none absolute -bottom-10 -right-8 hidden sm:flex items-end gap-3 opacity-80">
-              <div className="chrome-sphere mb-8 size-14" />
-              <div className="chrome-sphere-violet mb-4 size-22" />
-              <div className="chrome-sphere size-36" />
+            <div className="pointer-events-none absolute -bottom-6 -right-4 sm:-bottom-8 sm:-right-6 flex items-end gap-2 sm:gap-3 opacity-80 z-10">
+              <div className="chrome-sphere mb-6 sm:mb-8 size-10 sm:size-14 shrink-0" />
+              <div className="chrome-sphere-violet mb-3 sm:mb-4 size-14 sm:size-[88px] shrink-0" />
+              <div className="chrome-sphere size-24 sm:size-36 shrink-0" />
             </div>
           </section>
 

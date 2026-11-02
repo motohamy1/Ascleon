@@ -1096,15 +1096,15 @@ button[data-variant='unstyled'] *,
     );
   }
 
-  /* Acid palette swatch ramp — showcasing ink, teal, #7fd8c9 mint, cream and orange */
+  /* Magenta swatch ramp — the reference's Pantone-chip motif */
   .swatch-ramp {
     background: linear-gradient(
       90deg,
-      #0f0e10 0%,
-      #2e6f68 25%,
-      #7fd8c9 50%,
-      #f6d7a1 75%,
-      #ff4c00 100%
+      #5c0c38 0%,
+      #a1156e 26%,
+      #e0459a 52%,
+      #ff5fa2 76%,
+      #ffb3d1 100%
     );
   }
 
