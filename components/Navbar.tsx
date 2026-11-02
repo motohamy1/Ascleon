@@ -13,10 +13,11 @@ import {
 } from '@clerk/nextjs';
 import { Menu, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { AscleonLogo } from '@/components/ui/AscleonLogo';
 
 const navItems = [
   { href: '/', label: 'Progress', match: '/' },
-  { href: '/space/active', label: 'Space & Study', match: '/space/active', extraMatch: '/books' },
+  { href: '/space/active', label: 'Study Space', match: '/space/active', extraMatch: '/books' },
   { href: '/library', label: 'Library', match: '/library' },
   { href: '/space/revision', label: 'Revision', match: '/space/revision' },
 
@@ -29,7 +30,7 @@ const isActiveRoute = (pathname: string, match: string, extraMatch?: string) =>
       (!!extraMatch && pathname.startsWith(extraMatch));
 
 // Tabs that require an account; guests get the sign-in modal instead
-const authRequired = new Set(['/space/active', '/space/revision']);
+const authRequired = new Set(['/space/active', '/space/revision', '/library']);
 
 const Navbar = () => {
   const pathname = usePathname();
@@ -65,17 +66,18 @@ const Navbar = () => {
     'shadow-nav-deep border-2 border-[color:var(--ink)] bg-[color:var(--cream)]';
 
   return (
-    <header className="fixed inset-x-0 top-0 z-50 px-3 pt-3 sm:px-4 sm:pt-4">
-      <div className="relative mx-auto flex w-full max-w-[1680px] items-center justify-between gap-3">
+    <header className="fixed inset-x-0 top-0 z-50 px-3.5 pt-3 sm:px-6 md:px-8 lg:px-10 xl:px-12 sm:pt-4">
+      <div className="relative mx-auto flex w-full max-w-[1840px] 2xl:max-w-[2160px] items-center justify-between gap-3">
         {/* Left: Brand Identity */}
         <Link
           href="/"
           className={cn(
-            'group flex items-center gap-2.5 rounded-[1.25rem] px-3.5 py-2 transition-transform active:scale-[0.98]',
+            'group flex items-center gap-3 rounded-[1.35rem] px-4.5 py-2.5 sm:py-3 transition-transform active:scale-[0.98]',
             clusterClass
           )}
         >
-          <span className="font-serif text-lg font-bold tracking-tight text-[color:var(--ink)]">
+          <AscleonLogo size={34} className="transition-transform duration-200 group-hover:scale-105" />
+          <span className="font-serif text-xl sm:text-[21px] font-bold tracking-tight text-[color:var(--ink)]">
             Ascleon
           </span>
         </Link>
@@ -84,7 +86,7 @@ const Navbar = () => {
         <nav
           aria-label="Primary"
           className={cn(
-            'hidden items-center gap-1 rounded-full p-1.5 md:flex',
+            'hidden items-center gap-1.5 rounded-full p-2 md:flex',
             'shadow-nav-deep border-2 border-[color:var(--ink)] bg-[color:var(--ink)]'
           )}
         >
@@ -96,26 +98,31 @@ const Navbar = () => {
                 href={item.href}
                 onClick={(e) => guardClick(e, item.href)}
                 className={cn(
-                  'rounded-full px-4 py-1.5 text-xs font-semibold tracking-wide transition-all uppercase',
+                  'rounded-full px-5 py-2.5 text-xs sm:text-[13px] font-bold tracking-wider transition-all uppercase flex items-center gap-2',
                   active
                     ? 'bg-[color:var(--cream)] text-[color:var(--ink)] shadow-xs'
                     : 'text-[color:var(--cream)]/75 hover:text-[color:var(--cream)] hover:bg-white/10'
                 )}
               >
-                {item.label}
+                <span>{item.label}</span>
+                {item.href === '/space/revision' && (
+                  <span className="rounded-full bg-[color:var(--orange)] px-2 py-0.5 text-[9.5px] font-black uppercase text-[color:var(--ink)]">
+                    Soon
+                  </span>
+                )}
               </Link>
             );
           })}
         </nav>
 
         {/* Right: Auth & CTAs (Desktop) */}
-        <div className="hidden items-center gap-2 md:flex">
+        <div className="hidden items-center gap-2.5 md:flex">
           <SignedOut>
             <SignInButton mode="modal">
               <button
                 type="button"
                 className={cn(
-                  'cursor-pointer rounded-[1.25rem] px-4 py-2 font-serif text-xs font-bold uppercase tracking-wider text-[color:var(--ink)] transition-transform hover:-translate-y-0.5 active:translate-y-0',
+                  'cursor-pointer rounded-[1.35rem] px-5 py-2.5 sm:py-3 font-serif text-xs sm:text-[13px] font-bold uppercase tracking-wider text-[color:var(--ink)] transition-transform hover:-translate-y-0.5 active:translate-y-0',
                   clusterClass
                 )}
               >
@@ -126,14 +133,14 @@ const Navbar = () => {
           <SignedIn>
             <div
               className={cn(
-                'flex items-center rounded-full p-1',
+                'flex items-center rounded-full p-1.5',
                 clusterClass
               )}
             >
               <UserButton
                 appearance={{
                   elements: {
-                    userButtonAvatarBox: 'h-8 w-8',
+                    userButtonAvatarBox: 'h-9 w-9 sm:h-10 sm:w-10',
                   },
                 }}
               />
@@ -149,11 +156,11 @@ const Navbar = () => {
             aria-expanded={open}
             aria-label="Toggle navigation menu"
             className={cn(
-              'flex h-10 w-10 items-center justify-center rounded-[1rem] text-[color:var(--ink)]',
+              'flex h-12 w-12 items-center justify-center rounded-[1.15rem] text-[color:var(--ink)]',
               clusterClass
             )}
           >
-            {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
           </button>
         </div>
       </div>
@@ -179,13 +186,18 @@ const Navbar = () => {
                       setOpen(false);
                     }}
                     className={cn(
-                      'rounded-xl px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors',
+                      'rounded-xl px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors flex items-center justify-between',
                       active
                         ? 'bg-[color:var(--ink)] text-[color:var(--cream)]'
                         : 'text-[color:var(--ink)] hover:bg-black/5'
                     )}
                   >
-                    {item.label}
+                    <span>{item.label}</span>
+                    {item.href === '/space/revision' && (
+                      <span className="rounded-full bg-[color:var(--orange)] px-2 py-0.5 text-[10px] font-black uppercase text-[color:var(--ink)]">
+                        Soon
+                      </span>
+                    )}
                   </Link>
                 );
               })}

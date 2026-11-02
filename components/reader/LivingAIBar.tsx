@@ -13,6 +13,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import RichStudyMessage from "./RichStudyMessage";
 
 interface LivingAIBarProps {
   bookId: string;
@@ -148,7 +149,11 @@ export default function LivingAIBar({
                   <span className="text-[10px] font-bold tracking-wider uppercase opacity-50">
                     {msg.role === "user" ? "You" : "Book Companion"}
                   </span>
-                  <div className="whitespace-pre-wrap">{msg.content}</div>
+                  {msg.role === "assistant" ? (
+                    <RichStudyMessage content={msg.content} className="text-[#EFE6DC]" />
+                  ) : (
+                    <div className="whitespace-pre-wrap font-medium">{msg.content}</div>
+                  )}
 
                   {msg.keyPoints && msg.keyPoints.length > 0 && (
                     <ul className="mt-2 pt-2 border-t border-white/10 space-y-1">

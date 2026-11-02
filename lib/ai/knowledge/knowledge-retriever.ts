@@ -12,6 +12,9 @@ import {
 import { connectToDatabase } from "@/database/mongoose";
 import KnowledgeNode from "@/database/models/knowledge-node.model";
 
+// In-memory cache for dynamic DB knowledge nodes to eliminate redundant DB lookups on chat turns
+const knowledgeNodeCache = new Map<string, any[]>();
+
 export interface ContextRetrievalOptions {
   text: string;
   query?: string;
@@ -185,19 +188,78 @@ else if (
   switch (domain) {
     case "cardiology":
     case "medicine": {
-      focalTopic = combined.includes("split") || combined.includes("s2")
-        ? "Heart Sounds (S1-S4) & Splitting Mechanics"
-        : combined.includes("murmur") || combined.includes("maneuver")
-        ? "Cardiac Murmurs & Dynamic Bedside Manoeuvres"
-        : "Clinical Cardiology & Bedside Hemodynamics";
+      const isHeartFailure =
+        combined.includes("heart failure") ||
+        combined.includes("ahf") ||
+        combined.includes("failure") ||
+        combined.includes("decompensat") ||
+        combined.includes("edema") ||
+        combined.includes("pioglitazone") ||
+        combined.includes("verapamil") ||
+        combined.includes("nsaid") ||
+        combined.includes("fluid");
 
-      matchingRefs.push(
-        CLINICAL_AUTHORITATIVE_REFERENCES[0],
-        CLINICAL_AUTHORITATIVE_REFERENCES[1],
-        CLINICAL_AUTHORITATIVE_REFERENCES[2]
-      );
-      matchingQBank.push(...CLINICAL_QBANK_REPOSITORY);
-      matchingMnemonics.push(...CLINICAL_MNEMONICS);
+      const isHeartSounds =
+        combined.includes("split") ||
+        combined.includes("s2") ||
+        combined.includes("s1") ||
+        combined.includes("s3") ||
+        combined.includes("s4") ||
+        combined.includes("gallop") ||
+        combined.includes("auscultat");
+
+      const isMurmur =
+        combined.includes("murmur") ||
+        combined.includes("maneuver") ||
+        combined.includes("valsalva") ||
+        combined.includes("handgrip") ||
+        combined.includes("stenosis") ||
+        combined.includes("regurgit");
+
+      if (isHeartFailure) {
+        focalTopic = "Acute & Chronic Heart Failure Pathophysiology & Management";
+        const hfRef = CLINICAL_AUTHORITATIVE_REFERENCES.find(r => r.relevanceTag === "acute_heart_failure_pharmacology");
+        const harrisonsRef = CLINICAL_AUTHORITATIVE_REFERENCES.find(r => r.relevanceTag === "gallop_sounds_s3_s4");
+        if (hfRef) matchingRefs.push(hfRef);
+        if (harrisonsRef) matchingRefs.push(harrisonsRef);
+        const failureMnemonic = CLINICAL_MNEMONICS.find(m => m.mnemonic === "FAILURE");
+        if (failureMnemonic) matchingMnemonics.push(failureMnemonic);
+      } else if (isHeartSounds) {
+        focalTopic = "Heart Sounds (S1-S4) & Splitting Mechanics";
+        const braunwaldRef = CLINICAL_AUTHORITATIVE_REFERENCES.find(r => r.relevanceTag === "heart_sounds_s2_splitting");
+        const harrisonsRef = CLINICAL_AUTHORITATIVE_REFERENCES.find(r => r.relevanceTag === "gallop_sounds_s3_s4");
+        if (braunwaldRef) matchingRefs.push(braunwaldRef);
+        if (harrisonsRef) matchingRefs.push(harrisonsRef);
+        const asdMnemonic = CLINICAL_MNEMONICS.find(m => m.mnemonic.includes("ASD"));
+        if (asdMnemonic) matchingMnemonics.push(asdMnemonic);
+      } else if (isMurmur) {
+        focalTopic = "Cardiac Murmurs, Auscultation & Dynamic Bedside Manoeuvres";
+        const oxfordRef = CLINICAL_AUTHORITATIVE_REFERENCES.find(r => r.relevanceTag === "murmurs_dynamic_maneuvers");
+        const escRef = CLINICAL_AUTHORITATIVE_REFERENCES.find(r => r.relevanceTag === "valvular_guidelines_criteria");
+        if (oxfordRef) matchingRefs.push(oxfordRef);
+        if (escRef) matchingRefs.push(escRef);
+        const rile = CLINICAL_MNEMONICS.find(m => m.mnemonic === "RILE");
+        const handgrip = CLINICAL_MNEMONICS.find(m => m.mnemonic.includes("HANDS DOWN"));
+        if (rile) matchingMnemonics.push(rile);
+        if (handgrip) matchingMnemonics.push(handgrip);
+      } else {
+        focalTopic = "Clinical Cardiology & Bedside Hemodynamics";
+        matchingRefs.push(
+          CLINICAL_AUTHORITATIVE_REFERENCES[0],
+          CLINICAL_AUTHORITATIVE_REFERENCES[2]
+        );
+      }
+
+      // Add matching QBank vignette
+      if (isHeartFailure) {
+        const hfQ = CLINICAL_QBANK_REPOSITORY.find(q => q.topic.includes("Mitral Regurgitation Post-Myocardial") || q.topic.includes("Heart Failure"));
+        if (hfQ) matchingQBank.push(hfQ);
+      } else if (isHeartSounds) {
+        const s2Q = CLINICAL_QBANK_REPOSITORY.find(q => q.topic.includes("S2"));
+        if (s2Q) matchingQBank.push(s2Q);
+      } else {
+        matchingQBank.push(CLINICAL_QBANK_REPOSITORY[0]);
+      }
       break;
     }
 
@@ -345,20 +407,13 @@ else if (
     }
   }
 
-  // 3. QUERY MONGO DATABASE FOR CUSTOM CACHED KNOWLEDGE NODES
-  try {
-    await connectToDatabase();
-    const dbNodes = await KnowledgeNode.find({
-      $or: [
-        { domain: { $regex: domain, $options: "i" } },
-        { topic: { $regex: focalTopic.split(" ")[0], $options: "i" } },
-      ],
-    })
-      .limit(3)
-      .lean();
+  // 3. QUERY MONGO DATABASE FOR CUSTOM CACHED KNOWLEDGE NODES (Fast-path if static corpus already matched)
+  if (matchingRefs.length < 2) {
+    const cacheKey = `${domain}:${focalTopic.split(" ")[0]}`.toLowerCase();
+    const cachedDbNodes = knowledgeNodeCache.get(cacheKey);
 
-    if (dbNodes && dbNodes.length > 0) {
-      for (const node of dbNodes) {
+    if (cachedDbNodes) {
+      for (const node of cachedDbNodes) {
         if (node.type === "textbook" || node.type === "guideline") {
           matchingRefs.push({
             id: String(node._id),
@@ -372,9 +427,43 @@ else if (
           });
         }
       }
+    } else {
+      try {
+        await connectToDatabase();
+        const dbNodesPromise = KnowledgeNode.find({
+          $or: [
+            { domain: { $regex: domain, $options: "i" } },
+            { topic: { $regex: focalTopic.split(" ")[0], $options: "i" } },
+          ],
+        })
+          .limit(3)
+          .lean();
+
+        // 1.5s timeout guard so DB stalls never slow down the AI assistant
+        const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 1500));
+        const dbNodes = await Promise.race([dbNodesPromise, timeoutPromise]);
+
+        if (dbNodes && dbNodes.length > 0) {
+          knowledgeNodeCache.set(cacheKey, dbNodes);
+          for (const node of dbNodes) {
+            if (node.type === "textbook" || node.type === "guideline") {
+              matchingRefs.push({
+                id: String(node._id),
+                source: node.source,
+                type: node.type,
+                title: node.title,
+                chapterOrSection: node.topic,
+                excerpt: node.content,
+                clinicalPearls: node.clinicalPearls || [],
+                relevanceTag: node.topic,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("MongoDB KnowledgeNode lookup skipped:", err);
+      }
     }
-  } catch (err) {
-    console.warn("MongoDB KnowledgeNode lookup skipped:", err);
   }
 
   // 4. FORMAT GROUNDING SNIPPET FOR LLM PROMPT

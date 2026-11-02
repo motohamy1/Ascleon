@@ -69,6 +69,23 @@ export const CLINICAL_AUTHORITATIVE_REFERENCES: ReferenceResource[] = [
     relevanceTag: "valvular_guidelines_criteria",
   },
   {
+    id: "ref-esc-hf-guidelines-1",
+    source: "ESC / AHA Heart Failure Clinical Practice Guidelines & Oxford Handbook of Clinical Medicine",
+    edition: "Current Clinical Edition",
+    type: "guideline",
+    title: "Acute Heart Failure (AHF) & High-Risk Pharmacotherapy",
+    chapterOrSection: "Decompensation Pathophysiology, Precipitants & Contraindicated Drugs",
+    excerpt:
+      "Acute Heart Failure (AHF) is a life-threatening clinical syndrome defined by rapid onset or worsening of symptoms and signs of heart failure (pulmonary or systemic congestion, reduced cardiac output). It presents as acute decompensation of chronic heart failure (ADCHF) or de novo acute HF. The core pathophysiology involves elevated left ventricular end-diastolic pressure (LVEDP) transmitting retrogradely to left atrium, pulmonary veins, and capillaries, driving transudation of fluid into alveolar spaces (pulmonary edema). Management demands rapid identification of precipitants (mnemonic FAILURE: Failure to adhere to meds/diet, Arrhythmia, Ischemia, Load increase, Up-regulation, Renal failure, End-organ disease/drugs). Critical drug interactions in HF: (1) Pioglitazone is strictly contraindicated due to PPAR-gamma renal sodium and fluid retention; (2) Verapamil/Diltiazem (non-dihydropyridines) exert negative inotropy and worsen HFrEF; (3) NSAIDs blunt diuretics, cause sodium retention, and trigger acute decompensation; (4) Flecainide is proarrhythmic in structural heart disease; (5) Glucocorticoids cause mineralocorticoid fluid retention.",
+    clinicalPearls: [
+      "Pioglitazone: Fluid retention via renal ENaC/PPAR-γ activation — contraindicated in NYHA I-IV.",
+      "Verapamil: Negative inotropic agent — avoid in HFrEF.",
+      "NSAIDs: Inhibit renal prostaglandins, worsening renal perfusion, causing fluid retention, and blunting ACE-inhibitors and loop diuretics.",
+      "Retrograde congestion cascade: LV failure → ↑ LVEDP → ↑ LA pressure → ↑ Pulmonary capillary wedge pressure (PCWP > 18–20 mmHg) → Pulmonary alveolar edema.",
+    ],
+    relevanceTag: "acute_heart_failure_pharmacology",
+  },
+  {
     id: "ref-software-eng-1",
     source: "Designing Data-Intensive Applications (Martin Kleppmann)",
     edition: "1st Edition",
@@ -200,6 +217,12 @@ export const CLINICAL_QBANK_REPOSITORY: QBankVignette[] = [
  * High-Yield Clinical Mnemonics & Cognitive Anchors
  */
 export const CLINICAL_MNEMONICS: HighYieldMnemonic[] = [
+  {
+    mnemonic: "FAILURE",
+    expansion: "Precipitants of Acute Heart Failure Decompensation",
+    rule: "Failure to adhere to meds/diet, Arrhythmia (AF), Ischemia (ACS), Load increase (infection, anemia, PE, thyroid), Up-regulation (neurohormonal), Renal dysfunction, End-organ disease or drugs (NSAIDs, CCBs).",
+    clinicalContext: "Diagnostic workup and clinical management of patients presenting with acute decompensated heart failure.",
+  },
   {
     mnemonic: "RILE",
     expansion: "Right = Inspiration, Left = Expiration",

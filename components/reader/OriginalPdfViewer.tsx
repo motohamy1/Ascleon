@@ -21,6 +21,8 @@ import {
   MessageSquare,
   HelpCircle,
   Trash2,
+  ArrowDownUp,
+  ArrowLeftRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +39,7 @@ interface OriginalPdfViewerProps {
   onSnipDiagram?: (imageDataUrl: string, pageNumber: number, targetFeature?: "morph" | "chat" | "qbank") => void;
   zoomLevel?: number;
   fitMode?: "normal" | "fit-width" | "fit-page";
+  scrollOrientation?: "vertical" | "horizontal";
   theme?: "paper" | "ink";
   className?: string;
 }
@@ -58,6 +61,7 @@ interface PdfPageItemProps {
   pdfDoc: any;
   scale: number;
   fitMode: "normal" | "fit-width" | "fit-page";
+  scrollOrientation?: "vertical" | "horizontal";
   defaultPageSize: { width: number; height: number };
   isSnipActive: boolean;
   onSnipMouseDown: (e: React.MouseEvent, pageNum: number) => void;
@@ -73,6 +77,7 @@ const PdfPageItem = React.memo(function PdfPageItem({
   pdfDoc,
   scale,
   fitMode,
+  scrollOrientation = "vertical",
   defaultPageSize,
   isSnipActive,
   onSnipMouseDown,
@@ -103,14 +108,12 @@ const PdfPageItem = React.memo(function PdfPageItem({
         const entry = entries[0];
         if (entry) {
           onVisibleChange(pageNum, entry.isIntersecting, entry.intersectionRatio);
-          if (entry.isIntersecting) {
-            setShouldRender(true);
-          }
+          setShouldRender(entry.isIntersecting);
         }
       },
       {
         root: null,
-        rootMargin: "900px 0px 900px 0px",
+        rootMargin: "1200px 0px 1200px 0px",
         threshold: [0, 0.2, 0.4, 0.6, 0.8, 1.0],
       }
     );
@@ -127,7 +130,27 @@ const PdfPageItem = React.memo(function PdfPageItem({
 
   // 3. Render Canvas and TextLayer with scale caching
   useEffect(() => {
-    if (!pdfDoc || !shouldRender) return;
+    if (!pdfDoc) return;
+
+    if (!shouldRender) {
+      if (activeRenderTask.current) {
+        try {
+          activeRenderTask.current.cancel();
+        } catch { }
+        activeRenderTask.current = null;
+      }
+      if (canvasRef.current) {
+        canvasRef.current.width = 0;
+        canvasRef.current.height = 0;
+      }
+      if (textLayerRef.current) {
+        textLayerRef.current.innerHTML = "";
+      }
+      setIsRendered(false);
+      setIsRendering(false);
+      renderedScaleRef.current = 0;
+      return;
+    }
 
     // Avoid redundant renders if already rendered at this exact scale
     if (isRendered && Math.abs(renderedScaleRef.current - scale) < 0.01) {
@@ -152,7 +175,7 @@ const PdfPageItem = React.memo(function PdfPageItem({
         if (activeRenderTask.current) {
           try {
             activeRenderTask.current.cancel();
-          } catch {}
+          } catch { }
         }
 
         const outputScale =
@@ -164,8 +187,9 @@ const PdfPageItem = React.memo(function PdfPageItem({
         canvas.height = Math.floor(viewport.height * outputScale);
         canvas.style.width = `${Math.floor(viewport.width)}px`;
         canvas.style.height = `${Math.floor(viewport.height)}px`;
+        canvas.style.backgroundColor = "#ffffff";
 
-        const context = canvas.getContext("2d", { alpha: false });
+        const context = canvas.getContext("2d", { alpha: true });
         if (!context) return;
 
         context.fillStyle = "#ffffff";
@@ -233,7 +257,7 @@ const PdfPageItem = React.memo(function PdfPageItem({
       if (activeRenderTask.current) {
         try {
           activeRenderTask.current.cancel();
-        } catch {}
+        } catch { }
       }
     };
   }, [pdfDoc, pageNum, scale, shouldRender, isRendered]);
@@ -247,13 +271,17 @@ const PdfPageItem = React.memo(function PdfPageItem({
       id={`pdf-page-container-${pageNum}`}
       data-page-number={pageNum}
       className={cn(
-        "pdf-page-wrapper relative mx-auto overflow-visible rounded-md bg-white shadow-2xl transition-all duration-150 select-text",
-        fitMode === "fit-page" ? "my-2 snap-center shrink-0" : "my-4",
+        "pdf-page-wrapper relative overflow-visible rounded-md bg-white shadow-2xl transition-all duration-150 select-text",
+        scrollOrientation === "horizontal"
+          ? "mx-2.5 my-auto shrink-0 snap-center self-center"
+          : fitMode === "fit-page"
+            ? "mx-auto my-2 snap-center shrink-0"
+            : "mx-auto my-4",
         isSnipActive && "cursor-crosshair"
       )}
       style={{
-        width: isRendered ? "fit-content" : `${estimatedWidth}px`,
-        height: isRendered ? "fit-content" : `${estimatedHeight}px`,
+        width: `${estimatedWidth}px`,
+        height: `${estimatedHeight}px`,
       }}
       onMouseDown={(e) => onSnipMouseDown(e, pageNum)}
       onMouseMove={(e) => onSnipMouseMove(e, pageNum)}
@@ -302,10 +330,22 @@ export default function OriginalPdfViewer({
   onSnipDiagram,
   zoomLevel = 100,
   fitMode = "normal",
+  scrollOrientation: initialScrollOrientation = "vertical",
   theme = "paper",
   className,
 }: OriginalPdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Scroll Orientation State (Vertical or Horizontal carousel/slide)
+  const [scrollOrientation, setScrollOrientation] = useState<"vertical" | "horizontal">(
+    initialScrollOrientation
+  );
+
+  useEffect(() => {
+    if (initialScrollOrientation) {
+      setScrollOrientation(initialScrollOrientation);
+    }
+  }, [initialScrollOrientation]);
 
   // Keep latest callbacks in ref to eliminate parent re-render dependencies
   const callbacksRef = useRef({
@@ -350,6 +390,7 @@ export default function OriginalPdfViewer({
     currentPage || 1
   );
   const activeVisiblePageRef = useRef<number>(currentPage || 1);
+  const lastReportedPageRef = useRef<number>(currentPage || 1);
   const visiblePageRatios = useRef<Map<number, number>>(new Map());
   const isInternalScrollRef = useRef<boolean>(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -413,6 +454,9 @@ export default function OriginalPdfViewer({
         const loadingTask = pdfjsLib.getDocument({
           url: fileURL,
           withCredentials: false,
+          disableAutoFetch: true,
+          disableStream: false,
+          rangeChunkSize: 65536,
         });
 
         const doc = await loadingTask.promise;
@@ -422,21 +466,23 @@ export default function OriginalPdfViewer({
           const firstPage = await doc.getPage(1);
           const vp = firstPage.getViewport({ scale: 1.0 });
           setDocPageSize({ width: vp.width, height: vp.height });
-        } catch {}
+        } catch { }
 
         setPdfDoc(doc);
         pdfDocRef.current = doc;
         setTotalPages(doc.numPages);
         callbacksRef.current.onTotalPagesLoaded?.(doc.numPages);
-
-        try {
-          const initP = await doc.getPage(currentPage || 1);
-          const txtContent = await initP.getTextContent();
-          const initStr = txtContent.items.map((it: any) => it.str).join(" ");
-          callbacksRef.current.onPageChange?.(currentPage || 1, initStr);
-        } catch {}
-
         setLoading(false);
+
+        // Extract active page text in background without delaying visual canvas paint
+        doc.getPage(currentPage || 1)
+          .then((initP) => initP.getTextContent())
+          .then((txtContent) => {
+            if (!isMounted) return;
+            const initStr = txtContent.items.map((it: any) => it.str).join(" ");
+            callbacksRef.current.onPageChange?.(currentPage || 1, initStr);
+          })
+          .catch(() => {});
       } catch (err: any) {
         console.warn("Local worker load issue, trying unpkg worker fallback:", err);
         try {
@@ -447,6 +493,9 @@ export default function OriginalPdfViewer({
           const fallbackTask = pdfjsLib.getDocument({
             url: fileURL,
             withCredentials: false,
+            disableAutoFetch: true,
+            disableStream: false,
+            rangeChunkSize: 65536,
           });
 
           const doc = await fallbackTask.promise;
@@ -456,27 +505,28 @@ export default function OriginalPdfViewer({
             const firstPage = await doc.getPage(1);
             const vp = firstPage.getViewport({ scale: 1.0 });
             setDocPageSize({ width: vp.width, height: vp.height });
-          } catch {}
+          } catch { }
 
           setPdfDoc(doc);
           pdfDocRef.current = doc;
           setTotalPages(doc.numPages);
           callbacksRef.current.onTotalPagesLoaded?.(doc.numPages);
-
-          try {
-            const initP = await doc.getPage(currentPage || 1);
-            const txtContent = await initP.getTextContent();
-            const initStr = txtContent.items.map((it: any) => it.str).join(" ");
-            callbacksRef.current.onPageChange?.(currentPage || 1, initStr);
-          } catch {}
-
           setLoading(false);
+
+          doc.getPage(currentPage || 1)
+            .then((initP) => initP.getTextContent())
+            .then((txtContent) => {
+              if (!isMounted) return;
+              const initStr = txtContent.items.map((it: any) => it.str).join(" ");
+              callbacksRef.current.onPageChange?.(currentPage || 1, initStr);
+            })
+            .catch(() => {});
         } catch (fallbackErr: any) {
           console.error("Critical PDF load error:", fallbackErr);
           if (!isMounted) return;
           setError(
             fallbackErr?.message ||
-              "Unable to load original PDF file. Please verify file availability."
+            "Unable to load original PDF file. Please verify file availability."
           );
           setLoading(false);
         }
@@ -497,27 +547,36 @@ export default function OriginalPdfViewer({
 
   // 3. Compute Scale with Width/Height Fitting
   const computedScale = useMemo(() => {
-    const baseZoom = (zoomLevel / 100) * 1.35;
     const w = containerSize.width || containerRef.current?.clientWidth || 0;
     const h = containerSize.height || containerRef.current?.clientHeight || 0;
 
+    // Responsive width fitting ratio to eliminate blank borders
+    const widthRatio = w && docPageSize.width ? Math.max(100, w - 24) / docPageSize.width : 1.35;
+    const baseZoom = (zoomLevel / 100) * widthRatio;
+
     if (!w || !h) return baseZoom;
 
+    if (scrollOrientation === "horizontal") {
+      const availableH = Math.max(100, h - 30);
+      const scaleH = availableH / docPageSize.height;
+      return Math.max(0.35, Math.min(2.8, scaleH * (zoomLevel / 100)));
+    }
+
     if (fitMode === "fit-width") {
-      const availableW = Math.max(100, w - 36);
-      return Math.max(0.35, Math.min(3.0, availableW / docPageSize.width));
+      const availableW = Math.max(100, w - 20);
+      return Math.max(0.35, Math.min(3.2, (availableW / docPageSize.width) * (zoomLevel / 100)));
     }
 
     if (fitMode === "fit-page") {
-      const availableW = Math.max(100, w - 36);
-      const availableH = Math.max(100, h - 36);
+      const availableW = Math.max(100, w - 20);
+      const availableH = Math.max(100, h - 30);
       const scaleW = availableW / docPageSize.width;
       const scaleH = availableH / docPageSize.height;
-      return Math.max(0.35, Math.min(3.0, Math.min(scaleW, scaleH)));
+      return Math.max(0.35, Math.min(3.2, Math.min(scaleW, scaleH) * (zoomLevel / 100)));
     }
 
     return baseZoom;
-  }, [zoomLevel, fitMode, containerSize, docPageSize]);
+  }, [zoomLevel, fitMode, containerSize, docPageSize, scrollOrientation]);
 
   // 4. Register Canvas Callback for Page Items (stable reference)
   const handleRegisterCanvas = useCallback(
@@ -593,8 +652,8 @@ export default function OriginalPdfViewer({
             .map((item: any) => item.str)
             .join(" ");
           callbacksRef.current.onPageChange?.(currentPage, pageString);
-        } catch {}
-      }).catch(() => {});
+        } catch { }
+      }).catch(() => { });
     }
 
     const pageEl = document.getElementById(`pdf-page-container-${currentPage}`);
@@ -604,7 +663,8 @@ export default function OriginalPdfViewer({
 
       pageEl.scrollIntoView({
         behavior: "smooth",
-        block: fitMode === "fit-page" ? "center" : "start",
+        block: scrollOrientation === "horizontal" ? "nearest" : (fitMode === "fit-page" ? "center" : "start"),
+        inline: scrollOrientation === "horizontal" ? "center" : "nearest",
       });
 
       scrollTimeoutRef.current = setTimeout(() => {
@@ -872,7 +932,8 @@ export default function OriginalPdfViewer({
 
       pageEl.scrollIntoView({
         behavior: "smooth",
-        block: fitMode === "fit-page" ? "center" : "start",
+        block: scrollOrientation === "horizontal" ? "nearest" : (fitMode === "fit-page" ? "center" : "start"),
+        inline: scrollOrientation === "horizontal" ? "center" : "nearest",
       });
 
       scrollTimeoutRef.current = setTimeout(() => {
@@ -880,6 +941,34 @@ export default function OriginalPdfViewer({
       }, 700);
     }
   };
+
+  // Keyboard arrow navigation for horizontal reading
+  useEffect(() => {
+    if (scrollOrientation !== "horizontal") return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.ctrlKey ||
+        e.metaKey ||
+        e.altKey
+      ) {
+        return;
+      }
+
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        handleJumpToPage(activeVisiblePageRef.current - 1);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        handleJumpToPage(activeVisiblePageRef.current + 1);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [scrollOrientation, totalPages]);
 
   // =========================================================================
   // VIEW RENDER
@@ -960,8 +1049,38 @@ export default function OriginalPdfViewer({
           </button>
         </div>
 
-        {/* Tools: Snip Diagram */}
-        <div className="flex items-center gap-2">
+        {/* Tools: Scroll Orientation & Snip Diagram */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Scroll Orientation Toggle: Vertical vs Horizontal */}
+          <button
+            type="button"
+            onClick={() =>
+              setScrollOrientation((prev) =>
+                prev === "vertical" ? "horizontal" : "vertical"
+              )
+            }
+            className={cn(
+              "flex cursor-pointer items-center gap-1 rounded-full border px-2 py-1 text-[10.5px] font-bold transition-all shadow-sm",
+              scrollOrientation === "horizontal"
+                ? "border-[#43a08f] bg-[#43a08f]/20 text-[#7fd8c9]"
+                : "border-white/15 bg-white/5 text-[color:var(--cream)] hover:border-white/30 hover:bg-white/10"
+            )}
+            title={`Switch to ${scrollOrientation === "vertical" ? "Horizontal" : "Vertical"
+              } page scroll`}
+          >
+            {scrollOrientation === "horizontal" ? (
+              <>
+                <ArrowLeftRight className="size-3 text-[#7fd8c9]" />
+                <span className="hidden sm:inline">Horizontal</span>
+              </>
+            ) : (
+              <>
+                <ArrowDownUp className="size-3 text-[color:var(--cream)]/70" />
+                <span className="hidden sm:inline">Vertical</span>
+              </>
+            )}
+          </button>
+
           {confirmedSnip && (
             <button
               type="button"
@@ -1020,14 +1139,25 @@ export default function OriginalPdfViewer({
         onMouseUp={handleSelectionCheck}
         onTouchEnd={handleSelectionCheck}
         className={cn(
-          "custom-scrollbar relative flex-1 overflow-x-auto transition-colors select-text",
-          fitMode === "fit-page" ? "p-2 sm:p-3 overflow-y-auto snap-y snap-mandatory" : "p-4 sm:p-6 overflow-y-auto",
+          "custom-scrollbar relative flex-1 transition-colors select-text",
+          scrollOrientation === "horizontal"
+            ? "overflow-x-auto overflow-y-hidden p-2 sm:p-4 flex items-center snap-x snap-mandatory"
+            : fitMode === "fit-page"
+              ? "p-2 sm:p-3 overflow-y-auto overflow-x-auto snap-y snap-mandatory"
+              : "p-4 sm:p-6 overflow-y-auto overflow-x-auto",
           theme === "paper" && "bg-[#2b2a31]",
           theme === "ink" && "bg-[#111014]",
           isSnipActive && "cursor-crosshair select-none"
         )}
       >
-        <div className="flex flex-col items-center">
+        <div
+          className={cn(
+            "flex items-center",
+            scrollOrientation === "horizontal"
+              ? "flex-row flex-nowrap gap-4 h-full min-w-max px-4 py-2"
+              : "flex-col w-full"
+          )}
+        >
           {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
             <PdfPageItem
               key={pageNum}
@@ -1035,6 +1165,7 @@ export default function OriginalPdfViewer({
               pdfDoc={pdfDoc}
               scale={computedScale}
               fitMode={fitMode}
+              scrollOrientation={scrollOrientation}
               defaultPageSize={docPageSize}
               isSnipActive={isSnipActive}
               onSnipMouseDown={handleSnipMouseDown}
@@ -1047,6 +1178,47 @@ export default function OriginalPdfViewer({
           ))}
         </div>
       </div>
+
+      {/* HORIZONTAL PAGE NAVIGATION ARROWS (Borders of Left Panel / Over Book) */}
+      {scrollOrientation === "horizontal" && totalPages > 1 && (
+        <>
+          {/* Previous Page (Left Arrow) */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleJumpToPage(activeVisiblePage - 1);
+            }}
+            disabled={activeVisiblePage <= 1}
+            className={cn(
+              "group/arrow absolute left-3 top-1/2 -translate-y-1/2 z-30 flex size-11 items-center justify-center rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] text-[color:var(--ink)] shadow-frame transition-all duration-200 cursor-pointer hover:scale-110 hover:bg-[color:var(--orange)] active:scale-95 disabled:pointer-events-none disabled:opacity-0",
+              activeVisiblePage <= 1 ? "opacity-0 pointer-events-none" : "opacity-90 hover:opacity-100"
+            )}
+            title={`Previous Page (${activeVisiblePage - 1})`}
+            aria-label="Previous Page"
+          >
+            <ChevronLeft className="size-6 stroke-[3] transition-transform group-hover/arrow:-translate-x-0.5" />
+          </button>
+
+          {/* Next Page (Right Arrow) */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleJumpToPage(activeVisiblePage + 1);
+            }}
+            disabled={activeVisiblePage >= totalPages}
+            className={cn(
+              "group/arrow absolute right-3 top-1/2 -translate-y-1/2 z-30 flex size-11 items-center justify-center rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] text-[color:var(--ink)] shadow-frame transition-all duration-200 cursor-pointer hover:scale-110 hover:bg-[color:var(--orange)] active:scale-95 disabled:pointer-events-none disabled:opacity-0",
+              activeVisiblePage >= totalPages ? "opacity-0 pointer-events-none" : "opacity-90 hover:opacity-100"
+            )}
+            title={`Next Page (${activeVisiblePage + 1})`}
+            aria-label="Next Page"
+          >
+            <ChevronRight className="size-6 stroke-[3] transition-transform group-hover/arrow:translate-x-0.5" />
+          </button>
+        </>
+      )}
     </div>
   );
 }

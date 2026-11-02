@@ -201,7 +201,7 @@ export function ConceptMapCanvas({
   // Action Dispatchers for Selected Node
   const handleAskAIAboutNode = useCallback(() => {
     if (!activeNode) return;
-    const prompt = `Deep dive into this core principle from the concept map: "${activeNode.label}" (${activeNode.category}). Context details: "${activeNode.details}". Explain the underlying mechanism and clinical or exam significance.`;
+    const prompt = `Explain the core mechanism, clinical significance, and practical exam pearls for "${activeNode.label}": ${activeNode.details || "as presented on this page"}`;
     onAskAI?.(prompt);
   }, [activeNode, onAskAI]);
 

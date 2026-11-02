@@ -88,27 +88,20 @@ export const connectToDatabase = async () => {
   if (!cached.promise) {
     const opts = {
       bufferCommands: false,
-      serverSelectionTimeoutMS: 8000,
-      connectTimeoutMS: 8000,
+      serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 5000,
     };
 
     cached.promise = (async () => {
+      // Proactively resolve direct URI for known Atlas shards or SRV issues to eliminate 8s timeout
+      const resolvedUri = await getDirectConnectionUri(MONGODB_URI);
       try {
-        // Attempt normal connect first
-        return await mongoose.connect(MONGODB_URI, opts);
+        return await mongoose.connect(resolvedUri, opts);
       } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        const isSrvError =
-          errMsg.includes("querySrv") ||
-          errMsg.includes("ECONNREFUSED") ||
-          errMsg.includes("ENOTFOUND");
-
-        if (isSrvError && MONGODB_URI.startsWith("mongodb+srv://")) {
-          console.warn(
-            "MongoDB SRV DNS query refused by local network. Switching automatically to direct replica set...",
-          );
-          const directUri = await getDirectConnectionUri(MONGODB_URI);
-          return await mongoose.connect(directUri, opts);
+        // Fallback to original URI if direct attempt somehow failed
+        if (resolvedUri !== MONGODB_URI) {
+          console.warn("Direct connection failed, attempting fallback to original MONGODB_URI...");
+          return await mongoose.connect(MONGODB_URI, opts);
         }
         throw err;
       }

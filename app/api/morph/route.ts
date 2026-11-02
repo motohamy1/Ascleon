@@ -156,12 +156,15 @@ Return ONLY a JSON object matching this structure.`;
           config: {
             responseMimeType: "application/json",
             temperature: 0.2,
+            thinkingConfig: {
+              thinkingBudget: 0,
+            },
           },
         });
 
-        // 12-second timeout guard to prevent 3-minute hangs
+        // 30-second timeout guard to ensure complex multi-card schemas never drop prematurely
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Gemini generation timed out after 12s")), 12000)
+          setTimeout(() => reject(new Error("Gemini generation timed out after 30s")), 30000)
         );
 
         const response: any = await Promise.race([generatePromise, timeoutPromise]);

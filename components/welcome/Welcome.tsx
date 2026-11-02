@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ArrowUpRight } from 'lucide-react';
 import { SignInButton } from '@clerk/nextjs';
+import { AscleonLogo } from '@/components/ui/AscleonLogo';
 
 const features = [
   {
@@ -15,9 +16,9 @@ const features = [
     n: '02',
     title: 'Talk it out',
     desc: 'Voice sessions that question, argue and re-explain until it clicks.',
-    card: 'bg-[color:var(--cream)] text-[color:var(--ink)]',
-    dim: 'text-[color:var(--ink)]/50',
-    body: 'text-[color:var(--ink)]/70',
+    card: 'bg-[#7fd8c9] text-[color:var(--ink)]',
+    dim: 'text-[color:var(--ink)]/60',
+    body: 'text-[color:var(--ink)]/80',
   },
   {
     n: '03',
@@ -61,84 +62,87 @@ const Welcome = () => {
       {/* HERO ROW */}
       <section className="grid gap-3 lg:grid-cols-12">
         {/* Hero module */}
-        <div className="relative flex min-h-[430px] flex-col justify-between overflow-hidden rounded-[22px] bg-[color:var(--cream)] p-6 sm:p-10 lg:col-span-8 lg:min-h-[520px]">
+        <div className="relative flex min-h-[410px] sm:min-h-[455px] lg:min-h-[505px] xl:min-h-[535px] flex-col justify-between overflow-hidden rounded-[24px] bg-[color:var(--cream)] p-6 sm:p-10 lg:p-12 lg:col-span-8 shadow-chip">
           <div className="flex items-center justify-between gap-6">
-            <p className="meta-label text-[color:var(--ink)]/70">
-              Ascleon® · reading, out loud
-            </p>
-            <div className="barcode h-7 w-20 shrink-0 text-[color:var(--ink)]" />
+            <div className="flex items-center gap-3">
+              <AscleonLogo size={40} className="shadow-xs transition-transform duration-200 hover:scale-105" />
+              <p className="meta-label text-[color:var(--ink)]/80">
+                Ascleon® · reading, out loud
+              </p>
+            </div>
+            <div className="barcode h-8 w-24 shrink-0 text-[color:var(--ink)]" />
           </div>
 
-          <div className="mt-10 sm:mt-14">
-            <h1 className="display text-[color:var(--ink)] text-[clamp(3.4rem,9vw,7.2rem)]">
+          <div className="mt-6 sm:mt-10 max-w-2xl">
+            <h1 className="display text-[color:var(--ink)] text-[clamp(3.6rem,8.5vw,7.6rem)] leading-[0.93]">
               Talk to
               <br />
               your books.
             </h1>
-            <p className="mt-5 max-w-md text-[15px] leading-relaxed text-[color:var(--ink-soft)] sm:text-base">
+            <p className="mt-5 max-w-xl text-[16px] sm:text-lg leading-relaxed text-[color:var(--ink-soft)]">
               Upload any stubborn book, light or med-school dense. Ascleon
               turns its chapters into live conversations with an AI co-reader,
               so the hard parts finally open up.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-4">
               <SignInButton mode="modal">
-                <button className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-6 py-3.5 text-[13px] font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5">
+                <button className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 active:translate-y-0">
                   Start reading
-                  <ArrowUpRight className="size-4" />
+                  <ArrowUpRight className="size-4.5" />
                 </button>
               </SignInButton>
               <Link
                 href="/library"
-                className="group flex items-center gap-1.5 text-[13px] font-bold uppercase tracking-[0.08em] text-[color:var(--ink)]"
+                className="group flex items-center gap-1.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] hover:underline underline-offset-4"
               >
                 Browse the library
-                <ArrowUpRight className="size-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                <ArrowUpRight className="size-4.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
               </Link>
             </div>
           </div>
 
           {/* Chrome cluster — decorative, sits on the card surface */}
           <div className="pointer-events-none absolute hidden items-end gap-3 sm:flex sm:-bottom-10 sm:-right-8">
-            <div className="chrome-sphere mb-10 size-10" />
-            <div className="chrome-sphere-violet mb-5 size-16" />
-            <div className="chrome-sphere size-28" />
+            <div className="chrome-sphere mb-10 size-12" />
+            <div className="chrome-sphere-violet mb-5 size-18" />
+            <div className="chrome-sphere size-32" />
           </div>
         </div>
 
         {/* Right stack */}
         <div className="flex flex-col gap-3 lg:col-span-4">
           <SignInButton mode="modal">
-            <div className="group relative flex min-h-[250px] flex-1 cursor-pointer flex-col justify-between overflow-hidden rounded-[22px] bg-[color:var(--orange)] p-6 shadow-chip transition-transform duration-200 hover:-translate-y-1 sm:min-h-[280px]">
+            <div className="group relative flex min-h-[250px] sm:min-h-[280px] lg:min-h-[310px] flex-1 cursor-pointer flex-col justify-between overflow-hidden rounded-[24px] bg-[color:var(--orange)] p-6 sm:p-7 shadow-chip transition-transform duration-200 hover:-translate-y-1">
               <p className="meta-label text-[color:var(--ink)]/80">
                 First time here
               </p>
-              <h2 className="display mt-8 text-[44px] text-[color:var(--ink)] sm:text-[54px]">
+              <h2 className="display mt-4 text-[42px] sm:text-[48px] leading-[1.02] text-[color:var(--ink)]">
                 One PDF,
                 <br />
                 one conversation.
               </h2>
-              <p className="mt-3 text-sm font-semibold text-[color:var(--ink)]/80">
+              <p className="mt-3 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85">
                 Live voice sessions with your book, up to 60 minutes.
               </p>
-              <ArrowUpRight className="absolute right-5 bottom-4 size-14 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
+              <ArrowUpRight className="absolute right-6 bottom-5 size-12 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
             </div>
           </SignInButton>
 
-          <div className="rounded-[22px] bg-[color:var(--panel)] p-5 shadow-chip">
+          <div className="flex min-h-[160px] sm:min-h-[185px] flex-col justify-between rounded-[24px] bg-[color:var(--panel)] p-5 sm:p-6 shadow-chip">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="meta-label text-[color:var(--ink)]/60">
                   Format
                 </p>
-                <p className="display mt-2.5 text-[26px] text-[color:var(--ink)]">
+                <p className="display mt-1.5 text-[26px] text-[color:var(--ink)]">
                   PDF → Voice
                 </p>
               </div>
-              <div className="barcode h-10 w-22 shrink-0 text-[color:var(--ink)]" />
+              <div className="barcode h-9 w-22 shrink-0 text-[color:var(--ink)]" />
             </div>
             <div className="swatch-ramp mt-4 h-9 rounded-full border-2 border-[color:var(--ink)]" />
-            <div className="meta-label mt-2 flex justify-between text-[color:var(--ink)]/55">
-              <span>Magenta sample</span>
+            <div className="meta-label mt-2 flex justify-between text-[color:var(--ink)]/60 text-xs">
+              <span className="font-bold text-[#2e6f68]">#7fd8c9 · Mint</span>
               <span>Read · Re-read</span>
             </div>
           </div>
@@ -150,13 +154,13 @@ const Welcome = () => {
         {features.map((f) => (
           <article
             key={f.n}
-            className={`card-lift flex min-h-[212px] flex-col justify-between rounded-[18px] p-5 ${f.card}`}
+            className={`card-lift flex min-h-[210px] sm:min-h-[235px] lg:min-h-[255px] flex-col justify-between rounded-[22px] p-5 sm:p-6 shadow-chip ${f.card}`}
           >
-            <span className={`meta-label ${f.dim}`}>{f.n}</span>
+            <span className={`meta-label text-xs ${f.dim}`}>{f.n}</span>
             <div>
-              <h3 className="display text-[25px]">{f.title}</h3>
+              <h3 className="display text-[26px] sm:text-[28px] leading-tight">{f.title}</h3>
               <p
-                className={`mt-2 text-[13px] font-semibold leading-snug ${f.body}`}
+                className={`mt-2.5 text-xs sm:text-[13px] font-semibold leading-snug ${f.body}`}
               >
                 {f.desc}
               </p>
@@ -167,17 +171,17 @@ const Welcome = () => {
 
       {/* BOTTOM STRIP — how it works + the point */}
       <section className="grid gap-3 lg:grid-cols-12">
-        <div className="rounded-[22px] bg-[color:var(--cream)] p-6 sm:p-8 lg:col-span-8">
-          <div className="grid gap-8 sm:grid-cols-3 sm:gap-6">
+        <div className="flex min-h-[195px] sm:min-h-[225px] flex-col justify-center rounded-[24px] bg-[color:var(--cream)] p-6 sm:p-8 lg:col-span-8 shadow-chip">
+          <div className="grid gap-6 sm:grid-cols-3 sm:gap-5">
             {steps.map((s) => (
-              <div key={s.n}>
-                <span className="display text-[42px] text-[color:var(--ink)]/25">
+              <div key={s.n} className="flex flex-col justify-between">
+                <span className="display text-[40px] text-[color:var(--ink)]/25 leading-none">
                   {s.n}
                 </span>
-                <h3 className="mt-1 text-[15px] font-bold text-[color:var(--ink)]">
+                <h3 className="mt-1.5 text-sm sm:text-base font-bold text-[color:var(--ink)]">
                   {s.title}
                 </h3>
-                <p className="mt-1.5 text-[13px] font-medium leading-snug text-[color:var(--ink)]/70">
+                <p className="mt-1.5 text-xs sm:text-[12.5px] font-medium leading-relaxed text-[color:var(--ink)]/75">
                   {s.desc}
                 </p>
               </div>
@@ -185,12 +189,12 @@ const Welcome = () => {
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-5 rounded-[22px] bg-[color:var(--ink)] p-6 lg:col-span-4">
+        <div className="flex min-h-[195px] sm:min-h-[225px] items-center justify-between gap-5 rounded-[24px] bg-[color:var(--ink)] p-6 sm:p-8 lg:col-span-4 shadow-chip">
           <div>
-            <p className="meta-label text-[color:var(--cream)]/60">
+            <p className="meta-label font-bold text-[#7fd8c9]">
               The point
             </p>
-            <p className="display mt-2 text-[30px] text-[color:var(--cream)]">
+            <p className="display mt-2.5 text-[28px] sm:text-[32px] leading-[1.08] text-[color:var(--cream)]">
               Not a summary.
               <br />
               A conversation.
@@ -200,9 +204,12 @@ const Welcome = () => {
         </div>
       </section>
 
-      <p className="meta-label mt-3 text-center text-[color:var(--ink)]/55">
-        Ascleon® · built for stubborn readers
-      </p>
+      <div className="mt-4 flex items-center justify-center gap-2">
+        <AscleonLogo size={18} />
+        <p className="meta-label text-center text-[color:var(--ink)]/60">
+          Ascleon® · built for stubborn readers
+        </p>
+      </div>
     </div>
   );
 };

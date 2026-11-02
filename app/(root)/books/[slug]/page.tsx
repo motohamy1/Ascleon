@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { getBookBySlug, getBookSegments } from "@/lib/actions/book.actions";
+import { getBookBySlug, getBookSegments, getInitialBookSegments } from "@/lib/actions/book.actions";
 import BookExperience from "@/components/reader/BookExperience";
 import { sampleBooks } from "@/lib/constants";
 import { IBook, IBookSegmentData } from "@/types";
@@ -33,9 +33,18 @@ export default async function BookDetailsPage({
 
   let segments: IBookSegmentData[] = [];
   if (result.success && result.data?._id) {
-    const segResult = await getBookSegments(result.data._id);
-    if (segResult.success && segResult.data) {
-      segments = segResult.data;
+    if (book.fileURL) {
+      // PDF-based books extract live page text directly in OriginalPdfViewer.
+      // Fetch only initial segments (limit 3) to avoid serializing 300+ pages of unused text on SSR.
+      const segResult = await getInitialBookSegments(result.data._id, 3);
+      if (segResult.success && segResult.data) {
+        segments = segResult.data;
+      }
+    } else {
+      const segResult = await getBookSegments(result.data._id);
+      if (segResult.success && segResult.data) {
+        segments = segResult.data;
+      }
     }
   }
 

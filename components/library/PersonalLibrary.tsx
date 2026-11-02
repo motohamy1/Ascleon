@@ -117,15 +117,19 @@ export default function PersonalLibrary({
         <div className="w-full bg-white/70 border border-dashed border-[#D5C7B5] rounded-2xl py-16 px-4 text-center flex flex-col items-center justify-center gap-3">
           <BookDashed className="w-10 h-10 text-[#8C7A68]" />
           <p className="text-base font-medium text-[#4A433A]">
-            No books found matching this filter
+            {initialBooks.length === 0
+              ? "Your personal library is empty. Upload your first book using the upload button above!"
+              : "No books found matching this filter"}
           </p>
-          <button
-            type="button"
-            onClick={() => setActiveFilter("all")}
-            className="text-xs text-[#8B3A2B] font-semibold underline underline-offset-4 cursor-pointer hover:opacity-80"
-          >
-            Reset to all books
-          </button>
+          {initialBooks.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setActiveFilter("all")}
+              className="text-xs text-[#8B3A2B] font-semibold underline underline-offset-4 cursor-pointer hover:opacity-80"
+            >
+              Reset to all books
+            </button>
+          )}
         </div>
       )}
 

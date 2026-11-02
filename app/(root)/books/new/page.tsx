@@ -10,8 +10,8 @@ export const metadata = {
 
 const NewBookPage = () => {
   return (
-    <main className="mx-auto w-full max-w-[1000px] px-3 pt-[108px] pb-16 sm:px-4 sm:pt-[116px] acid-bg">
-      <div className="rounded-[32px] bg-[color:var(--ink)] p-3 shadow-frame sm:p-5">
+    <main className="mx-auto w-full max-w-[1380px] 2xl:max-w-[1600px] px-3.5 pt-[94px] pb-16 sm:px-6 md:px-8 lg:px-10 xl:px-12 sm:pt-[102px] acid-bg transition-all">
+      <div className="rounded-[24px] sm:rounded-[32px] bg-[color:var(--ink)] p-2.5 sm:p-5 shadow-frame">
         {/* Header Card */}
         <header className="rounded-[22px] bg-[color:var(--cream)] p-5 sm:p-8 border-2 border-[color:var(--ink)]">
           <div className="mb-4">

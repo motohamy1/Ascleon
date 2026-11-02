@@ -13,17 +13,32 @@ import {
 import { retrieveEnrichedContext } from "./knowledge/knowledge-retriever";
 import { EnrichedStudyContext } from "@/types/knowledge";
 
-const SOCRATIC_SYSTEM_PROMPT = `You are Ascleon's elite AI Study Agent & Socratic Academic Mentor.
-Your mission is to guide students to first-principles mastery of the material they are studying on the left panel.
+const SOCRATIC_SYSTEM_PROMPT = `You are Ascleon's elite AI Clinical Study Agent & Academic Mentor.
+Your mission is to guide students to first-principles mastery of the material on the active study page with extreme accuracy, clarity, and pedagogical elegance.
 
-Guidelines:
-1. Ground every explanation in the book's verified text and the BACKGROUND AUTHORITATIVE REFERENCE CORPUS provided in your context (which dynamically adapts to the domain: Medicine, Computer Science, Law, Engineering, Natural Sciences, etc.).
-2. If the student has specifically selected or highlighted text, or provided a snipped diagram image, center your answer on that exact highlighted scope first!
-3. Structure your answers with high academic and clinical rigor:
-   - Identify core mechanisms, mathematical/physiological invariants, or key trade-offs.
-   - Use structured Markdown with bold terms, clear bullet points, and authoritative citations.
-   - Ground insights in the authoritative references provided in context.
-4. Maintain an encouraging, intellectually rigorous, and concise mentor tone.`;
+Core Guidelines:
+1. Ground your answer FIRST AND FOREMOST in the ACTIVE PAGE TEXT provided in your context.
+   - If the student specifically selected or highlighted text, or provided a diagram, center your response directly on that exact scope first!
+   - Draw seamlessly from canonical gold-standard textbooks and guidelines (e.g., Harrison's, Braunwald's, Oxford Handbook, ESC/AHA guidelines) to enrich, explain, and illustrate the active page.
+   - NEVER create artificial division or say "bridging the gap between your text and the authoritative corpus". Seamlessly synthesize the knowledge into one unified, crystal-clear explanation.
+   - NEVER start responses with robotic boilerplate like "To master [Topic] within the context of the provided material...". Jump directly into answering with engaging, high-yield clarity!
+   - Do NOT introduce unrelated topics or force irrelevant distractor concepts. Keep all focus on the active page topic.
+
+2. Adaptive Query-Intent Handling:
+   - For DIRECT / BRIEF QUESTIONS (e.g. definitions, "why is drug X avoided?", "what is the dose?", "what does sign Y mean?"):
+     Answer IMMEDIATELY, DIRECTLY, and CONCISELY. Do not generate unnecessary multi-section breakdowns or preamble.
+   - For DEEP DIVES, MECHANISMS, or BROAD CONCEPT EXPLORATION:
+     Deliver a structured masterclass explanation:
+     • Unpack the underlying physiological / mathematical mechanism step-by-step.
+     • Explain diagnostic criteria, exam pearls, and key trade-offs.
+     • Illustrate with clean Markdown tables or bulleted points when helpful.
+
+3. Formatting & Symbol Integrity:
+   - NEVER output raw LaTeX arrows or math syntax in normal text prose (do NOT write $\\rightarrow$, $\\uparrow$, $\\downarrow$).
+   - ALWAYS use clean Unicode symbols: "→" for arrows, "↑" for increases/elevations, "↓" for decreases/drops, "⇒" for implies.
+   - Format physiological flows clearly with arrows, e.g.:
+     LV Failure → ↑ LVEDP → ↑ LA Pressure → ↑ Pulmonary Venous Pressure → Pulmonary Edema
+   - Use bold terms for key concepts and clean bullet points for readability.`;
 
 /**
  * Executes a call to Google Gemini with tools and deep background references
@@ -44,7 +59,9 @@ async function callGeminiAgent(
     context.selectedText ? `\nUser Specifically Selected/Highlighted:\n"${context.selectedText}"\n` : ""
   }\n\n${enriched.groundingSnippet}`;
 
-  const toolsDeclaration = [
+  const isToolRequest = /morph|quiz|test me|vignette|flashcard|visualize|diagram/i.test(userQuery);
+
+  const toolsDeclaration = isToolRequest ? [
     {
       functionDeclarations: AGENT_TOOLS_DEFINITIONS.map((t) => ({
         name: t.name,
@@ -56,7 +73,7 @@ async function callGeminiAgent(
         },
       })),
     },
-  ];
+  ] : undefined;
 
   // Turn 1: Initial call
   const userParts: any[] = [
@@ -84,6 +101,13 @@ async function callGeminiAgent(
   let generatedMorph: any = null;
   let generatedQuiz: any = null;
 
+  const isQuickQuery =
+    userQuery.trim().length < 80 &&
+    !userQuery.toLowerCase().includes("deep dive") &&
+    !userQuery.toLowerCase().includes("mechanism") &&
+    !userQuery.toLowerCase().includes("step-by-step") &&
+    !userQuery.toLowerCase().includes("breakdown");
+
   try {
     const generatePromise = ai.models.generateContent({
       model: modelName,
@@ -91,11 +115,14 @@ async function callGeminiAgent(
       config: {
         tools: toolsDeclaration as any,
         temperature: 0.2,
+        thinkingConfig: {
+          thinkingBudget: isQuickQuery ? 0 : 256,
+        },
       },
     });
 
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Gemini call timed out after 12s")), 12000)
+      setTimeout(() => reject(new Error("Gemini call timed out after 30s")), 30000)
     );
 
     const response: any = await Promise.race([generatePromise, timeoutPromise]);
@@ -147,13 +174,22 @@ async function callGeminiAgent(
         },
       ];
 
-      const finalResponse = await ai.models.generateContent({
+      const finalResponsePromise = ai.models.generateContent({
         model: modelName,
         contents: followUpContents,
         config: {
           temperature: 0.3,
+          thinkingConfig: {
+            thinkingBudget: isQuickQuery ? 0 : 256,
+          },
         },
       });
+
+      const finalTimeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Gemini Turn 2 call timed out after 30s")), 30000)
+      );
+
+      const finalResponse: any = await Promise.race([finalResponsePromise, finalTimeoutPromise]);
 
       return {
         text:
@@ -163,7 +199,7 @@ async function callGeminiAgent(
         model: modelName,
         toolsUsed,
         citations: [
-          `Section ${context.currentSegmentIndex + 1}`,
+          `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
           ...enriched.authoritativeReferences.map((r) => r.source),
         ],
         generatedMorph,
@@ -182,7 +218,7 @@ async function callGeminiAgent(
       model: modelName,
       toolsUsed,
       citations: [
-        `Section ${context.currentSegmentIndex + 1}`,
+        `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
         ...enriched.authoritativeReferences.map((r) => r.source),
       ],
       generatedMorph,
@@ -203,7 +239,7 @@ async function callGeminiAgent(
         provider: "gemini",
         model: "gemini-3.8-flash",
         toolsUsed: [],
-        citations: [`Section ${context.currentSegmentIndex + 1}`],
+        citations: [`Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`],
         authoritativeReferences: enriched.authoritativeReferences,
         qbankVignettes: enriched.qbankVignettes,
         mnemonics: enriched.mnemonics,
@@ -249,7 +285,7 @@ async function callOpenAICompatibleAgent(
     { role: "system", content: `${SOCRATIC_SYSTEM_PROMPT}\n\n${enriched.groundingSnippet}` },
     {
       role: "user",
-      content: `Book: "${context.bookTitle}" (Section ${context.currentSegmentIndex + 1})\nActive Text:\n${
+      content: `Book: "${context.bookTitle}" (${context.currentPageNumber ? `Page ${context.currentPageNumber}` : `Section ${context.currentSegmentIndex + 1}`})\nActive Text:\n${
         context.currentSegmentContent
       }\n${context.selectedText ? `Highlighted Passage:\n"${context.selectedText}"\n` : ""}\nQuery: ${userQuery}`,
     },
@@ -258,6 +294,7 @@ async function callOpenAICompatibleAgent(
   const toolsUsed: string[] = [];
   let generatedMorph: any = null;
   let generatedQuiz: any = null;
+  const isToolRequest = /morph|quiz|test me|vignette|flashcard|visualize|diagram/i.test(userQuery);
 
   const res = await fetch(endpoint, {
     method: "POST",
@@ -269,8 +306,7 @@ async function callOpenAICompatibleAgent(
     body: JSON.stringify({
       model: effectiveModel,
       messages,
-      tools: toolsSchema,
-      tool_choice: "auto",
+      ...(isToolRequest ? { tools: toolsSchema, tool_choice: "auto" } : {}),
       temperature: 0.2,
     }),
   });
@@ -340,7 +376,7 @@ async function callOpenAICompatibleAgent(
         model: effectiveModel,
         toolsUsed,
         citations: [
-          `Section ${context.currentSegmentIndex + 1}`,
+          `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
           ...enriched.authoritativeReferences.map((r) => r.source),
         ],
         generatedMorph,
@@ -358,7 +394,7 @@ async function callOpenAICompatibleAgent(
     model: effectiveModel,
     toolsUsed,
     citations: [
-      `Section ${context.currentSegmentIndex + 1}`,
+      `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
       ...enriched.authoritativeReferences.map((r) => r.source),
     ],
     generatedMorph,

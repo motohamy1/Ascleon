@@ -61,11 +61,23 @@ export function AscleonVoiceStudio({
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
-  // Initialize Speech Synthesis
+  // Initialize Speech Synthesis and cleanup on unmount
   useEffect(() => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       synthRef.current = window.speechSynthesis;
     }
+    return () => {
+      if (synthRef.current) {
+        try {
+          synthRef.current.cancel();
+        } catch {}
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+    };
   }, []);
 
   // Scroll to bottom of transcripts
@@ -75,10 +87,16 @@ export function AscleonVoiceStudio({
     }
   }, [messages, currentTranscript, status]);
 
+  const startListeningRef = useRef<() => void>(() => {});
+
   // Speak AI response
   const speakText = useCallback(
     (text: string) => {
-      if (isMuted || !synthRef.current) return;
+      if (isMuted || !synthRef.current) {
+        setStatus("listening");
+        startListeningRef.current();
+        return;
+      }
 
       synthRef.current.cancel();
 
@@ -90,13 +108,36 @@ export function AscleonVoiceStudio({
       utterance.rate = 1.0;
       utterance.pitch = 1.0;
 
+      // Select natural voice if available
+      try {
+        const voices = synthRef.current.getVoices?.() || [];
+        if (voices.length > 0) {
+          if (hasArabic || selectedLanguage === "ar") {
+            const arVoice = voices.find((v) => v.lang.startsWith("ar"));
+            if (arVoice) utterance.voice = arVoice;
+          } else {
+            const naturalVoice =
+              voices.find(
+                (v) =>
+                  v.lang.startsWith("en") &&
+                  (v.name.includes("Natural") ||
+                    v.name.includes("Google") ||
+                    v.name.includes("Samantha") ||
+                    v.name.includes("Daniel") ||
+                    v.name.includes("Alex"))
+              ) || voices.find((v) => v.lang.startsWith("en"));
+            if (naturalVoice) utterance.voice = naturalVoice;
+          }
+        }
+      } catch {}
+
       utterance.onstart = () => {
         setStatus("speaking");
       };
 
       utterance.onend = () => {
         setStatus("listening");
-        startListening();
+        startListeningRef.current();
       };
 
       utterance.onerror = () => {
@@ -219,6 +260,11 @@ export function AscleonVoiceStudio({
       };
 
       recognition.onerror = (e: any) => {
+        if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+          console.warn("Speech recognition access denied:", e.error);
+          setStatus("idle");
+          return;
+        }
         if (e.error !== "no-speech") {
           console.warn("Speech recognition notice:", e.error);
         }
@@ -245,6 +291,10 @@ export function AscleonVoiceStudio({
       console.warn("Could not start speech recognition:", err);
     }
   }, [isActive, status, selectedLanguage, sendSpokenTurn]);
+
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  }, [startListening]);
 
   // Start session
   const startSession = (initialPrompt?: string) => {

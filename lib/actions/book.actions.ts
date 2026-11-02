@@ -25,7 +25,10 @@ export const getAllBooks = async (search?: string) => {
       };
     }
 
-    const books = await Book.find(query).sort({ createdAt: -1 }).lean();
+    const books = await Book.find(query)
+      .select("-blueprint -initialQBank")
+      .sort({ createdAt: -1 })
+      .lean();
 
     return {
       success: true,
@@ -47,10 +50,16 @@ export const getUserBooks = async (search?: string) => {
 
     const { userId } = await auth();
 
-    let query: Record<string, unknown> = {};
-    if (userId) {
-      query.clerkId = userId;
+    if (!userId) {
+      return {
+        success: true,
+        data: [],
+      };
     }
+
+    let query: Record<string, unknown> = {
+      clerkId: userId,
+    };
 
     if (search) {
       const escapedSearch = escapeRegex(search);
@@ -61,7 +70,10 @@ export const getUserBooks = async (search?: string) => {
       };
     }
 
-    const books = await Book.find(query).sort({ createdAt: -1 }).lean();
+    const books = await Book.find(query)
+      .select("-blueprint -initialQBank")
+      .sort({ createdAt: -1 })
+      .lean();
 
     return {
       success: true,
@@ -316,6 +328,51 @@ export const searchBookSegments = async (
       error: (error as Error).message,
       data: [],
     };
+  }
+};
+
+// Fetches initial segments of a book for instant reader bootstrap (e.g. limit = 3)
+export const getInitialBookSegments = async (bookId: string, limit: number = 3) => {
+  try {
+    await connectToDatabase();
+
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      return { success: true, data: [] as IBookSegmentData[] };
+    }
+
+    const segments = await BookSegment.find({
+      bookId: new mongoose.Types.ObjectId(bookId),
+    })
+      .sort({ segmentIndex: 1 })
+      .limit(limit)
+      .lean();
+
+    return {
+      success: true,
+      data: serializeData(segments) as IBookSegmentData[],
+    };
+  } catch (error) {
+    console.error("Error fetching initial book segments:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to fetch initial segments",
+      data: [] as IBookSegmentData[],
+    };
+  }
+};
+
+// Fast single-query lookup for the user's most recent book slug
+export const getMostRecentBookSlug = async (clerkId: string): Promise<string | null> => {
+  try {
+    await connectToDatabase();
+    const book = await Book.findOne({ clerkId })
+      .select("slug")
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .lean();
+    return book?.slug || null;
+  } catch {
+    return null;
   }
 };
 

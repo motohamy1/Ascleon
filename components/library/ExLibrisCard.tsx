@@ -11,7 +11,6 @@ import {
 } from "@/lib/utils";
 import {
   BookOpen,
-  Mic,
   Star,
   X,
   Clock,
@@ -218,22 +217,14 @@ export default function ExLibrisCard({
         </button>
       </div>
 
-      {/* Action Buttons */}
-      <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 font-sans">
+      {/* Action Button */}
+      <div className="mt-5 pt-2 font-sans">
         <Link
           href={`/books/${book.slug}`}
-          className="flex items-center justify-center gap-2 bg-[#212A3B] hover:bg-[#323E53] text-white font-medium py-2.5 px-4 rounded-xl text-sm transition-all shadow-sm text-center"
+          className="flex w-full items-center justify-center gap-2.5 rounded-xl border-2 border-[color:var(--ink)] bg-[color:var(--ink)] px-5 py-3 text-center text-sm font-bold text-[color:var(--cream)] shadow-chip transition-all hover:bg-[#232029] active:scale-[0.99]"
         >
-          <BookOpen className="w-4 h-4" />
-          <span>Read & Study</span>
-        </Link>
-
-        <Link
-          href={`/books/${book.slug}#voice`}
-          className="flex items-center justify-center gap-2 bg-[#8B3A2B] hover:bg-[#A34433] text-white font-medium py-2.5 px-4 rounded-xl text-sm transition-all shadow-sm text-center"
-        >
-          <Mic className="w-4 h-4" />
-          <span>Voice Discussion</span>
+          <BookOpen className="size-4 text-[color:var(--orange)]" />
+          <span>Enter Study Space</span>
         </Link>
       </div>
     </div>

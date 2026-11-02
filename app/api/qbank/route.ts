@@ -76,12 +76,15 @@ Return ONLY the JSON array.`;
           config: {
             responseMimeType: "application/json",
             temperature: 0.25,
+            thinkingConfig: {
+              thinkingBudget: 0,
+            },
           },
         });
 
-        // 12-second timeout guard to prevent 3-minute hangs
+        // 30-second timeout guard to prevent premature dropouts
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Gemini QBank timed out after 12s")), 12000)
+          setTimeout(() => reject(new Error("Gemini QBank timed out after 30s")), 30000)
         );
 
         const response: any = await Promise.race([generatePromise, timeoutPromise]);

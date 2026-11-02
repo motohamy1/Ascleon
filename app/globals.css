@@ -565,7 +565,7 @@
     @apply flex-1 py-2 px-4 outline-none text-[var(--text-primary)] placeholder:text-[var(--text-muted)];
   }
   .library-books-grid {
-    @apply grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-3 md:gap-x-10 gap-y-7 md:gap-y-9;
+    @apply grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-x-3 sm:gap-x-6 md:gap-x-8 lg:gap-x-10 gap-y-6 sm:gap-y-8 md:gap-y-9;
   }
   .library-empty-card {
     @apply bg-[var(--bg-secondary)] rounded-[14px] p-12 max-w-md mx-auto;
@@ -675,10 +675,10 @@
     @apply absolute -left-1 top-2 bottom-2 w-3 bg-gradient-to-r from-[#8B7355] to-[#A08060] rounded-l-md z-0;
   }
   .book-card-cover-wrapper {
-    @apply relative bg-white rounded-[14px] overflow-hidden flex items-center justify-center h-[205px] md:h-[240px];
+    @apply relative bg-white rounded-[16px] overflow-hidden flex items-center justify-center h-[185px] sm:h-[210px] md:h-[235px] xl:h-[250px] shadow-sm;
   }
   .book-card-cover {
-    @apply w-auto h-[170px] md:h-[200px] object-cover rounded-lg;
+    @apply w-auto h-[155px] sm:h-[180px] md:h-[200px] xl:h-[215px] object-cover rounded-lg;
     box-shadow: var(--shadow-book);
   }
   .book-card-meta {
@@ -960,6 +960,8 @@ button[data-variant='unstyled'] *,
 
   /* Accents */
   --orange: #ff4c00;
+  --mint: #7fd8c9;
+  --mint-soft: #a8e8dd;
   --magenta: #a1156e;
   --magenta-light: #e0459a;
   --teal: #2e6f68;
@@ -1094,15 +1096,15 @@ button[data-variant='unstyled'] *,
     );
   }
 
-  /* Magenta swatch ramp — the reference's Pantone-chip motif */
+  /* Acid palette swatch ramp — showcasing ink, teal, #7fd8c9 mint, cream and orange */
   .swatch-ramp {
     background: linear-gradient(
       90deg,
-      #5c0c38 0%,
-      #a1156e 26%,
-      #e0459a 52%,
-      #ff5fa2 76%,
-      #ffb3d1 100%
+      #0f0e10 0%,
+      #2e6f68 25%,
+      #7fd8c9 50%,
+      #f6d7a1 75%,
+      #ff4c00 100%
     );
   }
 

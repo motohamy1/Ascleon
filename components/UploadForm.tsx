@@ -332,69 +332,71 @@ const UploadForm = () => {
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            {/* 1. PDF File Upload */}
-            <FileUploader
-              control={form.control}
-              name="pdfFile"
-              label="Book PDF File"
-              acceptTypes={ACCEPTED_PDF_TYPES}
-              icon={Upload}
-              placeholder="Click to upload or drag & drop PDF"
-              hint="PDF files up to 50MB"
-              disabled={isSubmitting}
-            />
+            {/* 1 & 2. Uploaders Grid */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FileUploader
+                control={form.control}
+                name="pdfFile"
+                label="Book PDF File"
+                acceptTypes={ACCEPTED_PDF_TYPES}
+                icon={Upload}
+                placeholder="Click to upload or drag & drop PDF"
+                hint="PDF files up to 50MB"
+                disabled={isSubmitting}
+              />
 
-            {/* 2. Cover Image Upload */}
-            <FileUploader
-              control={form.control}
-              name="coverImage"
-              label="Cover Image (Optional)"
-              acceptTypes={ACCEPTED_IMAGE_TYPES}
-              icon={ImageIcon}
-              placeholder="Click to upload custom cover artwork"
-              hint="Leave empty to auto-extract the first page from the PDF"
-              disabled={isSubmitting}
-            />
+              <FileUploader
+                control={form.control}
+                name="coverImage"
+                label="Cover Image (Optional)"
+                acceptTypes={ACCEPTED_IMAGE_TYPES}
+                icon={ImageIcon}
+                placeholder="Click to upload custom cover artwork"
+                hint="Leave empty to auto-extract the first page from the PDF"
+                disabled={isSubmitting}
+              />
+            </div>
 
-            {/* 3. Title Input */}
-            <FormField
-              control={form.control}
-              name="title"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="form-label">Book Title</FormLabel>
-                  <FormControl>
-                    <Input
-                      className="form-input"
-                      placeholder="e.g. Clean Architecture, Atomic Habits"
-                      {...field}
-                      disabled={isSubmitting}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            {/* 3 & 4. Title and Author Grid */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="title"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="form-label">Book Title</FormLabel>
+                    <FormControl>
+                      <Input
+                        className="form-input"
+                        placeholder="e.g. Clean Architecture, Atomic Habits"
+                        {...field}
+                        disabled={isSubmitting}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-            {/* 4. Author Input */}
-            <FormField
-              control={form.control}
-              name="author"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="form-label">Author Name</FormLabel>
-                  <FormControl>
-                    <Input
-                      className="form-input"
-                      placeholder="e.g. Robert C. Martin"
-                      {...field}
-                      disabled={isSubmitting}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+              <FormField
+                control={form.control}
+                name="author"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="form-label">Author Name</FormLabel>
+                    <FormControl>
+                      <Input
+                        className="form-input"
+                        placeholder="e.g. Robert C. Martin"
+                        {...field}
+                        disabled={isSubmitting}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
 
             {/* 5. Voice Selector */}
             <FormField

@@ -1,139 +1,144 @@
 import Link from 'next/link';
-import Image from 'next/image';
-import { ArrowUpRight } from 'lucide-react';
-import { redirect } from 'next/navigation';
-import { auth } from '@clerk/nextjs/server';
-import { getUserSessions, SessionHistoryItem } from '@/lib/actions/session.actions';
+import { Lock, ArrowUpRight, Sparkles, Brain, Clock, ShieldCheck, BookOpen } from 'lucide-react';
+import { AscleonLogo } from '@/components/ui/AscleonLogo';
 
-const formatDuration = (seconds: number) => {
-  const m = Math.max(1, Math.round(seconds / 60));
-  return `${m} min`;
-};
+const upcomingFeatures = [
+  {
+    icon: Brain,
+    title: 'Adaptive Spaced Repetition',
+    description: 'Scientifically timed recall intervals (FSRS algorithm) designed to prevent memory decay for dense textbook chapters.',
+    tag: 'FSRS v5 Engine',
+    card: 'bg-[color:var(--orange)] text-[color:var(--ink)]',
+  },
+  {
+    icon: Sparkles,
+    title: 'AI Active-Recall Flashcards',
+    description: 'Auto-synthesizes high-yield board question vignettes and clozes directly from passages you highlighted while reading.',
+    tag: 'Instant Sync',
+    card: 'bg-[color:var(--cream)] text-[color:var(--ink)]',
+  },
+  {
+    icon: Clock,
+    title: 'Oral Viva Audio Replay',
+    description: 'Listen back to key diagnostic moments from your live voice mentor sessions with synchronized textbook citations.',
+    tag: 'Bilingual Audio',
+    card: 'bg-[#7fd8c9] text-[color:var(--ink)]',
+  },
+];
 
-const formatDate = (d: string) =>
-  new Date(d).toLocaleDateString('en-US', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-
-const RevisionPage = async () => {
-  const { userId } = await auth();
-  if (!userId) redirect('/');
-
-  const sessionsResult = await getUserSessions(40);
-  const sessions = sessionsResult.success
-    ? (sessionsResult.data as SessionHistoryItem[])
-    : [];
-
-  const totalMinutes = Math.round(
-    sessions.reduce((sum, s) => sum + (s.durationSeconds ?? 0), 0) / 60,
-  );
-
+const RevisionPage = () => {
   return (
-    <main className="mx-auto w-full max-w-[1580px] px-3 pt-[108px] pb-16 sm:px-4 sm:pt-[116px] acid-bg">
-      <div className="rounded-[32px] bg-[color:var(--ink)] p-3 shadow-frame sm:p-4">
+    <main className="mx-auto w-full max-w-[1840px] 2xl:max-w-[2160px] min-h-[calc(100vh-120px)] px-3.5 pt-[94px] pb-16 sm:px-6 md:px-8 lg:px-10 xl:px-12 sm:pt-[102px] acid-bg transition-all">
+      <div className="rounded-[24px] sm:rounded-[32px] bg-[color:var(--ink)] p-2.5 sm:p-4 shadow-frame">
         <div className="flex flex-col gap-3">
-          {/* HEADER + LOG STATS */}
-          <section className="grid gap-3 lg:grid-cols-12">
-            <div className="flex flex-col justify-between rounded-[22px] bg-[color:var(--cream)] p-6 sm:p-9 lg:col-span-8">
-              <div className="flex items-center justify-between gap-6">
-                <p className="meta-label text-[color:var(--ink)]/70">
-                  Revision · the logbook
-                </p>
-                <div className="barcode h-7 w-20 text-[color:var(--ink)]" />
+          {/* HERO LOCKED BANNER */}
+          <section className="relative overflow-hidden rounded-[24px] bg-[color:var(--cream)] p-8 sm:p-12 lg:p-14 min-h-[370px] sm:min-h-[420px] flex flex-col justify-between shadow-chip">
+            {/* Top Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <AscleonLogo size={42} className="shadow-xs" />
+                <div>
+                  <p className="meta-label text-[color:var(--ink)]/70">
+                    Ascleon® · Revision Engine
+                  </p>
+                  <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-[color:var(--ink)]/50">
+                    Module Under Construction
+                  </p>
+                </div>
               </div>
-              <h1 className="display mt-8 text-[clamp(2.6rem,6vw,4.6rem)] text-[color:var(--ink)]">
-                Replay &amp; re-think.
-              </h1>
-              <p className="mt-4 max-w-md text-[15px] leading-relaxed text-[color:var(--ink-soft)]">
-                Every conversation you&apos;ve had with a book, in one place.
-                Open the reader again and pick up the thread.
-              </p>
+
+              {/* Status Pill */}
+              <div className="flex items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-4 py-2 text-xs font-black uppercase tracking-wider text-[color:var(--ink)] shadow-chip">
+                <Lock className="size-4 stroke-[2.5]" />
+                <span>Locked • Upcoming Soon</span>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 lg:col-span-4">
-              <div className="card-lift flex flex-col justify-between rounded-[18px] bg-[color:var(--orange)] p-5">
-                <p className="meta-label text-[color:var(--ink)]/70">
-                  Sessions
-                </p>
-                <p className="display mt-6 text-[44px] text-[color:var(--ink)]">
-                  {sessions.length}
-                </p>
+            {/* Hero Content */}
+            <div className="my-auto py-6 max-w-2xl">
+              <h1 className="display text-[clamp(2.8rem,6.5vw,5.2rem)] leading-[0.93] text-[color:var(--ink)]">
+                Rebuilding from
+                <br />
+                the ground up.
+              </h1>
+              <p className="mt-6 text-[15px] sm:text-base leading-relaxed text-[color:var(--ink-soft)] max-w-xl">
+                We are actively redesigning the Revision Vault to introduce board-grade spaced
+                repetition, automatic highlight extraction, and oral viva audio analytics.
+                This section is temporarily locked while the new architecture is being built.
+              </p>
+
+              {/* Action Buttons */}
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                <Link
+                  href="/library"
+                  className="flex items-center gap-2.5 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--ink)] px-7 py-3.5 text-xs font-bold uppercase tracking-[0.08em] text-[color:var(--cream)] shadow-chip transition-all hover:bg-[#232029] active:scale-[0.98]"
+                >
+                  <BookOpen className="size-4 text-[color:var(--orange)]" />
+                  <span>Return to Library</span>
+                </Link>
+
+                <Link
+                  href="/space/active"
+                  className="flex items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-xs font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-all hover:brightness-105 active:scale-[0.98]"
+                >
+                  <span>Open Study Space</span>
+                  <ArrowUpRight className="size-4" />
+                </Link>
               </div>
-              <div className="card-lift flex flex-col justify-between rounded-[18px] bg-[color:var(--panel)] p-5">
-                <p className="meta-label text-[color:var(--ink)]/55">
-                  Minutes logged
-                </p>
-                <p className="display mt-6 text-[44px] text-[color:var(--ink)]">
-                  {totalMinutes}
-                </p>
-              </div>
-              <div className="col-span-2 flex items-center justify-between rounded-[18px] bg-[color:var(--ink)] p-5 text-[color:var(--cream)]">
-                <p className="meta-label text-[color:var(--cream)]/55">
-                  Second pass
-                </p>
-                <div className="chrome-sphere size-10" />
-              </div>
+            </div>
+
+            {/* Decorative Y2K Chrome Accent */}
+            <div className="pointer-events-none absolute -bottom-10 -right-8 hidden sm:flex items-end gap-3 opacity-80">
+              <div className="chrome-sphere mb-8 size-14" />
+              <div className="chrome-sphere-violet mb-4 size-22" />
+              <div className="chrome-sphere size-36" />
             </div>
           </section>
 
-          {/* LOG LIST */}
-          <section className="rounded-[22px] bg-[color:var(--panel)] p-5 sm:p-6">
-            {sessions.length === 0 ? (
-              <div className="flex flex-col items-center gap-4 py-14 text-center">
-                <div className="chrome-sphere-violet size-14" />
-                <h2 className="display text-[30px] text-[color:var(--ink)]">
-                  Nothing to revise yet.
-                </h2>
-                <p className="max-w-sm text-[13px] font-medium leading-relaxed text-[color:var(--ink)]/60">
-                  Once you talk with a book, every session is logged here for a
-                  second pass.
-                </p>
-                <Link
-                  href="/library"
-                  className="group mt-1 inline-flex items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-6 py-3 text-[13px] font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5"
+          {/* PREVIEW OF UPCOMING MODULES */}
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {upcomingFeatures.map((f, i) => {
+              const Icon = f.icon;
+              return (
+                <article
+                  key={i}
+                  className={`card-lift flex min-h-[210px] sm:min-h-[235px] flex-col justify-between rounded-[22px] p-6 sm:p-7 shadow-chip ${f.card}`}
                 >
-                  Open the library
-                  <ArrowUpRight className="size-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                </Link>
-              </div>
-            ) : (
-              <ul className="flex flex-col divide-y divide-[color:var(--ink)]/10">
-                {sessions.map((s) => (
-                  <li key={s._id}>
-                    <Link
-                      href={`/books/${s.bookSlug}`}
-                      className="group flex items-center gap-4 rounded-lg px-2 py-3.5 transition-colors hover:bg-[color:var(--ink)]/[0.04]"
-                    >
-                      <div className="relative h-14 w-10 shrink-0 overflow-hidden rounded-md bg-[color:var(--paper)]">
-                        {s.bookCoverURL && (
-                          <Image
-                            src={s.bookCoverURL}
-                            alt=""
-                            fill
-                            sizes="40px"
-                            className="object-cover"
-                          />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-bold text-[color:var(--ink)]">
-                          {s.bookTitle}
-                        </p>
-                        <p className="meta-label mt-0.5 text-[color:var(--ink)]/50">
-                          {formatDate(s.startedAt)}
-                        </p>
-                      </div>
-                      <p className="shrink-0 text-[13px] font-bold text-[color:var(--ink)]/70">
-                        {formatDuration(s.durationSeconds)}
-                      </p>
-                      <ArrowUpRight className="size-4 shrink-0 text-[color:var(--ink)]/50 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
+                  <div className="flex items-center justify-between">
+                    <div className="flex size-11 items-center justify-center rounded-xl border-2 border-[color:var(--ink)] bg-white/30 text-[color:var(--ink)]">
+                      <Icon className="size-5" />
+                    </div>
+                    <span className="rounded-full border border-[color:var(--ink)]/30 bg-black/5 px-3 py-1 font-mono text-[10px] font-bold uppercase text-[color:var(--ink)]">
+                      {f.tag}
+                    </span>
+                  </div>
+
+                  <div>
+                    <h2 className="display text-2xl text-[color:var(--ink)] leading-snug">{f.title}</h2>
+                    <p className="mt-3 text-xs sm:text-[13px] font-medium leading-relaxed text-[color:var(--ink)]/80">
+                      {f.description}
+                    </p>
+                  </div>
+                </article>
+              );
+            })}
+          </section>
+
+          {/* BOTTOM NOTICE */}
+          <section className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-[20px] border border-white/10 bg-white/5 p-5 text-center sm:text-left">
+            <div className="flex items-center gap-3">
+              <ShieldCheck className="size-5 shrink-0 text-[#7fd8c9]" />
+              <p className="text-xs text-[color:var(--cream)]/80">
+                All previous reading sessions and study notes remain safe and linked to your books in the Library.
+              </p>
+            </div>
+            <Link
+              href="/library"
+              className="group inline-flex shrink-0 items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[color:var(--orange)] hover:underline underline-offset-4"
+            >
+              <span>Explore Books</span>
+              <ArrowUpRight className="size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+            </Link>
           </section>
         </div>
       </div>

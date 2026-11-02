@@ -120,11 +120,14 @@ Spoken Dialogue Rules:
       contents,
       config: {
         temperature: 0.35,
+        thinkingConfig: {
+          thinkingBudget: 0,
+        },
       },
     });
 
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Voice response timed out after 10s")), 10000)
+      setTimeout(() => reject(new Error("Voice response timed out after 25s")), 25000)
     );
 
     const response: any = await Promise.race([generatePromise, timeoutPromise]);

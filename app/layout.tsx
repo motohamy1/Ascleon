@@ -22,6 +22,15 @@ const monaSans = Mona_Sans({
 export const metadata: Metadata = {
   title: "Ascleon",
   description: "Talk to your books. Ascleon turns any difficult book into a live conversation with an AI co-reader.",
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+    ],
+    apple: [
+      { url: '/assets/ascleon-logo.svg' },
+    ],
+  },
 };
 
 export default function RootLayout({

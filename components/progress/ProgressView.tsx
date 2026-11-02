@@ -3,6 +3,7 @@ import Image from 'next/image';
 import { ArrowUpRight } from 'lucide-react';
 import { IBook } from '@/types';
 import { SessionHistoryItem } from '@/lib/actions/session.actions';
+import { AscleonLogo } from '@/components/ui/AscleonLogo';
 
 interface ProgressViewProps {
   books: IBook[];
@@ -56,13 +57,17 @@ const computeLastWeek = (sessions: SessionHistoryItem[]) => {
 const StatTile = ({
   value,
   label,
+  cardClass = 'bg-[color:var(--panel)] text-[color:var(--ink)]',
+  dimClass = 'text-[color:var(--ink)]/55',
 }: {
   value: number | string;
   label: string;
+  cardClass?: string;
+  dimClass?: string;
 }) => (
-  <div className="card-lift rounded-[18px] bg-[color:var(--panel)] p-5">
-    <p className="display text-[42px] text-[color:var(--ink)]">{value}</p>
-    <p className="meta-label mt-1 text-[color:var(--ink)]/55">{label}</p>
+  <div className={`card-lift flex min-h-[130px] sm:min-h-[155px] lg:min-h-[175px] flex-col justify-between rounded-[22px] p-5 sm:p-6 shadow-chip ${cardClass}`}>
+    <p className="display text-[38px] sm:text-[44px] lg:text-[48px] leading-none">{value}</p>
+    <p className={`meta-label mt-2 text-xs sm:text-[13px] ${dimClass}`}>{label}</p>
   </div>
 );
 
@@ -98,23 +103,29 @@ const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
   return (
     <div className="flex flex-col gap-3">
       {/* ROW 1 — journey header + pick up where you left */}
-      <section className="grid gap-3 lg:grid-cols-12">
-        <div className="flex min-h-[300px] flex-col justify-between rounded-[22px] bg-[color:var(--cream)] p-6 sm:p-9 lg:col-span-8 lg:min-h-[340px]">
+      <section className="grid gap-3 md:grid-cols-12">
+        <div className="flex min-h-[310px] sm:min-h-[340px] lg:min-h-[370px] flex-col justify-between rounded-[24px] bg-[color:var(--cream)] p-6 sm:p-9 lg:p-10 md:col-span-7 lg:col-span-8">
           <div className="flex items-start justify-between gap-6">
-            <p className="meta-label text-[color:var(--ink)]/70">
-              Progress · the journey
-            </p>
-            <div className="flex size-14 shrink-0 items-center justify-center rounded-full border-2 border-[color:var(--ink)]">
-              <span className="display text-[15px] leading-none">BK®</span>
+            <div className="flex items-center gap-2">
+              <p className="meta-label text-[color:var(--ink)]/70">
+                Progress · the journey
+              </p>
+              <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--ink)]/20 bg-[#7fd8c9] px-2 py-0.5 font-mono text-[9.5px] font-bold text-[color:var(--ink)]">
+                <span className="size-1.5 rounded-full bg-[color:var(--ink)] animate-pulse" />
+                Live Sync
+              </span>
+            </div>
+            <div className="flex size-14 shrink-0 items-center justify-center">
+              <AscleonLogo size={56} className="transition-transform duration-200 hover:scale-105" />
             </div>
           </div>
           <div>
-            <h1 className="display text-[color:var(--ink)] text-[clamp(2.6rem,6vw,5rem)]">
+            <h1 className="display text-[color:var(--ink)] text-[clamp(2.6rem,6vw,5.2rem)] leading-[0.98]">
               {greetingPeriod()},
               <br />
               {name}.
             </h1>
-            <p className="mt-4 max-w-md text-[15px] leading-relaxed text-[color:var(--ink-soft)]">
+            <p className="mt-5 max-w-md text-[15px] sm:text-base leading-relaxed text-[color:var(--ink-soft)]">
               Your whole study run in one view — the sessions, the minutes and
               the heavy books you are out-muscling. Med-school dense counts
               double.
@@ -122,26 +133,26 @@ const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 lg:col-span-4">
+        <div className="flex flex-col gap-3 md:col-span-5 lg:col-span-4">
           {resume ? (
             <Link
               href={resume.href}
-              className="card-lift group flex flex-1 cursor-pointer flex-col justify-between gap-6 rounded-[22px] bg-[color:var(--orange)] p-6 shadow-chip"
+              className="card-lift group flex min-h-[310px] sm:min-h-[340px] lg:min-h-[370px] flex-1 cursor-pointer flex-col justify-between gap-5 rounded-[24px] bg-[color:var(--orange)] p-6 sm:p-7 shadow-chip"
             >
               <div className="flex items-start justify-between gap-4">
                 <p className="meta-label text-[color:var(--ink)]/80">
                   Pick it up
                 </p>
-                <ArrowUpRight className="size-7 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
+                <ArrowUpRight className="size-8 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
               </div>
-              <div className="flex items-end gap-4">
-                <div className="relative h-36 w-24 shrink-0 overflow-hidden rounded-lg border-2 border-[color:var(--ink)]/20 bg-white/40">
+              <div className="flex items-end gap-5">
+                <div className="relative h-36 w-26 sm:h-42 sm:w-30 shrink-0 overflow-hidden rounded-xl border-2 border-[color:var(--ink)]/20 bg-white/40 shadow-sm">
                   {resume.cover && (
                     <Image
                       src={resume.cover}
                       alt={resume.title}
                       fill
-                      sizes="96px"
+                      sizes="144px"
                       className="object-cover"
                     />
                   )}
@@ -150,7 +161,7 @@ const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
                   <p className="meta-label text-[color:var(--ink)]/70">
                     Continue reading
                   </p>
-                  <h2 className="display mt-2 line-clamp-3 text-[27px] leading-[1.02] text-[color:var(--ink)]">
+                  <h2 className="display mt-2 line-clamp-3 text-[26px] sm:text-[30px] leading-[1.05] text-[color:var(--ink)]">
                     {resume.title}
                   </h2>
                 </div>
@@ -159,19 +170,19 @@ const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
           ) : (
             <Link
               href="/library"
-              className="card-lift group flex min-h-[280px] flex-1 cursor-pointer flex-col justify-between rounded-[22px] bg-[color:var(--orange)] p-6 shadow-chip"
+              className="card-lift group flex min-h-[310px] sm:min-h-[340px] lg:min-h-[370px] flex-1 cursor-pointer flex-col justify-between rounded-[24px] bg-[color:var(--orange)] p-6 sm:p-7 shadow-chip"
             >
               <p className="meta-label text-[color:var(--ink)]/80">
                 The journey starts here
               </p>
               <div>
-                <h2 className="display text-[36px] text-[color:var(--ink)]">
+                <h2 className="display text-[38px] sm:text-[44px] leading-[1.05] text-[color:var(--ink)]">
                   Add your
                   <br />
                   first book.
                 </h2>
-                <div className="mt-4 flex items-center justify-between">
-                  <p className="text-sm font-semibold text-[color:var(--ink)]/80">
+                <div className="mt-6 flex items-center justify-between">
+                  <p className="text-sm font-bold text-[color:var(--ink)]/80">
                     Progress begins on page one.
                   </p>
                   <ArrowUpRight className="size-8 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
@@ -183,35 +194,35 @@ const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
       </section>
 
       {/* ROW 2 — the study log (real data) */}
-      <section className="grid gap-3 lg:grid-cols-12">
+      <section className="grid gap-3 md:grid-cols-12">
         {/* 7-day session chart */}
-        <div className="rounded-[22px] bg-[color:var(--panel)] p-5 sm:p-6 lg:col-span-4">
+        <div className="flex min-h-[200px] sm:min-h-[225px] lg:min-h-[245px] flex-col justify-between rounded-[22px] bg-[color:var(--panel)] p-5 sm:p-7 shadow-chip md:col-span-5 lg:col-span-4">
           <div className="flex items-baseline justify-between gap-4">
             <p className="meta-label text-[color:var(--ink)]/60">
               Study log · last 7 days
             </p>
-            <p className="text-[13px] font-bold text-[color:var(--ink)]">
+            <p className="text-sm font-bold text-[color:var(--ink)]">
               {weekMinutes} min
             </p>
           </div>
 
-          <div className="mt-5 flex h-28 items-end gap-1.5 sm:gap-2">
+          <div className="my-auto py-2.5 flex h-28 sm:h-32 items-end gap-2 sm:gap-2.5">
             {week.map((d) => (
-              <div key={d.key} className="group/b flex flex-1 flex-col items-center gap-1.5">
+              <div key={d.key} className="group/b flex flex-1 flex-col items-center gap-2">
                 <div
                   title={`${d.minutes} min`}
                   className="w-full rounded-full transition-transform duration-200 group-hover/b:scale-y-[1.03] origin-bottom"
                   style={{
-                    height: `${d.minutes > 0 ? Math.max(8, (d.minutes / peak) * 100) : 4}%`,
+                    height: `${d.minutes > 0 ? Math.max(10, (d.minutes / peak) * 100) : 6}%`,
                     backgroundColor: d.isToday
                       ? 'var(--orange)'
                       : d.minutes > 0
-                        ? 'var(--ink)'
+                        ? '#7fd8c9'
                         : 'color-mix(in srgb, var(--ink) 12%, transparent)',
                   }}
                 />
                 <span
-                  className={`meta-label text-[9px] ${d.isToday ? 'text-[color:var(--ink)]' : 'text-[color:var(--ink)]/40'}`}
+                  className={`meta-label text-[10px] ${d.isToday ? 'text-[color:var(--ink)] font-bold' : 'text-[color:var(--ink)]/40'}`}
                 >
                   {d.letter}
                 </span>
@@ -219,82 +230,107 @@ const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
             ))}
           </div>
           {sessions.length === 0 && (
-            <p className="mt-3 text-[12px] font-medium text-[color:var(--ink)]/55">
+            <p className="mt-2 text-[12.5px] font-medium text-[color:var(--ink)]/55">
               No sessions this week yet. Open a book and the log fills itself.
             </p>
           )}
         </div>
 
         {/* Row of own stats */}
-        <div className="grid grid-cols-2 gap-3 lg:col-span-8 lg:grid-cols-4">
-          <StatTile value={books.length} label="Books on shelf" />
-          <StatTile value={sessions.length} label="Sessions logged" />
-          <StatTile value={minutes} label="Minutes in conversation" />
-          <StatTile value={favorites} label="Marked favorites" />
+        <div className="grid grid-cols-2 gap-3 md:col-span-7 lg:col-span-8 lg:grid-cols-4">
+          <StatTile
+            value={books.length}
+            label="Books on shelf"
+            cardClass="bg-[color:var(--panel)] text-[color:var(--ink)]"
+            dimClass="text-[color:var(--ink)]/55"
+          />
+          <StatTile
+            value={sessions.length}
+            label="Sessions logged"
+            cardClass="bg-[#7fd8c9] text-[color:var(--ink)]"
+            dimClass="text-[color:var(--ink)]/70"
+          />
+          <StatTile
+            value={minutes}
+            label="Minutes in conversation"
+            cardClass="bg-[color:var(--orange)] text-[color:var(--ink)]"
+            dimClass="text-[color:var(--ink)]/75"
+          />
+          <StatTile
+            value={favorites}
+            label="Marked favorites"
+            cardClass="bg-[color:var(--ink)] text-[color:var(--cream)]"
+            dimClass="text-[color:var(--cream)]/60"
+          />
         </div>
       </section>
 
       {/* ROW 3 — shelf status ramp + recent sessions + actions */}
-      <section className="grid gap-3 lg:grid-cols-12">
+      <section className="grid gap-3 md:grid-cols-12">
         {/* Reading-status distribution */}
-        <div className="rounded-[22px] bg-[color:var(--cream)] p-5 sm:p-6 lg:col-span-4">
-          <p className="meta-label text-[color:var(--ink)]/60">Shelf status</p>
+        <div className="flex min-h-[260px] sm:min-h-[290px] flex-col justify-between rounded-[22px] bg-[color:var(--cream)] p-5 sm:p-7 md:col-span-6 lg:col-span-4">
+          <div>
+            <p className="meta-label text-[color:var(--ink)]/60">Shelf status</p>
 
-          {statusTotal === 0 ? (
-            <p className="mt-3 text-[13px] font-medium text-[color:var(--ink)]/70">
-              Nothing shelved yet — upload a book and this ramp starts moving.
-            </p>
-          ) : (
-            <>
-              <div className="mt-4 flex h-9 gap-1 overflow-hidden rounded-full border-2 border-[color:var(--ink)]">
-                {statusCounts.in_progress > 0 && (
-                  <div
-                    className="h-full bg-[color:var(--orange)]"
-                    style={{ width: `${(statusCounts.in_progress / statusTotal) * 100}%` }}
-                  />
-                )}
-                {statusCounts.read > 0 && (
-                  <div
-                    className="h-full bg-[color:var(--ink)]"
-                    style={{ width: `${(statusCounts.read / statusTotal) * 100}%` }}
-                  />
-                )}
-                {statusCounts.not_started > 0 && (
-                  <div
-                    className="h-full bg-[color:var(--cream-deep)]"
-                    style={{ width: `${(statusCounts.not_started / statusTotal) * 100}%` }}
-                  />
-                )}
-              </div>
-              <ul className="meta-label mt-3 flex flex-col gap-1.5 text-[color:var(--ink)]/60">
-                <li className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <span className="size-2.5 rounded-full bg-[color:var(--orange)]" />
-                    In progress
-                  </span>
-                  {statusCounts.in_progress}
-                </li>
-                <li className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <span className="size-2.5 rounded-full bg-[color:var(--ink)]" />
-                    Read
-                  </span>
-                  {statusCounts.read}
-                </li>
-                <li className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <span className="size-2.5 rounded-full bg-[color:var(--cream-deep)]" />
-                    Not started
-                  </span>
-                  {statusCounts.not_started}
-                </li>
-              </ul>
-            </>
-          )}
+            {statusTotal === 0 ? (
+              <p className="mt-4 text-[13.5px] font-medium leading-relaxed text-[color:var(--ink)]/70">
+                Nothing shelved yet — upload a book and this ramp starts moving.
+              </p>
+            ) : (
+              <>
+                <div className="mt-5 flex h-10 gap-1 overflow-hidden rounded-full border-2 border-[color:var(--ink)]">
+                  {statusCounts.in_progress > 0 && (
+                    <div
+                      className="h-full bg-[color:var(--orange)]"
+                      style={{ width: `${(statusCounts.in_progress / statusTotal) * 100}%` }}
+                    />
+                  )}
+                  {statusCounts.read > 0 && (
+                    <div
+                      className="h-full bg-[#7fd8c9]"
+                      style={{ width: `${(statusCounts.read / statusTotal) * 100}%` }}
+                    />
+                  )}
+                  {statusCounts.not_started > 0 && (
+                    <div
+                      className="h-full bg-[color:var(--cream-deep)]"
+                      style={{ width: `${(statusCounts.not_started / statusTotal) * 100}%` }}
+                    />
+                  )}
+                </div>
+                <ul className="meta-label mt-4 flex flex-col gap-2 text-[color:var(--ink)]/60">
+                  <li className="flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <span className="size-2.5 rounded-full bg-[color:var(--orange)]" />
+                      In progress
+                    </span>
+                    <span className="font-bold text-[color:var(--ink)]">{statusCounts.in_progress}</span>
+                  </li>
+                  <li className="flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <span className="size-2.5 rounded-full bg-[#7fd8c9]" />
+                      Read
+                    </span>
+                    <span className="font-bold text-[color:var(--ink)]">{statusCounts.read}</span>
+                  </li>
+                  <li className="flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <span className="size-2.5 rounded-full bg-[color:var(--cream-deep)]" />
+                      Not started
+                    </span>
+                    <span className="font-bold text-[color:var(--ink)]">{statusCounts.not_started}</span>
+                  </li>
+                </ul>
+              </>
+            )}
+          </div>
+          <div className="mt-4 pt-3 border-t border-[color:var(--ink)]/10 text-xs font-semibold text-[color:var(--ink)]/60">
+            {statusTotal} {statusTotal === 1 ? 'total title' : 'total titles'} tracked
+          </div>
         </div>
 
         {/* Recent sessions */}
-        <div className="rounded-[22px] bg-[color:var(--panel)] p-5 sm:p-6 lg:col-span-5">
+        <div className="flex min-h-[260px] sm:min-h-[290px] flex-col justify-between rounded-[22px] bg-[color:var(--panel)] p-5 sm:p-7 md:col-span-6 lg:col-span-5">
           <div className="flex items-center justify-between gap-4">
             <p className="meta-label text-[color:var(--ink)]/60">
               Recent sessions
@@ -311,59 +347,64 @@ const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
           </div>
 
           {sessions.length === 0 ? (
-            <div className="flex flex-col items-start gap-3 py-10">
+            <div className="flex flex-col items-start gap-3 py-10 my-auto">
               <p className="display text-[26px] text-[color:var(--ink)]">
                 Nothing on tape yet.
               </p>
-              <p className="max-w-sm text-[13px] font-medium text-[color:var(--ink)]/60">
+              <p className="max-w-sm text-sm font-medium leading-relaxed text-[color:var(--ink)]/60">
                 Open a book, press the mic, and start asking. Every session
                 lands here afterwards.
               </p>
             </div>
           ) : (
-            <ul className="mt-4 flex flex-col divide-y divide-[color:var(--ink)]/10">
+            <ul className="mt-4 flex flex-col divide-y divide-[color:var(--ink)]/10 my-auto">
               {sessions.slice(0, 4).map((s) => (
                 <li key={s._id}>
                   <Link
                     href={`/books/${s.bookSlug}`}
-                    className="group flex items-center gap-4 rounded-lg px-2 py-3 transition-colors hover:bg-[color:var(--ink)]/[0.04]"
+                    className="group flex items-center gap-4 rounded-xl px-2.5 py-3 transition-colors hover:bg-[color:var(--ink)]/[0.04]"
                   >
-                    <div className="relative h-13 w-9 shrink-0 overflow-hidden rounded-md bg-[color:var(--paper)]">
+                    <div className="relative h-15 w-11 shrink-0 overflow-hidden rounded-lg bg-[color:var(--paper)] shadow-xs">
                       {s.bookCoverURL && (
                         <Image
                           src={s.bookCoverURL}
                           alt=""
                           fill
-                          sizes="36px"
+                          sizes="44px"
                           className="object-cover"
                         />
                       )}
                     </div>
-                    <p className="min-w-0 flex-1 truncate text-sm font-bold text-[color:var(--ink)]">
-                      {s.bookTitle}
-                    </p>
-                    <p className="meta-label shrink-0 text-[color:var(--ink)]/55">
-                      {formatDate(s.startedAt)} · {formatDuration(s.durationSeconds)}
-                    </p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-[color:var(--ink)]">
+                        {s.bookTitle}
+                      </p>
+                      <p className="meta-label mt-0.5 text-[color:var(--ink)]/55">
+                        {formatDate(s.startedAt)} · {formatDuration(s.durationSeconds)}
+                      </p>
+                    </div>
                     <ArrowUpRight className="size-4 shrink-0 text-[color:var(--ink)]/50 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
                   </Link>
                 </li>
               ))}
             </ul>
           )}
+          <div className="mt-4 pt-3 border-t border-[color:var(--ink)]/10 text-xs font-semibold text-[color:var(--ink)]/60">
+            {sessions.length} {sessions.length === 1 ? 'session recorded' : 'total sessions recorded'}
+          </div>
         </div>
 
         {/* Quick actions */}
-        <div className="flex flex-col gap-3 lg:col-span-3">
+        <div className="flex flex-col sm:flex-row lg:flex-col justify-between gap-3 md:col-span-12 lg:col-span-3">
           <Link
             href="/library"
-            className="card-lift group flex flex-1 cursor-pointer items-start justify-between gap-4 rounded-[22px] bg-[color:var(--ink)] p-6 text-[color:var(--cream)] shadow-chip"
+            className="card-lift group flex min-h-[125px] sm:min-h-[140px] flex-1 cursor-pointer items-start justify-between gap-4 rounded-[22px] bg-[color:var(--ink)] p-5 sm:p-6 text-[color:var(--cream)] shadow-chip"
           >
             <div>
               <p className="meta-label text-[color:var(--cream)]/55">
                 Quick action
               </p>
-              <h3 className="display mt-2 text-[26px]">Add a book</h3>
+              <h3 className="display mt-2 text-[26px] sm:text-[28px]">Add a book</h3>
               <div className="barcode mt-3 h-7 w-full max-w-[120px] text-[color:var(--cream)]" />
             </div>
             <ArrowUpRight className="size-6 shrink-0 transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
@@ -371,11 +412,11 @@ const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
 
           <Link
             href="/library"
-            className="card-lift group flex flex-1 cursor-pointer items-start justify-between gap-4 rounded-[22px] bg-[color:var(--paper)] p-6 shadow-chip border-2 border-[color:var(--ink)]/10"
+            className="card-lift group flex min-h-[125px] sm:min-h-[140px] flex-1 cursor-pointer items-start justify-between gap-4 rounded-[22px] bg-[#7fd8c9] p-5 sm:p-6 text-[color:var(--ink)] shadow-chip border-2 border-[color:var(--ink)]"
           >
             <div>
-              <p className="meta-label text-[color:var(--ink)]/55">Browse</p>
-              <h3 className="display mt-2 text-[26px] text-[color:var(--ink)]">
+              <p className="meta-label text-[color:var(--ink)]/70">Browse</p>
+              <h3 className="display mt-2 text-[26px] sm:text-[28px] text-[color:var(--ink)]">
                 The library
               </h3>
             </div>

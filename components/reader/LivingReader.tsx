@@ -15,6 +15,7 @@ import {
   ScannedPinItem,
 } from "@/components/reader/SourceSelectionToolbar";
 import OriginalPdfViewer from "./OriginalPdfViewer";
+import { AscleonLogo } from "@/components/ui/AscleonLogo";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -74,9 +75,9 @@ interface ChatMessage {
 }
 
 const CHAT_SUGGESTION_CHIPS = [
+  "📑 Executive page summary",
   "Explain core mechanism",
   "High-yield exam pearls",
-  "Step-by-step breakdown",
   "Key invariants & trade-offs",
 ];
 
@@ -88,8 +89,17 @@ export default function LivingReader({
   const [currentIdx, setCurrentIdx] = useState(0);
   const [theme, setTheme] = useState<ThemeMode>("paper");
   const [zoomLevel, setZoomLevel] = useState<number>(100);
-  const [fitMode, setFitMode] = useState<FitMode>("normal");
+  const [fitMode, setFitMode] = useState<FitMode>("fit-width");
   const [paragraphInteractiveMode, setParagraphInteractiveMode] = useState(true);
+  const [mobileActivePane, setMobileActivePane] = useState<"reader" | "studio">("reader");
+  const [isLgScreen, setIsLgScreen] = useState(true);
+
+  useEffect(() => {
+    const checkLg = () => setIsLgScreen(window.innerWidth >= 1024);
+    checkLg();
+    window.addEventListener("resize", checkLg);
+    return () => window.removeEventListener("resize", checkLg);
+  }, []);
 
   // Dual-Track View Mode: Original Authentic PDF vs Structured Reflow
   const [readerViewMode, setReaderViewMode] = useState<"original_pdf" | "reflow">(
@@ -105,8 +115,8 @@ export default function LivingReader({
     pageNumber: number;
   } | null>(null);
 
-  // Right Panel: All Controls & Study Studio
-  const [activeIntent, setActiveIntent] = useState<StudyIntent>("morph");
+  // Right Panel: All Controls & Study Studio (Default: AI Chat)
+  const [activeIntent, setActiveIntent] = useState<StudyIntent>("chat");
   const [language, setLanguage] = useState<VoiceLanguage>(
     (book.language as VoiceLanguage) || DEFAULT_VOICE_LANGUAGE,
   );
@@ -119,6 +129,7 @@ export default function LivingReader({
 
   // Dynamic QBank State
   const [dynamicQBankList, setDynamicQBankList] = useState<QBankVignette[]>([]);
+  const [qbankCache, setQBankCache] = useState<Record<number, QBankVignette[]>>({});
   const [isQBankLoading, setIsQBankLoading] = useState(false);
   const [activeQBankIdx, setActiveQBankIdx] = useState(0);
   const [quizAnswer, setQuizAnswer] = useState<number | null>(null);
@@ -126,6 +137,7 @@ export default function LivingReader({
 
   // Dynamic Summary State
   const [dynamicSummary, setDynamicSummary] = useState<any>(null);
+  const [summaryCache, setSummaryCache] = useState<Record<number, any>>({});
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
 
   // Source Selection & Background Sync
@@ -271,14 +283,24 @@ export default function LivingReader({
     }
   }, []);
 
-  // Trigger real Morph generation via /api/morph (supports custom override text & diagram)
-  const handleRunMorph = async (overrideSelection?: string, diagramUrl?: string) => {
+  // Trigger real Morph generation via /api/morph (supports custom override text, diagram & cached retrieval)
+  const handleRunMorph = async (
+    overrideSelection?: string,
+    diagramUrl?: string,
+    forceRefresh = false
+  ) => {
     const targetSelection = overrideSelection ?? selectedText;
     const activeKey = book.fileURL ? activePdfPage : currentIdx;
     const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
     const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
 
     setActiveIntent("morph");
+
+    // Instant local cache hit: if this page was already morphed in this session and not forcing refresh, restore in 0ms!
+    if (!forceRefresh && !targetSelection && !diagramUrl && morphArtifacts[activeKey]) {
+      return;
+    }
+
     setIsMorphLoading(true);
     try {
       const precedingSegments = segments
@@ -299,7 +321,7 @@ export default function LivingReader({
           precedingSegments,
           selectedText: targetSelection || undefined,
           snippedDiagram: diagramUrl || snippedDiagram?.url || null,
-          forceRefresh: true,
+          forceRefresh: Boolean(forceRefresh),
         }),
       });
 
@@ -326,13 +348,23 @@ export default function LivingReader({
     }
   };
 
-  // Dynamic QBank generator
-  const loadDynamicQBank = useCallback(async (diagramUrl?: string) => {
+  // Dynamic QBank generator with per-page caching
+  const loadDynamicQBank = useCallback(async (diagramUrl?: string, forceRefresh = false) => {
+    const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+
+    // Instant cache hit: if QBank was already generated for this page, load instantly (0ms)
+    if (!forceRefresh && !diagramUrl && !selectedText && qbankCache[activePage]?.length) {
+      setDynamicQBankList(qbankCache[activePage]);
+      setQuizSubmitted(false);
+      setQuizAnswer(null);
+      setActiveQBankIdx(0);
+      return;
+    }
+
     setIsQBankLoading(true);
     setQuizSubmitted(false);
     setQuizAnswer(null);
     try {
-      const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
       const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
 
       const res = await fetch("/api/qbank", {
@@ -350,6 +382,7 @@ export default function LivingReader({
         const data = await res.json();
         if (data?.questions && data.questions.length > 0) {
           setDynamicQBankList(data.questions);
+          setQBankCache((prev) => ({ ...prev, [activePage]: data.questions }));
           setActiveQBankIdx(0);
         }
       }
@@ -358,13 +391,20 @@ export default function LivingReader({
     } finally {
       setIsQBankLoading(false);
     }
-  }, [book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, snippedDiagram]);
+  }, [book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, snippedDiagram, qbankCache]);
 
-  // Dynamic Summary generator
-  const loadDynamicSummary = useCallback(async () => {
+  // Dynamic Summary generator with per-page caching
+  const loadDynamicSummary = useCallback(async (forceRefresh = false) => {
+    const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+
+    // Instant cache hit: if summary was already generated for this page, load instantly (0ms)
+    if (!forceRefresh && !selectedText && summaryCache[activePage]) {
+      setDynamicSummary(summaryCache[activePage]);
+      return;
+    }
+
     setIsSummaryLoading(true);
     try {
-      const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
       const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
 
       const res = await fetch("/api/summary", {
@@ -381,6 +421,7 @@ export default function LivingReader({
         const data = await res.json();
         if (data?.summary) {
           setDynamicSummary(data.summary);
+          setSummaryCache((prev) => ({ ...prev, [activePage]: data.summary }));
         }
       }
     } catch (e) {
@@ -388,7 +429,7 @@ export default function LivingReader({
     } finally {
       setIsSummaryLoading(false);
     }
-  }, [book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText]);
+  }, [book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, summaryCache]);
 
   // Pin active selection into Study Vault (background storage)
   const handlePinSelectionToVault = useCallback(
@@ -690,7 +731,7 @@ export default function LivingReader({
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[color:var(--ink)] pt-0 text-[color:var(--cream)] select-none">
       {/* COMPACT UNIFIED TOP BAR (44px) */}
       <header className="flex h-11 shrink-0 items-center justify-between border-b border-white/10 bg-[#141318] px-3 z-30">
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
           <Link
             href="/library"
             className="flex size-7 items-center justify-center rounded-full border border-[color:var(--ink)] bg-[color:var(--cream)] text-[color:var(--ink)] shadow-xs transition-transform hover:-translate-y-0.5 cursor-pointer shrink-0"
@@ -698,6 +739,7 @@ export default function LivingReader({
           >
             <ArrowLeft className="size-3.5 stroke-[2.5]" />
           </Link>
+          <AscleonLogo size={24} className="shrink-0 transition-transform duration-200 hover:scale-105" />
           <div className="flex items-center gap-2 min-w-0">
             <h1 className="display line-clamp-1 text-xs font-bold text-[color:var(--cream)] sm:text-sm">
               {book.title}
@@ -710,8 +752,38 @@ export default function LivingReader({
           </div>
         </div>
 
-        {/* Center Page Tracking & Progress */}
-        <div className="flex items-center gap-3">
+        {/* Center: Mobile Source/Studio Switcher (on mobile/tablet) + Page Tracking */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Mobile/Tablet Viewport Toggle */}
+          <div className="flex lg:hidden items-center rounded-full border border-white/20 bg-white/10 p-0.5">
+            <button
+              type="button"
+              onClick={() => setMobileActivePane("reader")}
+              className={cn(
+                "flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer",
+                mobileActivePane === "reader"
+                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs"
+                  : "text-[color:var(--cream)]/70 hover:text-white"
+              )}
+            >
+              <BookOpen className="size-3" />
+              <span>Source</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileActivePane("studio")}
+              className={cn(
+                "flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer",
+                mobileActivePane === "studio"
+                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs"
+                  : "text-[color:var(--cream)]/70 hover:text-white"
+              )}
+            >
+              <Sparkles className="size-3" />
+              <span>Studio</span>
+            </button>
+          </div>
+
           <div className="hidden md:flex w-36 items-center gap-2">
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
               <div
@@ -815,8 +887,12 @@ export default function LivingReader({
           {/* LEFT PANEL: AUTHENTIC PDF READER (CLEAN, NO REDUNDANT TOOLBARS)*/}
           {/* ============================================================== */}
           <div
-            className="relative flex h-full flex-col overflow-hidden rounded-[18px] border border-white/10 shadow-frame transition-[width] duration-75 bg-[#17161b]"
-            style={{ width: `${splitRatio}%` }}
+            className={cn(
+              "relative h-full flex-col overflow-hidden rounded-[18px] border border-white/10 shadow-frame transition-[width] duration-75 bg-[#17161b]",
+              mobileActivePane === "reader" ? "flex w-full" : "hidden",
+              "lg:flex"
+            )}
+            style={isLgScreen ? { width: `${splitRatio}%` } : undefined}
           >
             {/* Left Panel Body: Authentic PDF Viewer */}
             {book.fileURL ? (
@@ -824,15 +900,23 @@ export default function LivingReader({
                 <SourceSelectionToolbar
                   selectedText={selectedText}
                   position={selectionPos}
-                  onMorphSelection={() => handleRunMorph(selectedText)}
-                  onAskAI={() => handleAskAISelection(selectedText)}
+                  onMorphSelection={() => {
+                    handleRunMorph(selectedText);
+                    setMobileActivePane("studio");
+                  }}
+                  onAskAI={() => {
+                    handleAskAISelection(selectedText);
+                    setMobileActivePane("studio");
+                  }}
                   onVoiceViva={() => {
                     setSelectionPos(null);
                     setActiveIntent("voice");
+                    setMobileActivePane("studio");
                   }}
                   onQuizSelection={() => {
                     setSelectionPos(null);
                     setActiveIntent("quiz");
+                    setMobileActivePane("studio");
                     loadDynamicQBank();
                   }}
                   onPinToBoard={() => handlePinSelectionToVault(selectedText)}
@@ -882,15 +966,23 @@ export default function LivingReader({
                 <SourceSelectionToolbar
                   selectedText={selectedText}
                   position={selectionPos}
-                  onMorphSelection={() => handleRunMorph(selectedText)}
-                  onAskAI={() => handleAskAISelection(selectedText)}
+                  onMorphSelection={() => {
+                    handleRunMorph(selectedText);
+                    setMobileActivePane("studio");
+                  }}
+                  onAskAI={() => {
+                    handleAskAISelection(selectedText);
+                    setMobileActivePane("studio");
+                  }}
                   onVoiceViva={() => {
                     setSelectionPos(null);
                     setActiveIntent("voice");
+                    setMobileActivePane("studio");
                   }}
                   onQuizSelection={() => {
                     setSelectionPos(null);
                     setActiveIntent("quiz");
+                    setMobileActivePane("studio");
                     setQuizAnswer(null);
                     setQuizSubmitted(false);
                   }}
@@ -901,9 +993,9 @@ export default function LivingReader({
                 <div
                   className={cn(
                     "mx-auto transition-transform duration-150 origin-top",
-                    fitMode === "normal" && "max-w-2xl",
+                    fitMode === "normal" && "max-w-4xl xl:max-w-5xl px-2",
                     fitMode === "fit-width" && "max-w-full px-2",
-                    fitMode === "fit-page" && "max-w-xl text-sm leading-normal",
+                    fitMode === "fit-page" && "max-w-2xl text-sm leading-normal",
                   )}
                   style={
                     fitMode === "normal"
@@ -1030,6 +1122,45 @@ export default function LivingReader({
                     </button>
                   </div>
                 </div>
+
+                {/* Border Navigation Arrows for Reflow Mode */}
+                {segments.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={currentIdx === 0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCurrentIdx((prev) => Math.max(0, prev - 1));
+                      }}
+                      className={cn(
+                        "group/arrow absolute left-3 top-1/2 -translate-y-1/2 z-20 hidden sm:flex size-11 items-center justify-center rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] text-[color:var(--ink)] shadow-frame transition-all duration-200 cursor-pointer hover:scale-110 hover:bg-[color:var(--orange)] active:scale-95 disabled:pointer-events-none disabled:opacity-0",
+                        currentIdx === 0 ? "opacity-0 pointer-events-none" : "opacity-90 hover:opacity-100"
+                      )}
+                      title="Previous Section"
+                      aria-label="Previous Section"
+                    >
+                      <ChevronLeft className="size-6 stroke-[3] transition-transform group-hover/arrow:-translate-x-0.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={currentIdx === segments.length - 1}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCurrentIdx((prev) => Math.min(segments.length - 1, prev + 1));
+                      }}
+                      className={cn(
+                        "group/arrow absolute right-3 top-1/2 -translate-y-1/2 z-20 hidden sm:flex size-11 items-center justify-center rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] text-[color:var(--ink)] shadow-frame transition-all duration-200 cursor-pointer hover:scale-110 hover:bg-[color:var(--orange)] active:scale-95 disabled:pointer-events-none disabled:opacity-0",
+                        currentIdx === segments.length - 1 ? "opacity-0 pointer-events-none" : "opacity-90 hover:opacity-100"
+                      )}
+                      title="Next Section"
+                      aria-label="Next Section"
+                    >
+                      <ChevronRight className="size-6 stroke-[3] transition-transform group-hover/arrow:translate-x-0.5" />
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -1043,7 +1174,7 @@ export default function LivingReader({
             onPointerDown={handleSplitPointerDown}
             onDoubleClick={() => setSplitRatio(54)}
             onKeyDown={handleSplitKeyDown}
-            className="group relative flex w-2.5 shrink-0 cursor-col-resize items-center justify-center"
+            className="group relative hidden lg:flex w-2.5 shrink-0 cursor-col-resize items-center justify-center"
             title="Drag to resize panes • double-click to reset"
           >
             <div
@@ -1059,9 +1190,24 @@ export default function LivingReader({
           {/* ============================================================== */}
           {/* RIGHT PANEL: ALL CONTROLS, LIVE VOICE & INTERACTIVE WORKSPACE    */}
           {/* ============================================================== */}
-          <div className="flex h-full flex-1 flex-col overflow-hidden rounded-[20px] bg-[color:var(--ink-soft)]">
+          <div
+            className={cn(
+              "h-full flex-col overflow-hidden rounded-[20px] bg-[color:var(--ink-soft)]",
+              mobileActivePane === "studio" ? "flex w-full" : "hidden",
+              "lg:flex lg:flex-1"
+            )}
+          >
             {/* TOP CONTROL BAR */}
-            <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4">
+            <div className="flex h-14 shrink-0 items-center justify-between gap-2 sm:gap-3 border-b border-white/10 px-3 sm:px-4">
+              {/* Back to Source button on mobile */}
+              <button
+                type="button"
+                onClick={() => setMobileActivePane("reader")}
+                className="flex lg:hidden items-center gap-1 rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10.5px] font-bold text-[color:var(--cream)] hover:bg-white/20 cursor-pointer shrink-0"
+              >
+                <BookOpen className="size-3 text-[color:var(--orange)]" />
+                <span>Source</span>
+              </button>
               {/* Zoom & View Controls */}
               <div className="flex items-center gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] p-1 text-xs">
                 <button
@@ -1185,22 +1331,8 @@ export default function LivingReader({
               </div>
             )}
 
-            {/* STUDIO SWITCHER TABS (5 CORE TABS) */}
-            <div className="grid shrink-0 grid-cols-5 gap-1 border-b border-white/10 bg-black/40 p-1.5 text-[11px]">
-              <button
-                type="button"
-                onClick={() => setActiveIntent("morph")}
-                className={cn(
-                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1.5 font-bold transition-all",
-                  activeIntent === "morph"
-                    ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
-                    : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
-                )}
-              >
-                <Sparkles className="size-3" />
-                <span className="truncate">Morph</span>
-              </button>
-
+            {/* STUDIO SWITCHER TABS (4 CORE TABS: AI Chat, Morph, Voice, Q banks) */}
+            <div className="grid shrink-0 grid-cols-4 gap-1 border-b border-white/10 bg-black/40 p-1.5 text-[11px]">
               <button
                 type="button"
                 onClick={() => setActiveIntent("chat")}
@@ -1213,6 +1345,23 @@ export default function LivingReader({
               >
                 <MessageSquare className="size-3" />
                 <span className="truncate">AI Chat</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveIntent("morph");
+                  handleRunMorph();
+                }}
+                className={cn(
+                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1.5 font-bold transition-all",
+                  activeIntent === "morph"
+                    ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
+                    : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
+                )}
+              >
+                <Sparkles className="size-3" />
+                <span className="truncate">Morph</span>
               </button>
 
               <button
@@ -1233,9 +1382,7 @@ export default function LivingReader({
                 type="button"
                 onClick={() => {
                   setActiveIntent("quiz");
-                  if (dynamicQBankList.length === 0) {
-                    loadDynamicQBank();
-                  }
+                  loadDynamicQBank();
                 }}
                 className={cn(
                   "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1.5 font-bold transition-all",
@@ -1245,26 +1392,7 @@ export default function LivingReader({
                 )}
               >
                 <HelpCircle className="size-3" />
-                <span className="truncate">QBank</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveIntent("summary");
-                  if (!dynamicSummary) {
-                    loadDynamicSummary();
-                  }
-                }}
-                className={cn(
-                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1.5 font-bold transition-all",
-                  activeIntent === "summary"
-                    ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
-                    : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
-                )}
-              >
-                <FileText className="size-3" />
-                <span className="truncate">Summary</span>
+                <span className="truncate">Q banks</span>
               </button>
             </div>
 
@@ -1451,11 +1579,23 @@ export default function LivingReader({
                     )}
                   </div>
 
-                  {/* Quick-Start Suggestion Chips */}
+                  {/* Preset Action Bar: Executive Summary & Core Prompts */}
                   <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                    <span className="flex items-center gap-1 text-[10px] font-semibold text-[color:var(--cream)]/50 mr-0.5">
-                      <Sparkles className="size-3 text-[color:var(--orange)]" /> Suggestions:
-                    </span>
+                    <button
+                      type="button"
+                      disabled={isAiLoading}
+                      onClick={() => {
+                        const pageNum = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+                        const prompt = `Generate a high-yield executive summary, core mechanism breakdown, and clinical exam pearls for Page ${pageNum} of "${book.title}".`;
+                        triggerDirectAIQuery(prompt);
+                      }}
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[color:var(--orange)] bg-[color:var(--orange)]/15 px-3 py-1 text-[11px] font-black text-[color:var(--orange)] hover:bg-[color:var(--orange)]/25 transition-all shadow-xs"
+                      title="Run executive summary prompt for the active page"
+                    >
+                      <FileText className="size-3 text-[color:var(--orange)]" />
+                      <span>Executive Page Summary</span>
+                    </button>
+
                     {CHAT_SUGGESTION_CHIPS.map((chip) => (
                       <button
                         key={chip}
@@ -1557,8 +1697,12 @@ export default function LivingReader({
                 <div className="flex animate-in fade-in flex-col h-full duration-150">
                   <AscleonVoiceStudio
                     bookTitle={book.title}
-                    currentPageNumber={currentSegment?.pageNumber || currentIdx + 1}
-                    currentSectionText={currentSegment?.content || ""}
+                    currentPageNumber={book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
+                    currentSectionText={
+                      (book.fileURL && activePageLiveText)
+                        ? activePageLiveText
+                        : (currentSegment?.content || "")
+                    }
                     selectedText={selectedText || undefined}
                     authoritativeReferences={activeReferences}
                     language={language}
@@ -1837,6 +1981,18 @@ export default function LivingReader({
           </div>
         </div>
       </div>
+
+      {/* Floating Quick Action Button on Mobile */}
+      {mobileActivePane === "reader" && (
+        <button
+          type="button"
+          onClick={() => setMobileActivePane("studio")}
+          className="fixed bottom-4 right-4 z-40 flex lg:hidden items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[color:var(--ink)] shadow-chip transition-transform active:scale-95 cursor-pointer"
+        >
+          <Sparkles className="size-4" />
+          <span>Open Studio</span>
+        </button>
+      )}
     </div>
   );
 }
