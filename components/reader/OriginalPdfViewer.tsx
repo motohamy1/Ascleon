@@ -108,12 +108,14 @@ const PdfPageItem = React.memo(function PdfPageItem({
         const entry = entries[0];
         if (entry) {
           onVisibleChange(pageNum, entry.isIntersecting, entry.intersectionRatio);
-          setShouldRender(entry.isIntersecting);
+          if (entry.isIntersecting) {
+            setShouldRender(true);
+          }
         }
       },
       {
         root: null,
-        rootMargin: "1200px 0px 1200px 0px",
+        rootMargin: "1000px 0px 1000px 0px",
         threshold: [0, 0.2, 0.4, 0.6, 0.8, 1.0],
       }
     );
@@ -139,16 +141,8 @@ const PdfPageItem = React.memo(function PdfPageItem({
         } catch { }
         activeRenderTask.current = null;
       }
-      if (canvasRef.current) {
-        canvasRef.current.width = 0;
-        canvasRef.current.height = 0;
-      }
-      if (textLayerRef.current) {
-        textLayerRef.current.innerHTML = "";
-      }
-      setIsRendered(false);
+      // Keep already-rendered canvases in memory to prevent scroll flickering and layout jumps
       setIsRendering(false);
-      renderedScaleRef.current = 0;
       return;
     }
 
@@ -271,12 +265,10 @@ const PdfPageItem = React.memo(function PdfPageItem({
       id={`pdf-page-container-${pageNum}`}
       data-page-number={pageNum}
       className={cn(
-        "pdf-page-wrapper relative overflow-visible rounded-md bg-white shadow-2xl transition-all duration-150 select-text",
+        "pdf-page-wrapper relative overflow-visible rounded-md bg-white shadow-2xl select-text",
         scrollOrientation === "horizontal"
           ? "mx-2.5 my-auto shrink-0 snap-center self-center"
-          : fitMode === "fit-page"
-            ? "mx-auto my-2 snap-center shrink-0"
-            : "mx-auto my-4",
+          : "mx-auto my-3",
         isSnipActive && "cursor-crosshair"
       )}
       style={{
@@ -394,6 +386,16 @@ export default function OriginalPdfViewer({
   const visiblePageRatios = useRef<Map<number, number>>(new Map());
   const isInternalScrollRef = useRef<boolean>(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // User manual scroll detection to completely prevent scroll fighting & rollbacks
+  const isUserScrollingRef = useRef<boolean>(false);
+  const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pageNotifyTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Jump Input State
+  const [isEditingPage, setIsEditingPage] = useState<boolean>(false);
+  const [pageInputValue, setPageInputValue] = useState<string>("");
+  const pageInputRef = useRef<HTMLInputElement>(null);
 
   // Canvas registry for snipping
   const canvasMap = useRef<Map<number, HTMLCanvasElement>>(new Map());
@@ -590,7 +592,17 @@ export default function OriginalPdfViewer({
     []
   );
 
-  // 5. Track Most Visible Page with stable reference and loop guard
+  // User manual scroll handler to set scrolling flag and prevent scroll-fighting
+  const handleContainerScroll = useCallback(() => {
+    if (isInternalScrollRef.current) return;
+    isUserScrollingRef.current = true;
+    if (userScrollTimeoutRef.current) clearTimeout(userScrollTimeoutRef.current);
+    userScrollTimeoutRef.current = setTimeout(() => {
+      isUserScrollingRef.current = false;
+    }, 400);
+  }, []);
+
+  // 5. Track Most Visible Page with stable reference, debounce, and loop guard
   const handleVisibleChange = useCallback(
     (pageNum: number, isIntersecting: boolean, ratio: number) => {
       if (isIntersecting) {
@@ -612,35 +624,50 @@ export default function OriginalPdfViewer({
 
       if (mostVisible && mostVisible !== activeVisiblePageRef.current) {
         activeVisiblePageRef.current = mostVisible;
+        lastReportedPageRef.current = mostVisible;
         setActiveVisiblePage(mostVisible);
-        const doc = pdfDocRef.current;
-        if (doc) {
-          doc.getPage(mostVisible).then(async (pageObj: any) => {
-            try {
-              const textContent = await pageObj.getTextContent();
-              const pageString = textContent.items
-                .map((item: any) => item.str)
-                .join(" ");
-              callbacksRef.current.onPageChange?.(mostVisible, pageString);
-            } catch {
+
+        // Debounce text extraction and parent notification so rapid scrollbar dragging doesn't flood React
+        if (pageNotifyTimerRef.current) clearTimeout(pageNotifyTimerRef.current);
+        pageNotifyTimerRef.current = setTimeout(() => {
+          const doc = pdfDocRef.current;
+          if (doc) {
+            doc.getPage(mostVisible).then(async (pageObj: any) => {
+              try {
+                const textContent = await pageObj.getTextContent();
+                const pageString = textContent.items
+                  .map((item: any) => item.str)
+                  .join(" ");
+                callbacksRef.current.onPageChange?.(mostVisible, pageString);
+              } catch {
+                callbacksRef.current.onPageChange?.(mostVisible);
+              }
+            }).catch(() => {
               callbacksRef.current.onPageChange?.(mostVisible);
-            }
-          }).catch(() => {
+            });
+          } else {
             callbacksRef.current.onPageChange?.(mostVisible);
-          });
-        } else {
-          callbacksRef.current.onPageChange?.(mostVisible);
-        }
+          }
+        }, 120);
       }
     },
     []
   );
 
-  // 6. External Jump to Page (with loop guard)
+  // 6. External Jump to Page (with strict loop guard against scroll fighting)
   useEffect(() => {
-    if (!currentPage || currentPage === activeVisiblePageRef.current) return;
+    // If invalid, already at page, just reported by our own scroll, or user is currently scrolling: DO NOT scroll!
+    if (
+      !currentPage ||
+      currentPage === activeVisiblePageRef.current ||
+      currentPage === lastReportedPageRef.current ||
+      isUserScrollingRef.current
+    ) {
+      return;
+    }
 
     activeVisiblePageRef.current = currentPage;
+    lastReportedPageRef.current = currentPage;
     setActiveVisiblePage(currentPage);
 
     const doc = pdfDocRef.current;
@@ -663,7 +690,7 @@ export default function OriginalPdfViewer({
 
       pageEl.scrollIntoView({
         behavior: "smooth",
-        block: scrollOrientation === "horizontal" ? "nearest" : (fitMode === "fit-page" ? "center" : "start"),
+        block: scrollOrientation === "horizontal" ? "nearest" : "start",
         inline: scrollOrientation === "horizontal" ? "center" : "nearest",
       });
 
@@ -671,7 +698,7 @@ export default function OriginalPdfViewer({
         isInternalScrollRef.current = false;
       }, 700);
     }
-  }, [currentPage, fitMode]);
+  }, [currentPage, scrollOrientation]);
 
   // 7. Handle Native Text Selection on the TextLayer
   const handleSelectionCheck = useCallback(() => {
@@ -904,6 +931,8 @@ export default function OriginalPdfViewer({
   const handleJumpToPage = (newPage: number) => {
     const clamped = Math.max(1, Math.min(newPage, totalPages));
     activeVisiblePageRef.current = clamped;
+    lastReportedPageRef.current = clamped;
+    isUserScrollingRef.current = false;
     setActiveVisiblePage(clamped);
 
     const doc = pdfDocRef.current;
@@ -932,7 +961,7 @@ export default function OriginalPdfViewer({
 
       pageEl.scrollIntoView({
         behavior: "smooth",
-        block: scrollOrientation === "horizontal" ? "nearest" : (fitMode === "fit-page" ? "center" : "start"),
+        block: scrollOrientation === "horizontal" ? "nearest" : "start",
         inline: scrollOrientation === "horizontal" ? "center" : "nearest",
       });
 
@@ -1030,13 +1059,60 @@ export default function OriginalPdfViewer({
             <ChevronLeft className="size-3.5" />
           </button>
 
-          <div className="flex items-center gap-1 font-mono text-[11px]">
-            <span className="font-bold text-[color:var(--orange)]">
-              {activeVisiblePage}
-            </span>
-            <span className="opacity-40">/</span>
-            <span className="opacity-70">{totalPages}</span>
-          </div>
+          {isEditingPage ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const p = parseInt(pageInputValue, 10);
+                if (!isNaN(p) && p >= 1 && p <= totalPages) {
+                  handleJumpToPage(p);
+                }
+                setIsEditingPage(false);
+              }}
+              className="flex items-center gap-1 font-mono text-[11px]"
+            >
+              <input
+                ref={pageInputRef}
+                autoFocus
+                type="number"
+                min={1}
+                max={totalPages}
+                value={pageInputValue}
+                onChange={(e) => setPageInputValue(e.target.value)}
+                onBlur={() => {
+                  const p = parseInt(pageInputValue, 10);
+                  if (!isNaN(p) && p >= 1 && p <= totalPages) {
+                    handleJumpToPage(p);
+                  }
+                  setIsEditingPage(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setIsEditingPage(false);
+                  }
+                }}
+                className="w-12 rounded border border-[color:var(--orange)] bg-[color:var(--ink)] px-1 py-0.5 text-center font-bold text-[color:var(--orange)] outline-none shadow-inner"
+              />
+              <span className="opacity-40">/</span>
+              <span className="opacity-70">{totalPages}</span>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setPageInputValue(String(activeVisiblePage));
+                setIsEditingPage(true);
+              }}
+              className="group flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] transition-colors hover:bg-white/10 hover:ring-1 hover:ring-[color:var(--orange)]/50"
+              title="Click to jump to a page number"
+            >
+              <span className="font-bold text-[color:var(--orange)] underline decoration-dotted underline-offset-2 group-hover:decoration-solid">
+                {activeVisiblePage}
+              </span>
+              <span className="opacity-40">/</span>
+              <span className="opacity-70">{totalPages}</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -1136,15 +1212,14 @@ export default function OriginalPdfViewer({
       {/* ================================================================= */}
       <div
         ref={containerRef}
+        onScroll={handleContainerScroll}
         onMouseUp={handleSelectionCheck}
         onTouchEnd={handleSelectionCheck}
         className={cn(
           "custom-scrollbar relative flex-1 transition-colors select-text",
           scrollOrientation === "horizontal"
             ? "overflow-x-auto overflow-y-hidden p-2 sm:p-4 flex items-center snap-x snap-mandatory"
-            : fitMode === "fit-page"
-              ? "p-2 sm:p-3 overflow-y-auto overflow-x-auto snap-y snap-mandatory"
-              : "p-4 sm:p-6 overflow-y-auto overflow-x-auto",
+            : "p-3 sm:p-5 overflow-y-auto overflow-x-auto",
           theme === "paper" && "bg-[#2b2a31]",
           theme === "ink" && "bg-[#111014]",
           isSnipActive && "cursor-crosshair select-none"

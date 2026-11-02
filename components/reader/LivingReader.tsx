@@ -110,6 +110,8 @@ export default function LivingReader({
     book.totalPages || initialSegments.length || 1
   );
   const [activePageLiveText, setActivePageLiveText] = useState<string>("");
+  const [isEditingTopPage, setIsEditingTopPage] = useState<boolean>(false);
+  const [topPageInputValue, setTopPageInputValue] = useState<string>("");
   const [snippedDiagram, setSnippedDiagram] = useState<{
     url: string;
     pageNumber: number;
@@ -798,13 +800,73 @@ export default function LivingReader({
             </span>
           </div>
 
-          <div className="flex items-center gap-1 font-mono text-[11px] font-bold">
-            <span className="text-[color:var(--orange)]">
-              Page {book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
-            </span>
-            <span className="opacity-40">/</span>
-            <span className="opacity-70">{book.fileURL ? totalPdfPages : (book.totalPages || segments.length)}</span>
-          </div>
+          {isEditingTopPage ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const p = parseInt(topPageInputValue, 10);
+                const max = book.fileURL ? totalPdfPages : (book.totalPages || segments.length);
+                if (!isNaN(p) && p >= 1 && p <= max) {
+                  if (book.fileURL) {
+                    setActivePdfPage(p);
+                  } else {
+                    const matchedIdx = segments.findIndex((s) => s.pageNumber === p);
+                    if (matchedIdx !== -1) setCurrentIdx(matchedIdx);
+                    else setCurrentIdx(Math.min(segments.length - 1, p - 1));
+                  }
+                }
+                setIsEditingTopPage(false);
+              }}
+              className="flex items-center gap-1 font-mono text-[11px] font-bold"
+            >
+              <span className="text-[color:var(--orange)]">Page</span>
+              <input
+                autoFocus
+                type="number"
+                min={1}
+                max={book.fileURL ? totalPdfPages : (book.totalPages || segments.length)}
+                value={topPageInputValue}
+                onChange={(e) => setTopPageInputValue(e.target.value)}
+                onBlur={() => {
+                  const p = parseInt(topPageInputValue, 10);
+                  const max = book.fileURL ? totalPdfPages : (book.totalPages || segments.length);
+                  if (!isNaN(p) && p >= 1 && p <= max) {
+                    if (book.fileURL) {
+                      setActivePdfPage(p);
+                    } else {
+                      const matchedIdx = segments.findIndex((s) => s.pageNumber === p);
+                      if (matchedIdx !== -1) setCurrentIdx(matchedIdx);
+                      else setCurrentIdx(Math.min(segments.length - 1, p - 1));
+                    }
+                  }
+                  setIsEditingTopPage(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setIsEditingTopPage(false);
+                }}
+                className="w-12 rounded border border-[color:var(--orange)] bg-[color:var(--ink)] px-1 py-0.5 text-center text-[color:var(--orange)] outline-none"
+              />
+              <span className="opacity-40">/</span>
+              <span className="opacity-70">{book.fileURL ? totalPdfPages : (book.totalPages || segments.length)}</span>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                const cur = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+                setTopPageInputValue(String(cur));
+                setIsEditingTopPage(true);
+              }}
+              className="group flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] font-bold transition-colors hover:bg-white/10 hover:ring-1 hover:ring-[color:var(--orange)]/50"
+              title="Click to jump to a page number"
+            >
+              <span className="text-[color:var(--orange)] underline decoration-dotted underline-offset-2 group-hover:decoration-solid">
+                Page {book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
+              </span>
+              <span className="opacity-40">/</span>
+              <span className="opacity-70">{book.fileURL ? totalPdfPages : (book.totalPages || segments.length)}</span>
+            </button>
+          )}
         </div>
 
         {/* Right Active Scope Badges & Navigation */}
