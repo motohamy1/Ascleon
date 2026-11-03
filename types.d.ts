@@ -126,6 +126,7 @@ export interface BookCardProps {
   readingTimeMinutes?: number;
   isFavorite?: boolean;
   color?: string;
+  onDelete?: () => void;
 }
 
 export interface Messages {

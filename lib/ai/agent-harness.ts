@@ -10,6 +10,7 @@ import {
   convertSchemaToLowercase,
   convertSchemaToGemini,
 } from "./tools";
+import { buildLanguageDirective } from "@/lib/language";
 import { retrieveEnrichedContext } from "./knowledge/knowledge-retriever";
 import { EnrichedStudyContext } from "@/types/knowledge";
 
@@ -108,12 +109,15 @@ async function callGeminiAgent(
     !userQuery.toLowerCase().includes("step-by-step") &&
     !userQuery.toLowerCase().includes("breakdown");
 
+  const langDirective = buildLanguageDirective(context.language || "en", "text");
+  const fullSystemInstruction = `${SOCRATIC_SYSTEM_PROMPT}\n\n${langDirective}`;
+
   try {
     const generatePromise = ai.models.generateContent({
       model: modelName,
       contents,
       config: {
-        systemInstruction: SOCRATIC_SYSTEM_PROMPT,
+        systemInstruction: fullSystemInstruction,
         tools: toolsDeclaration as any,
         temperature: 0.2,
         thinkingConfig: {
@@ -282,8 +286,9 @@ async function callOpenAICompatibleAgent(
     },
   }));
 
+  const langDirective = buildLanguageDirective(context.language || "en", "text");
   const messages: any[] = [
-    { role: "system", content: `${SOCRATIC_SYSTEM_PROMPT}\n\n${enriched.groundingSnippet}` },
+    { role: "system", content: `${SOCRATIC_SYSTEM_PROMPT}\n\n${langDirective}\n\n${enriched.groundingSnippet}` },
     {
       role: "user",
       content: `Book: "${context.bookTitle}" (${context.currentPageNumber ? `Page ${context.currentPageNumber}` : `Section ${context.currentSegmentIndex + 1}`})\nActive Text:\n${
@@ -477,7 +482,8 @@ export async function runStudyAgent(
     text: context.currentSegmentContent,
     query: userQuery,
     bookTitle: context.bookTitle,
-      bookTopic: context.bookTopic || "",
+    bookTopic: context.bookTopic || "",
+    bookReferences: context.bookReferences,
   });
 
   const geminiKey = process.env.GEMINI_API_KEY;

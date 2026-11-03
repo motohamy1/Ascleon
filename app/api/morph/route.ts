@@ -7,6 +7,7 @@ import { ContextEnvelope } from "@/types/morph";
 import { synthesizeMorphBlocks } from "@/lib/morph/synthesizer";
 import { auth } from "@clerk/nextjs/server";
 import { GoogleGenAI } from "@google/genai";
+import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,6 +19,7 @@ export async function POST(req: NextRequest) {
       subsequentSegments = [],
       forceRefresh = false,
       snippedDiagram = null,
+      language = "en",
     } = body;
 
     const bookId = body.bookId || body.id || "default-book";
@@ -51,7 +53,7 @@ export async function POST(req: NextRequest) {
 
     // Compute true content hash to prevent stale cache collisions
     const targetPassage = (selectedText || focalText).trim();
-    const hashInput = `${targetPassage.slice(0, 1000)}_${snippedDiagram ? "img" : "noimg"}`;
+    const hashInput = `${language}_${targetPassage.slice(0, 1000)}_${snippedDiagram ? "img" : "noimg"}`;
     const selectionHash = crypto.createHash("sha256").update(hashInput).digest("hex").slice(0, 16);
 
     // 1. Build Context Envelope & Baseline Fallback
@@ -136,7 +138,9 @@ Instructions:
      - "rightBadge": Badge text
      - "rightPoints": Array of 3 { "label": string, "value": string, "isPositive": boolean }
 
-Return ONLY a JSON object matching this structure.`;
+Return ONLY a JSON object matching this structure.
+
+${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
         const userParts: any[] = [{ text: prompt }];
 

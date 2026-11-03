@@ -20,11 +20,12 @@ export interface ContextRetrievalOptions {
   query?: string;
   bookTitle?: string;
   bookTopic?: string;
+  bookReferences?: string[];
 }
 
 /**
  * Universal Multi-Domain Knowledge Retriever
- * Dynamically detects the domain (Medicine, Computer Science, AI, Law, Finance, Engineering)
+ * Dynamically detects the domain (Surgery, Cardiology, Medicine, Computer Science, AI, Law, Finance)
  * and retrieves or synthesizes the exact canonical textbooks, guidelines, and QBank vignettes.
  */
 export async function retrieveEnrichedContext(
@@ -35,6 +36,7 @@ export async function retrieveEnrichedContext(
   let query = "";
   let bookTitle = "";
   let bookTopic = "";
+  let bookReferences: string[] = [];
 
   if (typeof textOrOptions === "string") {
     text = textOrOptions;
@@ -44,66 +46,77 @@ export async function retrieveEnrichedContext(
     query = textOrOptions.query || "";
     bookTitle = textOrOptions.bookTitle || "";
     bookTopic = textOrOptions.bookTopic || "";
+    bookReferences = textOrOptions.bookReferences || [];
   }
 
   const combined = `${bookTitle} ${bookTopic} ${text} ${query}`.toLowerCase();
-  
+  const bookScope = `${bookTitle} ${bookTopic}`.toLowerCase();
+
   // 1. DYNAMIC DOMAIN DETECTION
-  // Priority order: specific medical subdomains > broad medicine > other technical domains > general
-  let domain: "cardiology" | "medicine" | "cs_architecture" | "ai_ml" | "law" | "finance" | "general" = "general";
-  
-// Enhanced cardiology detection: heart + broader clinical terms
-if (
+  // Priority order: specific medical subdomains (surgery / cardiology) > broad medicine > other technical domains > general
+  let domain: "surgery" | "cardiology" | "medicine" | "cs_architecture" | "ai_ml" | "law" | "finance" | "general" = "general";
+
+  if (
+    bookScope.includes("surg") ||
+    combined.includes("surgery") ||
+    combined.includes("surgical") ||
+    combined.includes("swelling sheet") ||
+    combined.includes("hernia") ||
+    combined.includes("appendic") ||
+    combined.includes("cholecyst") ||
+    combined.includes("laparotom") ||
+    combined.includes("thyroidectom") ||
+    combined.includes("abscess") ||
+    combined.includes("lipoma")
+  ) {
+    domain = "surgery";
+  } else if (
     combined.includes("heart") ||
     combined.includes("cardio") ||
     combined.includes("murmur") ||
     combined.includes("stenosis") ||
     combined.includes("auscultat") ||
     combined.includes("s1") ||
-  combined.includes("s2") ||
+    combined.includes("s2") ||
     combined.includes("mrcp") ||
-  combined.includes("ekg") ||
+    combined.includes("ekg") ||
     combined.includes("ecg") ||
     combined.includes("arrhythmia") ||
-    combined.includes("failure") ||
     combined.includes("myocardial") ||
     combined.includes("heart failure") ||
     combined.includes("cardiomyopathy")
   ) {
     domain = "cardiology";
-  }
-// Enhanced medicine detection: clinical + pharmacology + pathology + usmle + broader terms
-else if (
+  } else if (
     combined.includes("patient") ||
     combined.includes("clinical") ||
     combined.includes("syndrome") ||
     combined.includes("patholog") ||
     combined.includes("pharmacology") ||
-  combined.includes("usmle") ||
+    combined.includes("usmle") ||
     combined.includes("diagnosis") ||
-  combined.includes("treatment") ||
+    combined.includes("treatment") ||
     combined.includes("management") ||
     combined.includes("medication") ||
     combined.includes("therapy") ||
-    combined.includes("clinical") ||
     combined.includes("bedside") ||
-  combined.includes("ward") ||
+    combined.includes("ward") ||
     combined.includes("rounds")
   ) {
     domain = "medicine";
-} else if (
+  } else if (
     combined.includes("software") ||
     combined.includes("distributed") ||
     combined.includes("database") ||
-  combined.includes("concurrency") ||
+    combined.includes("concurrency") ||
     combined.includes("architecture") ||
-  combined.includes("api") ||
+    combined.includes("api") ||
     combined.includes("microservice") ||
     combined.includes("system design") ||
     combined.includes("design pattern") ||
     combined.includes("interface") ||
     combined.includes("service") ||
-  combined.includes("rest") ||
+    combined.includes("rest") ||
     combined.includes("endpoint")
   ) {
     domain = "cs_architecture";
@@ -147,10 +160,14 @@ else if (
   ) {
     domain = "finance";
   }
+
   // If bookTopic is provided and matches a known domain, prefer that over detected domain
   if (bookTopic && bookTopic.trim()) {
     const topicLower = bookTopic.trim().toLowerCase();
-    const topicDomainMap: Record<string, "cardiology" | "medicine" | "cs_architecture" | "ai_ml" | "law" | "finance" | "general"> = {
+    const topicDomainMap: Record<string, "surgery" | "cardiology" | "medicine" | "cs_architecture" | "ai_ml" | "law" | "finance" | "general"> = {
+      surgery: "surgery",
+      "clinical surgery": "surgery",
+      "general surgery": "surgery",
       cardiology: "cardiology",
       heart: "cardiology",
       cardiovascular: "cardiology",
@@ -176,6 +193,8 @@ else if (
     };
     if (topicDomainMap[topicLower]) {
       domain = topicDomainMap[topicLower];
+    } else if (topicLower.includes("surg")) {
+      domain = "surgery";
     }
   }
 
@@ -186,18 +205,82 @@ else if (
 
   // 2. DOMAIN-SPECIFIC RESOURCE RESOLUTION
   switch (domain) {
+    case "surgery": {
+      focalTopic = "Clinical Surgery, History Taking & Bedside Examination";
+      matchingRefs.push({
+        id: "ref-bailey-love-1",
+        source: "Bailey & Love's Short Practice of Surgery",
+        edition: "28th Edition",
+        type: "textbook",
+        title: "Principles of Surgical History Taking, Swellings & Ulcers",
+        chapterOrSection: "Part 1: Basic Principles & Clinical Assessment",
+        excerpt:
+          "Systematic surgical evaluation begins with the patient's exact complaint in their own words, followed by chronological analysis of onset, course, and duration. Local examination of any swelling requires assessment of site, size, shape, surface, edge, consistency, fluctuation, transillumination, reducibility, anatomical plane attachment, neurovascular compression (V.A.N.), and regional lymphadenopathy.",
+        clinicalPearls: [
+          "Onset & Course: Sudden onset suggests vascular trauma/hematoma; acute suggests inflammation/abscess; gradual progressive suggests neoplasia; intermittent suggests reducible hernia.",
+          "Never examine a localized swelling without evaluating the draining regional lymph nodes and distal neurovascular (V.A.N.) status.",
+        ],
+        relevanceTag: "clinical_surgery_swelling_assessment",
+      });
+      matchingRefs.push({
+        id: "ref-browse-surgery-1",
+        source: "Browse's Introduction to the Symptoms & Signs of Surgical Disease",
+        edition: "6th Edition",
+        type: "textbook",
+        title: "Bedside Examination of Lumps, Swellings, and Pressure Effects",
+        chapterOrSection: "Chapter 2: The History and General Principles of Local Examination",
+        excerpt:
+          "A mass or swelling exerts local mechanical effects on adjacent anatomical structures: venous compression causes distal pitting edema and secondary varicosities; arterial compromise causes pallor, coldness, and trophic skin/nail changes; nerve compression produces radicular pain, paraesthesia, or lower motor neuron paresis.",
+        clinicalPearls: [
+          "V.A.N. Framework for local pressure symptoms: Vein (edema/varicosities), Artery (ischemia/trophic changes), Nerve (paresthesia/motor weakness).",
+          "Always record the chief complaint in the patient's vernacular rather than premature diagnostic terminology.",
+        ],
+        relevanceTag: "surgical_signs_symptoms_van",
+      });
+      matchingQBank.push({
+        id: "qbank-surg-01",
+        examType: "General Clinical",
+        topic: "Surgical Swelling Assessment & Neurovascular Compression",
+        difficulty: "hard",
+        vignette:
+          "A 52-year-old patient presents with a painless, progressively enlarging mass in the supraclavicular fossa noticed accidentally 3 months ago. Over the past 2 weeks, the patient developed unilateral upper limb swelling with prominent superficial veins and tingling along the medial border of the forearm.\n\nIn systematic surgical history taking, what do these secondary limb symptoms represent?",
+        options: [
+          "Systemic paraneoplastic endocrine syndrome",
+          "Local pressure effects on adjacent Vein and Nerve structures (V.A.N. triad)",
+          "Primary intrinsic venous thrombosis unrelated to the mass",
+          "Acute inflammatory cellulitis of the extremity",
+        ],
+        correctIndex: 1,
+        distractorRationales: {
+          0: "Incorrect: Unilateral venous engorgement and dermatomal paresthesia reflect direct anatomical compression rather than a systemic humoral effect.",
+          1: "Correct: Progressive masses compress neighboring neurovascular bundles (V.A.N.): subclavian vein obstruction increases hydrostatic pressure causing edema and venous engorgement, while lower brachial plexus compression produces medial forearm paresthesia.",
+          2: "Incorrect: The symptoms are directly secondary to extrinsic mechanical compression by the enlarging mass.",
+          3: "Incorrect: An accidental painless onset with progressive course and mechanical obstruction points to neoplasia rather than acute cellulitis.",
+        },
+        highYieldTakeaway:
+          "Always evaluate every surgical swelling for local pressure symptoms on neighboring Veins (edema/varicosities), Arteries (ischemia/trophic changes), and Nerves (paresthesia/paresis) alongside regional lymph nodes.",
+        sourceQBank: "MRCS / Clinical Surgery Qualifying Bank",
+      });
+      matchingMnemonics.push({
+        mnemonic: "O.C.D. + V.A.N.",
+        expansion: "Onset, Course, Duration + Vein, Artery, Nerve Pressure Symptoms",
+        rule: "Analyze every swelling chronologically (O.C.D.) and screen for local mechanical compression on neighboring neurovascular bundles (V.A.N.).",
+        clinicalContext: "Surgical swelling history taking and local complication screening.",
+      });
+      break;
+    }
+
     case "cardiology":
     case "medicine": {
       const isHeartFailure =
         combined.includes("heart failure") ||
         combined.includes("ahf") ||
-        combined.includes("failure") ||
-        combined.includes("decompensat") ||
-        combined.includes("edema") ||
+        combined.includes("adchf") ||
+        combined.includes("hfref") ||
+        combined.includes("hfpef") ||
+        combined.includes("pulmonary edema") ||
         combined.includes("pioglitazone") ||
-        combined.includes("verapamil") ||
-        combined.includes("nsaid") ||
-        combined.includes("fluid");
+        combined.includes("verapamil");
 
       const isHeartSounds =
         combined.includes("split") ||
@@ -402,6 +485,24 @@ else if (
       });
       break;
     }
+  }
+
+  // 2.5 PRIORITIZE BOOK-SPECIFIC DIGESTED BLUEPRINT REFERENCES
+  if (bookReferences && bookReferences.length > 0 && matchingRefs.length === 0) {
+    bookReferences.slice(0, 3).forEach((refName, idx) => {
+      matchingRefs.push({
+        id: `ref-book-bp-${idx + 1}`,
+        source: refName,
+        type: "textbook",
+        title: refName,
+        chapterOrSection: `Canonical Reference for ${bookTopic || bookTitle || "Active Study"}`,
+        excerpt: `Authoritative reference for ${bookTitle || focalTopic}, grounding clinical and theoretical mechanisms in verified literature.`,
+        clinicalPearls: [
+          `Cross-referenced with ${refName} for ${bookTitle || focalTopic}.`,
+        ],
+        relevanceTag: domain,
+      });
+    });
   }
 
   // 3. QUERY MONGO DATABASE FOR CUSTOM CACHED KNOWLEDGE NODES (Fast-path if static corpus already matched)

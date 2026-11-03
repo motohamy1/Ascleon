@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,6 +12,7 @@ export async function POST(req: NextRequest) {
       selectedText = "",
       snippedDiagram = null,
       authoritativeReferences = [],
+      language = "en",
     } = body;
 
     const focalText = (selectedText || pageText || "").trim();
@@ -56,7 +58,9 @@ Produce a JSON array of 2 question vignettes with this exact structure:
   }
 ]
 
-Return ONLY the JSON array.`;
+Return ONLY the JSON array.
+
+${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
         const userParts: any[] = [{ text: prompt }];
 

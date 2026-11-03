@@ -1,21 +1,25 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Mic,
   MicOff,
   Sparkles,
   Activity,
   X,
-  MessageSquare,
-  Award,
-  Globe,
-  Send,
   Volume2,
-  VolumeX,
+  Send,
+  Radio,
+  AlertCircle,
+  ChevronDown,
+  RefreshCw,
+  SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { voiceLanguages, type VoiceLanguage } from "@/lib/constants";
+import { StudyLanguage } from "@/lib/language";
+import { AVAILABLE_LIVE_VOICES, DEFAULT_LIVE_VOICE } from "@/lib/voice-config";
+import { useLiveVoice, VisualTriggerEvent } from "@/hooks/useLiveVoice";
+import { StudyLanguageSwitch } from "@/components/reader/StudyLanguageSwitch";
 
 interface AscleonVoiceStudioProps {
   bookTitle: string;
@@ -23,16 +27,14 @@ interface AscleonVoiceStudioProps {
   currentSectionText: string;
   selectedText?: string;
   authoritativeReferences?: any[];
-  language?: VoiceLanguage;
-  onLanguageChange?: (language: VoiceLanguage) => void;
+  studyLanguage?: StudyLanguage;
+  onStudyLanguageChange?: (lang: StudyLanguage) => void;
+  // Backwards compatibility props
+  language?: any;
+  onLanguageChange?: (lang: any) => void;
   onClose?: () => void;
   isFloating?: boolean;
-}
-
-interface MessageTurn {
-  role: "user" | "model";
-  content: string;
-  time?: string;
+  onTriggerMorph?: () => void;
 }
 
 export function AscleonVoiceStudio({
@@ -41,604 +43,486 @@ export function AscleonVoiceStudio({
   currentSectionText,
   selectedText,
   authoritativeReferences = [],
-  language = voiceLanguages.en,
+  studyLanguage = "en",
+  onStudyLanguageChange,
+  language,
   onLanguageChange,
   onClose,
   isFloating = false,
+  onTriggerMorph,
 }: AscleonVoiceStudioProps) {
-  const [isActive, setIsActive] = useState(false);
-  const [status, setStatus] = useState<"idle" | "listening" | "thinking" | "speaking">("idle");
-  const [messages, setMessages] = useState<MessageTurn[]>([]);
-  const [currentTranscript, setCurrentTranscript] = useState("");
+  // Normalize study language
+  const activeLang: StudyLanguage =
+    studyLanguage || (language?.code === "ar" ? "ar" : language?.code === "mixed" ? "mixed" : "en");
+
+  const [selectedVoice, setSelectedVoice] = useState<string>(DEFAULT_LIVE_VOICE);
   const [typedInput, setTypedInput] = useState("");
-  const [isMuted, setIsMuted] = useState(false);
-  const [selectedLanguage, setSelectedLanguage] = useState<"en" | "ar" | "mixed">(
-    language.code === "ar" ? "ar" : "en"
-  );
-
-  const recognitionRef = useRef<any>(null);
-  const synthRef = useRef<SpeechSynthesis | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
-  // Initialize Speech Synthesis and cleanup on unmount
-  useEffect(() => {
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      synthRef.current = window.speechSynthesis;
+  const handleVisualTrigger = (event: VisualTriggerEvent) => {
+    if (event.action === "open_morph" && onTriggerMorph) {
+      onTriggerMorph();
     }
-    return () => {
-      if (synthRef.current) {
-        try {
-          synthRef.current.cancel();
-        } catch {}
-      }
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {}
-      }
-    };
-  }, []);
+  };
 
-  // Scroll to bottom of transcripts
+  const {
+    status,
+    isConnected,
+    isMuted,
+    toggleMute,
+    connect,
+    disconnect,
+    resetSession,
+    sendTextMessage,
+    updatePageContext,
+    messages,
+    currentInputTranscript,
+    currentOutputTranscript,
+    inputLevel,
+    outputLevel,
+    errorMessage,
+    activeVisualTrigger,
+    clearVisualTrigger,
+  } = useLiveVoice({
+    bookTitle,
+    pageNumber: currentPageNumber,
+    pageText: currentSectionText,
+    selectedText,
+    authoritativeReferences,
+    language: activeLang,
+    voiceName: selectedVoice,
+    onVisualTrigger: handleVisualTrigger,
+  });
+
+  // Track page changes during live call
+  useEffect(() => {
+    if (isConnected) {
+      updatePageContext(currentSectionText, currentPageNumber);
+    }
+  }, [currentPageNumber, currentSectionText, isConnected, updatePageContext]);
+
+  // Scroll to bottom of message transcripts
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, currentTranscript, status]);
+  }, [messages, currentInputTranscript, currentOutputTranscript]);
 
-  const startListeningRef = useRef<() => void>(() => {});
-
-  // Speak AI response
-  const speakText = useCallback(
-    (text: string) => {
-      if (isMuted || !synthRef.current) {
-        setStatus("listening");
-        startListeningRef.current();
-        return;
-      }
-
-      synthRef.current.cancel();
-
-      const utterance = new SpeechSynthesisUtterance(text);
-      activeUtteranceRef.current = utterance;
-
-      const hasArabic = /[\u0600-\u06FF]/.test(text);
-      utterance.lang = hasArabic || selectedLanguage === "ar" ? "ar-SA" : "en-US";
-      utterance.rate = 1.0;
-      utterance.pitch = 1.0;
-
-      // Select natural voice if available
-      try {
-        const voices = synthRef.current.getVoices?.() || [];
-        if (voices.length > 0) {
-          if (hasArabic || selectedLanguage === "ar") {
-            const arVoice = voices.find((v) => v.lang.startsWith("ar"));
-            if (arVoice) utterance.voice = arVoice;
-          } else {
-            const naturalVoice =
-              voices.find(
-                (v) =>
-                  v.lang.startsWith("en") &&
-                  (v.name.includes("Natural") ||
-                    v.name.includes("Google") ||
-                    v.name.includes("Samantha") ||
-                    v.name.includes("Daniel") ||
-                    v.name.includes("Alex"))
-              ) || voices.find((v) => v.lang.startsWith("en"));
-            if (naturalVoice) utterance.voice = naturalVoice;
-          }
-        }
-      } catch {}
-
-      utterance.onstart = () => {
-        setStatus("speaking");
-      };
-
-      utterance.onend = () => {
-        setStatus("listening");
-        startListeningRef.current();
-      };
-
-      utterance.onerror = () => {
-        setStatus("idle");
-      };
-
-      synthRef.current.speak(utterance);
-    },
-    [isMuted, selectedLanguage]
-  );
-
-  // Send turn to backend
-  const sendSpokenTurn = useCallback(
-    async (userSpeech: string) => {
-      if (!userSpeech.trim()) return;
-
-      setStatus("thinking");
-      setCurrentTranscript("");
-
-      const newHistory: MessageTurn[] = [
-        ...messages,
-        { role: "user", content: userSpeech.trim(), time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
-      ];
-      setMessages(newHistory);
-
-      try {
-        const res = await fetch("/api/voice/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            bookTitle,
-            pageNumber: currentPageNumber,
-            pageText: currentSectionText,
-            selectedText,
-            userSpeech: userSpeech.trim(),
-            language: selectedLanguage,
-            history: newHistory.slice(-6),
-            authoritativeReferences,
-          }),
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          const spokenReply = data.responseText || "Let's review this together.";
-
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "model",
-              content: spokenReply,
-              time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-            },
-          ]);
-
-          speakText(spokenReply);
-        } else {
-          throw new Error("Voice session response failed");
-        }
-      } catch (err) {
-        console.warn("Voice interaction error, falling back:", err);
-        const fallbackReply = `Grounded in Page ${currentPageNumber}: The key principle here is to examine the primary invariant before considering secondary variations.`;
-        setMessages((prev) => [
-          ...prev,
-          { role: "model", content: fallbackReply },
-        ]);
-        speakText(fallbackReply);
-      }
-    },
-    [bookTitle, currentPageNumber, currentSectionText, selectedText, selectedLanguage, messages, authoritativeReferences, speakText]
-  );
-
-  // Start continuous microphone listening
-  const startListening = useCallback(() => {
-    if (typeof window === "undefined") return;
-
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      console.warn("Browser SpeechRecognition not supported in this client.");
-      return;
-    }
-
-    try {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {}
-      }
-
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = selectedLanguage === "ar" ? "ar-SA" : "en-US";
-
-      recognition.onstart = () => {
-        setStatus("listening");
-      };
-
-      recognition.onresult = (event: any) => {
-        let interim = "";
-        let final = "";
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            final += event.results[i][0].transcript;
-          } else {
-            interim += event.results[i][0].transcript;
-          }
-        }
-
-        if (interim) {
-          setCurrentTranscript(interim);
-        }
-
-        if (final) {
-          setCurrentTranscript("");
-          sendSpokenTurn(final);
-        }
-      };
-
-      recognition.onerror = (e: any) => {
-        if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-          console.warn("Speech recognition access denied:", e.error);
-          setStatus("idle");
-          return;
-        }
-        if (e.error !== "no-speech") {
-          console.warn("Speech recognition notice:", e.error);
-        }
-        if (isActive && status === "listening") {
-          setTimeout(() => {
-            try {
-              recognition.start();
-            } catch {}
-          }, 600);
-        }
-      };
-
-      recognition.onend = () => {
-        if (isActive && status === "listening") {
-          try {
-            recognition.start();
-          } catch {}
-        }
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch (err) {
-      console.warn("Could not start speech recognition:", err);
-    }
-  }, [isActive, status, selectedLanguage, sendSpokenTurn]);
-
-  useEffect(() => {
-    startListeningRef.current = startListening;
-  }, [startListening]);
-
-  // Start session
-  const startSession = (initialPrompt?: string) => {
-    setIsActive(true);
-    if (synthRef.current) {
-      synthRef.current.cancel();
-    }
-
-    if (initialPrompt) {
-      sendSpokenTurn(initialPrompt);
-    } else {
-      const greeting =
-        selectedLanguage === "ar"
-          ? `أهلاً بك! أنا مرشدك الأكاديمي الصوتي في صفحة ${currentPageNumber}. تفضل بأي سؤال.`
-          : `Hello! I am your live oral mentor for Page ${currentPageNumber}. What would you like to explore or practice?`;
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "model",
-          content: greeting,
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        },
-      ]);
-      speakText(greeting);
-    }
-  };
-
-  // Stop session
-  const stopSession = () => {
-    setIsActive(false);
-    setStatus("idle");
-    setCurrentTranscript("");
-
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-    }
-
-    if (synthRef.current) {
-      synthRef.current.cancel();
-    }
-  };
-
-  const handleLanguageToggle = (lang: "en" | "ar" | "mixed") => {
-    setSelectedLanguage(lang);
-    if (onLanguageChange) {
-      onLanguageChange(lang === "ar" ? voiceLanguages.ar : voiceLanguages.en);
-    }
-    if (isActive) {
-      stopSession();
-      setTimeout(() => startSession(), 400);
-    }
-  };
-
-  const handleManualSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSendText = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!typedInput.trim()) return;
-    const text = typedInput.trim();
+    const textToSend = typedInput;
     setTypedInput("");
-    if (!isActive) {
-      setIsActive(true);
+
+    if (!isConnected) {
+      connect().then(() => {
+        sendTextMessage(textToSend);
+      });
+    } else {
+      sendTextMessage(textToSend);
     }
-    sendSpokenTurn(text);
   };
+
+  const handleChipClick = (chipText: string) => {
+    if (!isConnected) {
+      connect().then(() => {
+        sendTextMessage(chipText);
+      });
+    } else {
+      sendTextMessage(chipText);
+    }
+  };
+
+  // Compute reactive visualizer energy
+  const activeLevel = status === "mentor_speaking" ? outputLevel : inputLevel;
+  const orbScale = isConnected ? 1 + Math.min(0.25, activeLevel * 0.4) : 1;
 
   return (
     <div
       className={cn(
-        "flex flex-col overflow-hidden rounded-[24px] border-2 border-[color:var(--ink)] bg-gradient-to-b from-[#1c1a20] to-[#111013] text-[color:var(--cream)] shadow-frame transition-all duration-300",
-        isFloating ? "w-full max-w-lg p-5" : "h-full w-full p-4"
+        "flex flex-col h-full bg-[color:var(--ink-soft)] text-[color:var(--ink)] overflow-hidden",
+        isFloating && "fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] h-[580px] rounded-[22px] border-2 border-[color:var(--ink)] shadow-[6px_6px_0px_#0f0e10]"
       )}
     >
-      {/* HEADER: BRANDING & TOP-RIGHT LANGUAGE PILL */}
-      <div className="flex shrink-0 items-center justify-between border-b border-white/10 pb-3">
-        <div className="flex items-center gap-2">
-          <div className="flex size-7 items-center justify-center rounded-full bg-gradient-to-br from-[color:var(--orange)] to-amber-300 text-[color:var(--ink)] shadow-xs">
-            <Activity className="size-4 animate-pulse" />
-          </div>
-          <div className="flex flex-col">
-            <span className="text-xs font-black tracking-tight text-[color:var(--cream)]">
-              Ascleon Live Oral Mentor
-            </span>
-            <span className="text-[10px] text-[color:var(--cream)]/60">
-              Page {currentPageNumber} • Bilingual Socratic Session
-            </span>
-          </div>
-        </div>
-
-        {/* Top-Right Language & Controls */}
-        <div className="flex items-center gap-2">
-          {/* Language Selector Pill in the upper-right corner */}
-          <div className="flex items-center rounded-full border border-white/15 bg-white/5 p-0.5 text-[10px] font-bold">
-            <button
-              type="button"
-              onClick={() => handleLanguageToggle("en")}
-              className={cn(
-                "px-2 py-0.5 rounded-full transition-colors cursor-pointer",
-                selectedLanguage === "en"
-                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] font-bold shadow-xs"
-                  : "text-white/60 hover:text-white"
-              )}
-              title="English dialogue"
-            >
-              EN
-            </button>
-            <button
-              type="button"
-              onClick={() => handleLanguageToggle("ar")}
-              className={cn(
-                "px-2 py-0.5 rounded-full transition-colors cursor-pointer",
-                selectedLanguage === "ar"
-                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] font-bold shadow-xs"
-                  : "text-white/60 hover:text-white"
-              )}
-              title="Arabic dialogue (العربية)"
-            >
-              عربي
-            </button>
-            <button
-              type="button"
-              onClick={() => handleLanguageToggle("mixed")}
-              className={cn(
-                "px-2 py-0.5 rounded-full transition-colors cursor-pointer",
-                selectedLanguage === "mixed"
-                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] font-bold shadow-xs"
-                  : "text-white/60 hover:text-white"
-              )}
-              title="Mixed English + Arabic Code-Switching"
-            >
-              Mixed
-            </button>
-          </div>
-
-          {/* Mute Toggle */}
-          <button
-            type="button"
-            onClick={() => {
-              setIsMuted((prev) => !prev);
-              if (!isMuted && synthRef.current) {
-                synthRef.current.cancel();
-              }
-            }}
-            className="rounded-full p-1 text-[color:var(--cream)]/60 hover:bg-white/10 hover:text-[color:var(--cream)] cursor-pointer"
-            title={isMuted ? "Unmute spoken answers" : "Mute spoken answers"}
-          >
-            {isMuted ? <VolumeX className="size-4 text-rose-400" /> : <Volume2 className="size-4" />}
-          </button>
-
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-full p-1 text-[color:var(--cream)]/60 hover:bg-white/10 hover:text-[color:var(--cream)] cursor-pointer"
-              title="Close Voice Studio"
-            >
-              <X className="size-4" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* CENTER: PULSING INTERACTIVE ORB & EQUALIZER */}
-      <div className="my-3 flex flex-col items-center justify-center gap-2">
-        <div className="relative flex size-24 items-center justify-center">
-          {isActive && (
-            <>
-              <div
-                className={cn(
-                  "absolute inset-0 rounded-full opacity-40 blur-xl transition-all duration-500",
-                  status === "speaking" && "bg-amber-400 scale-125 animate-pulse",
-                  status === "listening" && "bg-emerald-400 scale-115 animate-ping",
-                  status === "thinking" && "bg-[color:var(--orange)] scale-120 animate-spin"
-                )}
-              />
-              <div className="absolute inset-1 rounded-full border-2 border-dashed border-white/20 animate-spin" />
-            </>
-          )}
-
-          <button
-            type="button"
-            onClick={isActive ? stopSession : () => startSession()}
-            className={cn(
-              "relative z-10 flex size-18 cursor-pointer items-center justify-center rounded-full border-2 border-[color:var(--ink)] transition-all shadow-chip active:scale-95",
-              isActive
-                ? status === "speaking"
-                  ? "bg-gradient-to-tr from-amber-400 to-[color:var(--orange)] text-[color:var(--ink)] scale-105"
-                  : status === "listening"
-                  ? "bg-gradient-to-tr from-emerald-400 to-[color:var(--cream)] text-[color:var(--ink)] scale-105"
-                  : "bg-[color:var(--orange)] text-[color:var(--ink)]"
-                : "bg-gradient-to-tr from-[#2a2730] to-[#1e1c22] text-[color:var(--cream)]/80 hover:text-[color:var(--orange)] hover:scale-105"
-            )}
-            title={isActive ? "Tap to pause session" : "Tap to speak with Ascleon mentor"}
-          >
-            {isActive ? (
-              <Mic className="size-7 animate-bounce text-[color:var(--ink)]" />
-            ) : (
-              <MicOff className="size-6" />
-            )}
-          </button>
-        </div>
-
-        {/* Live Status Badge */}
-        <span
-          className={cn(
-            "rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-            status === "speaking"
-              ? "bg-amber-400 text-black animate-pulse"
-              : status === "listening"
-              ? "bg-emerald-400 text-black animate-pulse"
-              : status === "thinking"
-              ? "bg-[color:var(--orange)] text-black animate-pulse"
-              : "bg-white/10 text-[color:var(--cream)]/70"
-          )}
-        >
-          {status === "speaking"
-            ? "Mentor Speaking..."
-            : status === "listening"
-            ? "Listening to You..."
-            : status === "thinking"
-            ? "Reasoning with Source..."
-            : "Tap Orb to Start"}
-        </span>
-
-        {/* Soundwave Bars */}
-        {isActive && (
-          <div className="flex items-center gap-1 h-5">
-            {[35, 70, 90, 55, 80, 100, 65, 45, 75, 40].map((height, i) => (
-              <div
-                key={i}
-                style={{
-                  height: status === "speaking" || status === "listening" ? `${Math.max(20, height)}%` : "20%",
-                  transition: "height 0.12s ease-in-out",
-                }}
-                className={cn(
-                  "w-1 rounded-full",
-                  status === "speaking"
-                    ? "bg-amber-400"
-                    : status === "listening"
-                    ? "bg-emerald-400"
-                    : "bg-white/20"
-                )}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* STREAMING TRANSCRIPTS FEED */}
-      <div
-        ref={scrollRef}
-        className="custom-scrollbar-dark flex-1 overflow-y-auto rounded-[16px] border border-white/10 bg-black/50 p-3 text-xs min-h-[160px]"
-      >
-        {messages.length === 0 && !currentTranscript && (
-          <div className="flex flex-col items-center justify-center gap-1.5 py-6 text-center text-[color:var(--cream)]/50">
-            <MessageSquare className="size-5 opacity-40" />
-            <p className="text-[11px]">
-              Tap the orb or select a prompt below to converse live on Page {currentPageNumber}.
-            </p>
-            {selectedText && (
-              <p className="mt-1 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[10.5px] text-amber-300">
-                🎯 Focused on highlighted passage: &ldquo;{selectedText.slice(0, 70)}...&rdquo;
-              </p>
-            )}
-          </div>
-        )}
-
-        <div className="flex flex-col gap-2">
-          {messages.map((m, idx) => (
+      {/* 1. TOP HEADER & CONTROLS BAR (Matches AI Chat header bar in LivingReader) */}
+      <div className="flex flex-col gap-2.5 border-b-2 border-[color:var(--ink)] bg-[color:var(--ink-soft)] p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
             <div
-              key={idx}
               className={cn(
-                "rounded-[16px] p-3 leading-relaxed text-xs",
-                m.role === "user"
-                  ? "self-end max-w-[85%] border-2 border-[color:var(--ink)] bg-[#ff4c00] text-[color:var(--ink)] font-bold shadow-chip"
-                  : "self-start max-w-[90%] border-2 border-[color:var(--ink)] bg-[#f6d7a1] text-[color:var(--ink)] font-medium shadow-chip"
+                "flex size-7 items-center justify-center rounded-full border-2 border-[color:var(--ink)] shadow-chip transition-all",
+                isConnected
+                  ? "bg-[color:var(--orange)] text-[color:var(--ink)]"
+                  : "bg-[color:var(--cream)] text-[color:var(--ink)]"
               )}
             >
-              <div className="mb-0.5 text-[9.5px] font-black uppercase tracking-wider text-[color:var(--ink)]/70">
-                {m.role === "user" ? "You" : "Ascleon Mentor"}
+              <Radio className="size-3.5 stroke-[2.5]" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-xs font-black tracking-tight text-[color:var(--cream)] uppercase">
+                  ASCLEON VOICE AGENT
+                </span>
+                <span className="rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-2 py-0.5 text-[9px] font-black uppercase text-[color:var(--ink)] shadow-[1px_1px_0px_#0f0e10]">
+                  LIVE CLINICAL MENTOR
+                </span>
               </div>
-              <p>{m.content}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* New Session Button if paused with existing messages */}
+            {messages.length > 0 && !isConnected && (
+              <button
+                type="button"
+                onClick={resetSession}
+                className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] px-2.5 py-1 font-mono text-[10px] font-black uppercase text-[color:var(--ink)] shadow-chip hover:bg-[color:var(--orange)] transition-colors"
+                title="Clear history and start a fresh session"
+              >
+                New Session
+              </button>
+            )}
+
+            {/* Voice Persona Selector */}
+            <div className="relative">
+              <select
+                value={selectedVoice}
+                disabled={isConnected}
+                onChange={(e) => setSelectedVoice(e.target.value)}
+                className="appearance-none cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] pl-3 pr-7 py-1 font-mono text-[11px] font-black text-[color:var(--ink)] shadow-chip focus:outline-none disabled:opacity-50"
+                title="Select Mentor Voice Persona"
+              >
+                {AVAILABLE_LIVE_VOICES.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name} ({v.gender})
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-3 text-[color:var(--ink)] stroke-[2.5]" />
+            </div>
+
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] p-1.5 text-[color:var(--ink)] shadow-chip hover:bg-[color:var(--orange)]"
+              >
+                <X className="size-3.5 stroke-[2.5]" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Study Language Switch (Unified across Reader) */}
+        {onStudyLanguageChange && (
+          <div className="flex items-center justify-between pt-0.5">
+            <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[color:var(--cream)]/80">
+              Session Language:
+            </span>
+            <StudyLanguageSwitch
+              currentLanguage={activeLang}
+              onLanguageChange={onStudyLanguageChange}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* VISUAL TRIGGER ACTION BANNER ("Show while explaining") */}
+      {activeVisualTrigger && (
+        <div className="mx-3 mt-3 flex items-center justify-between rounded-[14px] border-2 border-[color:var(--ink)] bg-[color:var(--mint)] px-3 py-2 text-xs text-[color:var(--ink)] shadow-chip animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-2">
+            <Sparkles className="size-4 shrink-0 text-[color:var(--ink)]" />
+            <div>
+              <div className="font-black">
+                {activeVisualTrigger.action === "open_morph" ? "Morph View Activated:" : "Concept Highlighted:"}{" "}
+                <span className="underline decoration-2">{activeVisualTrigger.conceptName}</span>
+              </div>
+              {activeVisualTrigger.explanation && (
+                <div className="text-[11px] font-semibold text-[color:var(--ink)]/80">
+                  {activeVisualTrigger.explanation}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {activeVisualTrigger.action === "open_morph" && onTriggerMorph && (
+              <button
+                type="button"
+                onClick={onTriggerMorph}
+                className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] px-2.5 py-1 text-[10px] font-black uppercase text-[color:var(--ink)] shadow-[1px_1px_0px_#0f0e10] hover:bg-[color:var(--orange)]"
+              >
+                View Morph
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={clearVisualTrigger}
+              className="cursor-pointer rounded p-1 text-[color:var(--ink)] hover:opacity-70"
+            >
+              <X className="size-3.5 stroke-[2.5]" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ERROR NOTICE */}
+      {errorMessage && (
+        <div className="mx-3 mt-3 flex items-center justify-between rounded-[14px] border-2 border-[color:var(--ink)] bg-red-100 px-3 py-2 text-xs text-red-900 shadow-chip">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="size-4 shrink-0 text-red-700" />
+            <span className="font-bold">{errorMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={connect}
+            className="flex items-center gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] px-2.5 py-1 text-[10px] font-black uppercase shadow-[1px_1px_0px_#0f0e10] hover:bg-[color:var(--orange)]"
+          >
+            <RefreshCw className="size-3 stroke-[2.5]" />
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* 2. MAIN CONVERSATION STAGE & ORB */}
+      <div className="flex flex-1 flex-col overflow-hidden p-3 gap-3">
+        {/* INTERACTIVE LIVE ORB HERO CARD */}
+        <div className="flex flex-col items-center justify-center rounded-[18px] border-2 border-[color:var(--ink)] bg-[color:var(--cream)] p-4 shadow-chip">
+          <div className="relative flex items-center justify-center">
+            {/* Outer reactive pulse rings */}
+            <div
+              className="absolute size-32 rounded-full border-2 border-[color:var(--ink)] transition-all duration-100"
+              style={{
+                transform: `scale(${orbScale * 1.15})`,
+                opacity: isConnected ? 0.35 : 0,
+              }}
+            />
+            <div
+              className="absolute size-28 rounded-full border-2 border-[color:var(--orange)] transition-all duration-75"
+              style={{
+                transform: `scale(${orbScale * 1.08})`,
+                opacity: isConnected ? 0.6 : 0,
+              }}
+            />
+
+            {/* Central Orb Button */}
+            <button
+              type="button"
+              onClick={isConnected ? disconnect : connect}
+              className={cn(
+                "relative z-10 flex size-24 cursor-pointer items-center justify-center rounded-full border-2 border-[color:var(--ink)] transition-all duration-150 shadow-chip",
+                isConnected
+                  ? status === "mentor_speaking"
+                    ? "bg-[color:var(--mint)] text-[color:var(--ink)]"
+                    : status === "interrupted"
+                    ? "bg-amber-300 text-[color:var(--ink)]"
+                    : "bg-[color:var(--orange)] text-[color:var(--ink)]"
+                  : status === "connecting"
+                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] animate-spin"
+                  : "bg-[color:var(--panel)] text-[color:var(--ink)] hover:bg-[color:var(--orange)]"
+              )}
+              style={{ transform: `scale(${orbScale})` }}
+              title={isConnected ? "Tap to End Oral Session" : "Tap to Start Live Voice Mentor"}
+            >
+              {status === "connecting" ? (
+                <Activity className="size-8 stroke-[2.5] animate-pulse" />
+              ) : isConnected ? (
+                status === "mentor_speaking" ? (
+                  <Volume2 className="size-8 stroke-[2.5]" />
+                ) : (
+                  <Mic className="size-8 stroke-[2.5] animate-pulse" />
+                )
+              ) : (
+                <Mic className="size-8 stroke-[2.5]" />
+              )}
+            </button>
+          </div>
+
+          {/* STATUS LABEL & LIVE MIC ENERGY */}
+          <div className="mt-3 flex flex-col items-center gap-1.5">
+            <span className="font-mono text-[11px] font-black uppercase tracking-wider text-[color:var(--ink)]">
+              {status === "connecting" && "SETTING UP ASCLEON VOICE AGENT..."}
+              {status === "listening" && (isMuted ? "MIC MUTED (LISTENING PAUSED)" : "READY — SPEAK NATURALLY")}
+              {status === "mentor_speaking" && "ASCLEON MENTOR SPEAKING (BARGE-IN READY)"}
+              {status === "interrupted" && "INTERRUPTED! LISTENING TO YOUR QUESTION..."}
+              {status === "disconnected" &&
+                (messages.length > 0
+                  ? "SESSION PAUSED — TAP MIC TO RESUME"
+                  : "TAP MIC TO BEGIN LIVE VOICE SESSION")}
+              {status === "error" && "DISCONNECTED"}
+            </span>
+
+            {/* Waveform indicator */}
+            {isConnected && (
+              <div className="flex items-center gap-1 py-0.5">
+                {Array.from({ length: 9 }).map((_, i) => {
+                  const factor = Math.sin((i / 8) * Math.PI);
+                  const barHeight = Math.max(5, Math.round(activeLevel * 22 * factor));
+                  return (
+                    <div
+                      key={i}
+                      className="w-1.5 rounded-full border border-[color:var(--ink)] bg-[color:var(--ink)] transition-all duration-75"
+                      style={{ height: `${barHeight}px` }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 3. LIVE TRANSCRIPT CARDS (BiDi safe with .ascleon-bidi & dir="auto") */}
+        <div
+          ref={scrollRef}
+          className="custom-scrollbar-dark flex-1 space-y-3 overflow-y-auto rounded-[18px] border-2 border-[color:var(--ink)] bg-[color:var(--ink)]/40 p-3"
+        >
+          {messages.length === 0 && !currentInputTranscript && !currentOutputTranscript && (
+            <div className="flex h-full flex-col items-center justify-center p-4 text-center">
+              <Sparkles className="size-7 mb-2 text-[color:var(--orange)]" />
+              <p className="font-bold text-xs text-[color:var(--cream)] max-w-xs leading-relaxed">
+                {activeLang === "ar"
+                  ? "تكلم بحرية باللهجة المصرية، اسأل أي سؤال إكلينيكي في الصفحة وقاطع دكتور وائل في أي لحظة زي الراوند الحقيقي!"
+                  : activeLang === "mixed"
+                  ? "تكلم براحتك مكس مصري + English Medical Terms، وقاطع الـ AI في أي وقت!"
+                  : "Speak naturally in English grounded in this book. Interrupt at any time just like a real medical round!"}
+              </p>
+            </div>
+          )}
+
+          {messages.map((m) => (
+            <div
+              key={m.id}
+              dir="auto"
+              className={cn(
+                "ascleon-bidi rounded-[18px] border-2 border-[color:var(--ink)] p-3 text-xs shadow-chip",
+                m.role === "user"
+                  ? "ml-6 bg-[color:var(--orange)] text-[color:var(--ink)] font-bold"
+                  : "mr-6 bg-[color:var(--cream)] text-[color:var(--ink)]"
+              )}
+            >
+              <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-[color:var(--ink)]/20">
+                <span className="font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]">
+                  {m.role === "user" ? "YOU · VOICE" : `ASCLEON MENTOR (${selectedVoice})`}
+                </span>
+                <div className="flex items-center gap-1.5 font-mono text-[9px] text-[color:var(--ink)]/70">
+                  {m.interrupted && (
+                    <span className="rounded bg-red-500 text-white px-1 py-0.2 font-bold uppercase">
+                      Interrupted
+                    </span>
+                  )}
+                  <span>{m.time}</span>
+                </div>
+              </div>
+              <p className="whitespace-pre-wrap">{m.text}</p>
             </div>
           ))}
 
-          {currentTranscript && (
-            <div className="self-end max-w-[85%] rounded-[16px] border-2 border-[color:var(--ink)] bg-[#7fd8c9] p-3 text-xs text-[color:var(--ink)] font-bold shadow-chip animate-pulse">
-              <span className="text-[9.5px] font-black uppercase tracking-wider text-[color:var(--ink)]/80">You (Speaking...)</span>
-              <p>{currentTranscript}</p>
+          {/* Real-time Interim User Transcript */}
+          {currentInputTranscript && (
+            <div
+              dir="auto"
+              className="ascleon-bidi ml-6 rounded-[18px] border-2 border-[color:var(--ink)] bg-[color:var(--orange)]/90 p-3 text-xs text-[color:var(--ink)] font-bold shadow-chip animate-pulse"
+            >
+              <div className="mb-1 font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]">
+                YOU (SPEAKING...)
+              </div>
+              <p className="whitespace-pre-wrap">{currentInputTranscript}</p>
+            </div>
+          )}
+
+          {/* Real-time Interim Mentor Transcript */}
+          {currentOutputTranscript && (
+            <div
+              dir="auto"
+              className="ascleon-bidi mr-6 rounded-[18px] border-2 border-[color:var(--ink)] bg-[color:var(--cream)] p-3 text-xs text-[color:var(--ink)] shadow-chip animate-pulse"
+            >
+              <div className="mb-1 font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]">
+                ASCLEON MENTOR (SPEAKING...)
+              </div>
+              <p className="whitespace-pre-wrap">{currentOutputTranscript}</p>
             </div>
           )}
         </div>
+
+        {/* 4. SOCRATIC QUESTION SUGGESTION CHIPS */}
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            activeLang === "ar"
+              ? "اشرح لي فكرة الصفحة دي ببساطة"
+              : activeLang === "mixed"
+              ? "إيه الـ mechanism بتاع الـ onset والـ course هنا؟"
+              : "Explain the core mechanism on this page",
+            activeLang === "ar"
+              ? "اسألني سؤال شفوي سريع"
+              : activeLang === "mixed"
+              ? "Quiz me على الـ differential diagnosis"
+              : "Quiz me on differential diagnosis",
+            activeLang === "ar"
+              ? "إيه أهم التريكات اللي بتيجي في الامتحان؟"
+              : activeLang === "mixed"
+              ? "إيه الـ high-yield exam pearls هنا؟"
+              : "What are the high-yield exam pearls?",
+          ].map((chip, idx) => (
+            <button
+              key={idx}
+              type="button"
+              dir="auto"
+              onClick={() => handleChipClick(chip)}
+              className="ascleon-bidi cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] px-3 py-1 font-sans text-[11px] font-bold text-[color:var(--ink)] shadow-chip transition-all hover:bg-[color:var(--orange)]"
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* SOCRATIC VIVA STARTERS */}
-      <div className="mt-2.5 flex flex-col gap-1.5 border-t border-[color:var(--ink)]/20 pt-2.5">
-        <div className="flex items-center justify-between text-[10px] text-[color:var(--cream)]/60">
-          <span className="font-bold uppercase tracking-wider text-[#7fd8c9]">Socratic Starters:</span>
-          <span>Click to speak prompt</span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-1.5">
+      {/* 5. FOOTER CONTROLS & TEXT INPUT (Matches AI Chat composer in LivingReader) */}
+      <div className="border-t-2 border-[color:var(--ink)] bg-[color:var(--ink-soft)] p-3">
+        <form onSubmit={handleSendText} className="flex items-center gap-2">
+          {/* Mute Mic Toggle */}
           <button
             type="button"
-            onClick={() => startSession(`Quiz me orally on the core mechanisms of Page ${currentPageNumber}`)}
-            className="flex cursor-pointer items-center gap-1.5 rounded-xl border-2 border-[color:var(--ink)] bg-[#f6d7a1] p-2 text-left text-[10.5px] text-[color:var(--ink)] font-bold shadow-xs transition-transform hover:-translate-y-0.5 hover:bg-[#ff4c00]"
+            onClick={toggleMute}
+            disabled={!isConnected}
+            className={cn(
+              "flex size-10 cursor-pointer items-center justify-center rounded-[14px] border-2 border-[color:var(--ink)] shadow-chip transition-all disabled:opacity-40",
+              isMuted
+                ? "bg-red-400 text-[color:var(--ink)]"
+                : "bg-[color:var(--cream)] text-[color:var(--ink)] hover:bg-[color:var(--orange)]"
+            )}
+            title={isMuted ? "Unmute Microphone" : "Mute Microphone"}
           >
-            <Award className="size-3.5 shrink-0 text-[#ff4c00]" />
-            <span className="truncate">Oral Exam Viva</span>
+            {isMuted ? <MicOff className="size-4 stroke-[2.5]" /> : <Mic className="size-4 stroke-[2.5]" />}
           </button>
 
+          {/* Text Input Field */}
+          <input
+            type="text"
+            dir="auto"
+            value={typedInput}
+            onChange={(e) => setTypedInput(e.target.value)}
+            placeholder={
+              isConnected
+                ? activeLang === "ar"
+                  ? "اكتب أو اتكلم مع دكتور وائل في الراوند الشفوي..."
+                  : activeLang === "mixed"
+                  ? "Type your clinical question or speak..."
+                  : "Type your clinical question into oral session..."
+                : "Type question or tap mic above..."
+            }
+            className="ascleon-bidi flex-1 rounded-[14px] border-2 border-[color:var(--ink)] bg-[color:var(--panel)] px-3 py-2 text-xs font-bold text-[color:var(--ink)] placeholder-[color:var(--ink)]/50 shadow-chip focus:outline-none focus:ring-2 focus:ring-[color:var(--orange)]"
+          />
+
+          {/* Send Button */}
           <button
-            type="button"
-            onClick={() => startSession(`Explain the foundational principle of Page ${currentPageNumber} step by step`)}
-            className="flex cursor-pointer items-center gap-1.5 rounded-xl border-2 border-[color:var(--ink)] bg-[#7fd8c9] p-2 text-left text-[10.5px] text-[color:var(--ink)] font-bold shadow-xs transition-transform hover:-translate-y-0.5 hover:bg-[#ff4c00]"
+            type="submit"
+            disabled={!typedInput.trim()}
+            className="flex size-10 cursor-pointer items-center justify-center rounded-[14px] border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] font-bold shadow-chip transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            title="Send into session"
           >
-            <Sparkles className="size-3.5 shrink-0 text-[color:var(--ink)]" />
-            <span className="truncate">Step-by-Step Mechanism</span>
+            <Send className="size-4 stroke-[2.5]" />
           </button>
-        </div>
+        </form>
       </div>
-
-      {/* TEXT INPUT FALLBACK BAR */}
-      <form onSubmit={handleManualSubmit} className="mt-2 flex items-center gap-1.5">
-        <input
-          type="text"
-          value={typedInput}
-          onChange={(e) => setTypedInput(e.target.value)}
-          placeholder={
-            selectedLanguage === "ar"
-              ? "اكتب سؤالك الصوتي هنا..."
-              : "Type a spoken question here..."
-          }
-          className="flex-1 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs text-[color:var(--cream)] placeholder:text-white/40 focus:border-[color:var(--orange)] focus:outline-none"
-        />
-        <button
-          type="submit"
-          disabled={!typedInput.trim()}
-          className="flex size-7 items-center justify-center rounded-full bg-[color:var(--orange)] text-[color:var(--ink)] hover:opacity-90 disabled:opacity-40 cursor-pointer"
-        >
-          <Send className="size-3" />
-        </button>
-      </form>
     </div>
   );
 }

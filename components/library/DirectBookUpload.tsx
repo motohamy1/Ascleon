@@ -15,14 +15,13 @@ import {
   BookOpen,
 } from "lucide-react";
 import { cn, parsePDFFile, withRetry } from "@/lib/utils";
-import { upload } from "@vercel/blob/client";
+import { uploadPdfWithProgress } from "@/lib/storage/client-upload";
 import {
   checkBookExists,
   createBook,
   saveBookSegments,
 } from "@/lib/actions/book.actions";
 import {
-  requestPresignedUpload,
   saveCoverImageAction,
 } from "@/lib/actions/storage.actions";
 import { DEFAULT_VOICE, voiceOptions } from "@/lib/constants";
@@ -153,67 +152,28 @@ export default function DirectBookUpload({
         setProgress(45);
         setStatusText("Digesting study source & uploading to secure cloud...");
 
-        // Task A: PDF Cloud Upload with 45-second timeout guard
+        // Task A: PDF Cloud Upload with live MB progress and smart stall detection
         const uploadPdfTask = async () => {
           if (cp.uploadedPdfUrl && cp.uploadedPdfKey) {
             return { url: cp.uploadedPdfUrl, key: cp.uploadedPdfKey };
           }
 
-          return await withRetry(
-            async () => {
-              let url = "";
-              let key = "";
-              try {
-                const presigned = await requestPresignedUpload(
-                  file.name,
-                  file.type || "application/pdf"
-                );
-                if (presigned.success && presigned.data) {
-                  const controller = new AbortController();
-                  const timeoutId = setTimeout(() => controller.abort(), 45000);
-
-                  const r2Res = await fetch(presigned.data.uploadUrl, {
-                    method: "PUT",
-                    body: file,
-                    headers: {
-                      "Content-Type": file.type || "application/pdf",
-                    },
-                    signal: controller.signal,
-                  });
-                  clearTimeout(timeoutId);
-
-                  if (r2Res.ok) {
-                    url = presigned.data.publicUrl;
-                    key = presigned.data.key;
-                  }
-                }
-              } catch (r2Err) {
-                console.warn("Direct R2 upload attempt failed, trying fallback:", r2Err);
-              }
-
-              if (!url) {
-                const fileSlug = file.name.replace(/\s+/g, "-").toLowerCase();
-                const uploadedBlob = await upload(`${fileSlug}`, file, {
-                  access: "public",
-                  handleUploadUrl: "/api/upload",
-                  contentType: "application/pdf",
-                });
-                url = uploadedBlob.url;
-                key = uploadedBlob.pathname;
-              }
-
-              cp.uploadedPdfUrl = url;
-              cp.uploadedPdfKey = key;
-              return { url, key };
+          const res = await uploadPdfWithProgress(file, {
+            onProgress: (p) => {
+              const overall = 45 + Math.round((p.loaded / Math.max(p.total, 1)) * 28);
+              setProgress(Math.min(overall, 74));
+              setStatusText(
+                `Uploading PDF (${(p.loaded / 1024 / 1024).toFixed(1)} / ${(p.total / 1024 / 1024).toFixed(1)} MB)...`
+              );
             },
-            {
-              retries: 2,
-              delayMs: 1200,
-              onRetry: (_err, attempt) => {
-                setStatusText(`Retrying cloud upload (attempt ${attempt}/2)...`);
-              },
-            }
-          );
+            onStatus: (st) => {
+              setStatusText(st);
+            },
+          });
+
+          cp.uploadedPdfUrl = res.url;
+          cp.uploadedPdfKey = res.key;
+          return res;
         };
 
         // Task B: Cover Upload (completely non-blocking, times out after 10s)

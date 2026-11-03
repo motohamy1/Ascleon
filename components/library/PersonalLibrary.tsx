@@ -17,41 +17,51 @@ interface PersonalLibraryProps {
 export default function PersonalLibrary({
   initialBooks,
 }: PersonalLibraryProps) {
+  const [books, setBooks] = useState<IBook[]>(initialBooks);
   const [viewMode, setViewMode] = useState<ViewMode>("shelf");
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
   const [selectedBook, setSelectedBook] = useState<IBook | null>(null);
 
+  React.useEffect(() => {
+    setBooks(initialBooks);
+  }, [initialBooks]);
+
+  const handleBookDeleted = (deletedId: string) => {
+    setBooks((prev) => prev.filter((b) => b._id !== deletedId));
+    setSelectedBook(null);
+  };
+
   // Compute unique topics with count
   const topics = useMemo(() => {
     const map = new Map<string, number>();
-    initialBooks.forEach((b) => {
+    books.forEach((b) => {
       const topic = b.topic?.trim() || "General";
       map.set(topic, (map.get(topic) || 0) + 1);
     });
     return Array.from(map.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count);
-  }, [initialBooks]);
+  }, [books]);
 
   // Counts for filters
   const favoritesCount = useMemo(
-    () => initialBooks.filter((b) => b.isFavorite).length,
-    [initialBooks],
+    () => books.filter((b) => b.isFavorite).length,
+    [books],
   );
 
   const inProgressCount = useMemo(
-    () => initialBooks.filter((b) => b.readingStatus === "in_progress").length,
-    [initialBooks],
+    () => books.filter((b) => b.readingStatus === "in_progress").length,
+    [books],
   );
 
   const quickReadsCount = useMemo(
-    () => initialBooks.filter((b) => getBookReadingTime(b) <= 15).length,
-    [initialBooks],
+    () => books.filter((b) => getBookReadingTime(b) <= 15).length,
+    [books],
   );
 
   // Filter books based on active filter
   const filteredBooks = useMemo(() => {
-    return initialBooks.filter((book) => {
+    return books.filter((book) => {
       if (activeFilter === "all") return true;
       if (activeFilter === "favorites") return Boolean(book.isFavorite);
       if (activeFilter === "reading_now")
@@ -60,17 +70,17 @@ export default function PersonalLibrary({
         return getBookReadingTime(book) <= 15;
       return (book.topic?.trim() || "General") === activeFilter;
     });
-  }, [initialBooks, activeFilter]);
+  }, [books, activeFilter]);
 
   const selectedIndex = useMemo(() => {
     if (!selectedBook) return 0;
-    return initialBooks.findIndex((b) => b._id === selectedBook._id);
-  }, [initialBooks, selectedBook]);
+    return books.findIndex((b) => b._id === selectedBook._id);
+  }, [books, selectedBook]);
 
   return (
     <div className="w-full flex flex-col gap-6">
       {/* 1. Library Statistics Ribbon */}
-      <LibraryStats books={initialBooks} />
+      <LibraryStats books={books} />
 
       {/* 2. View Mode Switcher and Filter Pills */}
       <ViewControls
@@ -79,7 +89,7 @@ export default function PersonalLibrary({
         activeFilter={activeFilter}
         onFilterChange={setActiveFilter}
         topics={topics}
-        totalCount={initialBooks.length}
+        totalCount={books.length}
         favoritesCount={favoritesCount}
         inProgressCount={inProgressCount}
         quickReadsCount={quickReadsCount}
@@ -109,6 +119,7 @@ export default function PersonalLibrary({
                 readingTimeMinutes={book.readingTimeMinutes}
                 isFavorite={book.isFavorite}
                 color={book.color}
+                onDelete={() => setSelectedBook(book)}
               />
             ))}
           </div>
@@ -117,11 +128,11 @@ export default function PersonalLibrary({
         <div className="w-full bg-white/70 border border-dashed border-[#D5C7B5] rounded-2xl py-16 px-4 text-center flex flex-col items-center justify-center gap-3">
           <BookDashed className="w-10 h-10 text-[#8C7A68]" />
           <p className="text-base font-medium text-[#4A433A]">
-            {initialBooks.length === 0
+            {books.length === 0
               ? "Your personal library is empty. Upload your first book using the upload button above!"
               : "No books found matching this filter"}
           </p>
-          {initialBooks.length > 0 && (
+          {books.length > 0 && (
             <button
               type="button"
               onClick={() => setActiveFilter("all")}
@@ -147,6 +158,7 @@ export default function PersonalLibrary({
               book={selectedBook}
               index={selectedIndex}
               onClose={() => setSelectedBook(null)}
+              onDeleted={handleBookDeleted}
             />
           </div>
         </div>

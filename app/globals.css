@@ -1207,3 +1207,30 @@ button[data-variant='unstyled'] *,
   user-select: none;
   -webkit-user-select: none;
 }
+
+/* ==========================================================================
+   ASCLEON BIDIRECTIONAL (ARABIC + ENGLISH) TYPOGRAPHY & LAYOUT PROTECTION
+   Prevents mixed Arabic/English text collision, line-height truncation,
+   and character scrambling across LTR/RTL script boundaries.
+   ========================================================================== */
+.ascleon-bidi,
+[dir="auto"] {
+  unicode-bidi: plaintext;
+  text-align: start;
+  line-height: 1.85 !important;
+  word-spacing: 0.03em;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+/* Ensure inline English terms, abbreviations, and code spans inside Arabic context stay isolated */
+.ascleon-bidi code,
+.ascleon-bidi .ascleon-pill,
+[dir="auto"] code,
+[dir="auto"] .ascleon-pill {
+  unicode-bidi: isolate;
+  display: inline-block;
+  vertical-align: baseline;
+  margin-inline: 0.15em;
+}
+

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,6 +10,7 @@ export async function POST(req: NextRequest) {
       pageNumber = 1,
       pageText = "",
       selectedText = "",
+      language = "en",
     } = body;
 
     const focalText = (selectedText || pageText || "").trim();
@@ -51,7 +53,9 @@ Produce a JSON object with this exact shape:
   ]
 }
 
-Return ONLY the JSON object.`;
+Return ONLY the JSON object.
+
+${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
         const generatePromise = ai.models.generateContent({
           model: "gemini-3-flash-preview",

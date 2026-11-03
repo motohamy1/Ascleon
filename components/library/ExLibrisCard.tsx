@@ -16,10 +16,12 @@ import {
   Clock,
   Calendar,
   Layers,
+  Trash2,
 } from "lucide-react";
 import {
   toggleBookFavorite,
   updateBookReadingStatus,
+  deleteBook,
 } from "@/lib/actions/book.actions";
 import { toast } from "sonner";
 
@@ -27,18 +29,22 @@ interface ExLibrisCardProps {
   book: IBook;
   onClose: () => void;
   index: number;
+  onDeleted?: (bookId: string) => void;
 }
 
 export default function ExLibrisCard({
   book,
   onClose,
   index,
+  onDeleted,
 }: ExLibrisCardProps) {
   const [isPending, startTransition] = useTransition();
   const [isFavorite, setIsFavorite] = React.useState(Boolean(book.isFavorite));
   const [readingStatus, setReadingStatus] = React.useState<ReadingStatus>(
     book.readingStatus || "not_started",
   );
+  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
+  const [isDeleting, setIsDeleting] = React.useState(false);
 
   const readingTime = getBookReadingTime(book);
   const year = getBookYear(book);
@@ -84,6 +90,25 @@ export default function ExLibrisCard({
     });
   };
 
+  const handleDeleteBook = async () => {
+    setIsDeleting(true);
+    try {
+      const result = await deleteBook(book._id);
+      if (result.success) {
+        toast.success(`"${book.title}" removed from library`);
+        onDeleted?.(book._id);
+        onClose();
+      } else {
+        toast.error(result.error || "Failed to remove book");
+      }
+    } catch {
+      toast.error("Failed to remove book");
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
   return (
     <div
       role="dialog"
@@ -91,15 +116,56 @@ export default function ExLibrisCard({
       aria-labelledby="ex-libris-title"
       className="w-full max-w-xl mx-auto bg-[#FDFBF7] border-2 border-[#D8C7B0] rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] p-6 sm:p-8 relative font-serif text-[#2B261F] animate-in fade-in zoom-in-95 duration-200"
     >
-      {/* Close button */}
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="Close book card"
-        className="absolute top-4 right-4 text-[#8C7A68] hover:text-[#212A3B] p-1.5 rounded-full hover:bg-[#EFE8DD] transition-colors cursor-pointer"
-      >
-        <X className="w-5 h-5" />
-      </button>
+      {/* Top action buttons */}
+      <div className="absolute top-4 right-4 flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setShowDeleteConfirm((prev) => !prev)}
+          aria-label="Remove book from library"
+          title="Remove from library"
+          className="text-[#8C7A68] hover:text-rose-600 p-1.5 rounded-full hover:bg-rose-50 transition-colors cursor-pointer"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close book card"
+          className="text-[#8C7A68] hover:text-[#212A3B] p-1.5 rounded-full hover:bg-[#EFE8DD] transition-colors cursor-pointer"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* Delete Confirmation Banner */}
+      {showDeleteConfirm && (
+        <div className="mb-5 p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between gap-3 text-xs font-sans text-rose-900 animate-in fade-in duration-150">
+          <div className="flex items-center gap-2 min-w-0">
+            <Trash2 className="w-4 h-4 text-rose-600 shrink-0" />
+            <span className="font-semibold truncate">
+              Remove &ldquo;{book.title}&rdquo; from library?
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              disabled={isDeleting}
+              onClick={() => setShowDeleteConfirm(false)}
+              className="px-2.5 py-1 rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 font-medium transition-colors cursor-pointer text-[11px]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={isDeleting}
+              onClick={handleDeleteBook}
+              className="px-2.5 py-1 rounded-md bg-rose-600 text-white hover:bg-rose-700 font-bold transition-colors cursor-pointer text-[11px] flex items-center gap-1"
+            >
+              {isDeleting ? "Removing..." : "Remove"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Ex Libris Header Stamp */}
       <div className="flex flex-col items-center border-b border-[#D8C7B0] pb-4 mb-6 text-center">
@@ -200,21 +266,35 @@ export default function ExLibrisCard({
           </div>
         </div>
 
-        {/* Favorite Button */}
-        <button
-          type="button"
-          disabled={isPending}
-          onClick={handleToggleFavorite}
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-sans font-medium transition-colors cursor-pointer",
-            isFavorite
-              ? "bg-[#A04000]/10 border-[#A04000] text-[#A04000]"
-              : "border-[#D8C7B0] text-[#6B5E50] hover:bg-[#EFE8DD]",
-          )}
-        >
-          <Star className={cn("w-3.5 h-3.5", isFavorite && "fill-current")} />
-          <span>{isFavorite ? "Favorited" : "Favorite"}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Favorite Button */}
+          <button
+            type="button"
+            disabled={isPending || isDeleting}
+            onClick={handleToggleFavorite}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-sans font-medium transition-colors cursor-pointer",
+              isFavorite
+                ? "bg-[#A04000]/10 border-[#A04000] text-[#A04000]"
+                : "border-[#D8C7B0] text-[#6B5E50] hover:bg-[#EFE8DD]",
+            )}
+          >
+            <Star className={cn("w-3.5 h-3.5", isFavorite && "fill-current")} />
+            <span>{isFavorite ? "Favorited" : "Favorite"}</span>
+          </button>
+
+          {/* Remove Button */}
+          <button
+            type="button"
+            disabled={isPending || isDeleting}
+            onClick={() => setShowDeleteConfirm((prev) => !prev)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D8C7B0] text-[#6B5E50] hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50 text-xs font-sans font-medium transition-colors cursor-pointer"
+            title="Remove from library"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Remove</span>
+          </button>
+        </div>
       </div>
 
       {/* Action Button */}

@@ -10,6 +10,8 @@ import {
 } from "@/lib/ai/knowledge/sample-book-data";
 import { MorphCanvas } from "@/components/reader/MorphCanvas";
 import { AscleonVoiceStudio } from "@/components/reader/AscleonVoiceStudio";
+import { StudyLanguageSwitch } from "@/components/reader/StudyLanguageSwitch";
+import { StudyLanguage, DEFAULT_STUDY_LANGUAGE } from "@/lib/language";
 import {
   SourceSelectionToolbar,
   ScannedPinItem,
@@ -123,16 +125,23 @@ export default function LivingReader({
   const [language, setLanguage] = useState<VoiceLanguage>(
     (book.language as VoiceLanguage) || DEFAULT_VOICE_LANGUAGE,
   );
+  const [studyLanguage, setStudyLanguage] = useState<StudyLanguage>(() => {
+    const rawLang = book.language as any;
+    const code = typeof rawLang === "string" ? rawLang : rawLang?.code;
+    if (code === "ar") return "ar";
+    if (code === "mixed") return "mixed";
+    return DEFAULT_STUDY_LANGUAGE;
+  });
 
   // Morph Engine State
   const [morphArtifacts, setMorphArtifacts] = useState<
-    Record<number, MorphArtifactData>
+    Record<string, MorphArtifactData>
   >({});
   const [isMorphLoading, setIsMorphLoading] = useState(false);
 
   // Dynamic QBank State
   const [dynamicQBankList, setDynamicQBankList] = useState<QBankVignette[]>([]);
-  const [qbankCache, setQBankCache] = useState<Record<number, QBankVignette[]>>({});
+  const [qbankCache, setQBankCache] = useState<Record<string, QBankVignette[]>>({});
   const [isQBankLoading, setIsQBankLoading] = useState(false);
   const [activeQBankIdx, setActiveQBankIdx] = useState(0);
   const [quizAnswer, setQuizAnswer] = useState<number | null>(null);
@@ -140,7 +149,7 @@ export default function LivingReader({
 
   // Dynamic Summary State
   const [dynamicSummary, setDynamicSummary] = useState<any>(null);
-  const [summaryCache, setSummaryCache] = useState<Record<number, any>>({});
+  const [summaryCache, setSummaryCache] = useState<Record<string, any>>({});
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
 
   // Source Selection & Background Sync
@@ -293,14 +302,15 @@ export default function LivingReader({
     forceRefresh = false
   ) => {
     const targetSelection = overrideSelection ?? selectedText;
-    const activeKey = book.fileURL ? activePdfPage : currentIdx;
+    const baseKey = book.fileURL ? activePdfPage : currentIdx;
+    const activeKey = `${baseKey}_${studyLanguage}`;
     const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
     const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
 
     setActiveIntent("morph");
 
     // Instant local cache hit: if this page was already morphed in this session and not forcing refresh, restore in 0ms!
-    if (!forceRefresh && !targetSelection && !diagramUrl && morphArtifacts[activeKey]) {
+    if (!forceRefresh && !targetSelection && !diagramUrl && (morphArtifacts[activeKey] || morphArtifacts[baseKey])) {
       return;
     }
 
@@ -324,6 +334,7 @@ export default function LivingReader({
           precedingSegments,
           selectedText: targetSelection || undefined,
           snippedDiagram: diagramUrl || snippedDiagram?.url || null,
+          language: studyLanguage,
           forceRefresh: Boolean(forceRefresh),
         }),
       });
@@ -354,10 +365,11 @@ export default function LivingReader({
   // Dynamic QBank generator with per-page caching
   const loadDynamicQBank = useCallback(async (diagramUrl?: string, forceRefresh = false) => {
     const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+    const cacheKey = `${activePage}_${studyLanguage}`;
 
     // Instant cache hit: if QBank was already generated for this page, load instantly (0ms)
-    if (!forceRefresh && !diagramUrl && !selectedText && qbankCache[activePage]?.length) {
-      setDynamicQBankList(qbankCache[activePage]);
+    if (!forceRefresh && !diagramUrl && !selectedText && qbankCache[cacheKey]?.length) {
+      setDynamicQBankList(qbankCache[cacheKey]);
       setQuizSubmitted(false);
       setQuizAnswer(null);
       setActiveQBankIdx(0);
@@ -379,13 +391,14 @@ export default function LivingReader({
           pageText: activeText,
           selectedText: selectedText || undefined,
           snippedDiagram: diagramUrl || snippedDiagram?.url || null,
+          language: studyLanguage,
         }),
       });
       if (res.ok) {
         const data = await res.json();
         if (data?.questions && data.questions.length > 0) {
           setDynamicQBankList(data.questions);
-          setQBankCache((prev) => ({ ...prev, [activePage]: data.questions }));
+          setQBankCache((prev) => ({ ...prev, [cacheKey]: data.questions }));
           setActiveQBankIdx(0);
         }
       }
@@ -394,15 +407,16 @@ export default function LivingReader({
     } finally {
       setIsQBankLoading(false);
     }
-  }, [book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, snippedDiagram, qbankCache]);
+  }, [book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, snippedDiagram, qbankCache, studyLanguage]);
 
   // Dynamic Summary generator with per-page caching
   const loadDynamicSummary = useCallback(async (forceRefresh = false) => {
     const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+    const cacheKey = `${activePage}_${studyLanguage}`;
 
     // Instant cache hit: if summary was already generated for this page, load instantly (0ms)
-    if (!forceRefresh && !selectedText && summaryCache[activePage]) {
-      setDynamicSummary(summaryCache[activePage]);
+    if (!forceRefresh && !selectedText && summaryCache[cacheKey]) {
+      setDynamicSummary(summaryCache[cacheKey]);
       return;
     }
 
@@ -418,13 +432,14 @@ export default function LivingReader({
           pageNumber: activePage,
           pageText: activeText,
           selectedText: selectedText || undefined,
+          language: studyLanguage,
         }),
       });
       if (res.ok) {
         const data = await res.json();
         if (data?.summary) {
           setDynamicSummary(data.summary);
-          setSummaryCache((prev) => ({ ...prev, [activePage]: data.summary }));
+          setSummaryCache((prev) => ({ ...prev, [cacheKey]: data.summary }));
         }
       }
     } catch (e) {
@@ -432,7 +447,7 @@ export default function LivingReader({
     } finally {
       setIsSummaryLoading(false);
     }
-  }, [book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, summaryCache]);
+  }, [book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, summaryCache, studyLanguage]);
 
   // Pin active selection into Study Vault (background storage)
   const handlePinSelectionToVault = useCallback(
@@ -560,12 +575,14 @@ export default function LivingReader({
           query: queryText,
           bookId: book._id,
           bookTitle: book.title,
-          bookTopic: book.topic || "",
+          bookTopic: book.blueprint?.domain || book.topic || "",
+          bookReferences: book.blueprint?.authoritativeReferences || [],
           currentSegmentIndex: currentIdx,
           currentPageNumber: activePageNum,
           currentSegmentContent: activeContent,
           selectedText: contextSelection || selectedText || undefined,
           selectedImage: imagePayload || snippedDiagram?.url || undefined,
+          language: studyLanguage,
           history: historyPayload,
         }),
       });
@@ -629,13 +646,15 @@ export default function LivingReader({
   const handleResetMorph = (idx: number) => {
     setMorphArtifacts((prev) => {
       const copy = { ...prev };
-      delete copy[idx];
+      delete copy[`${idx}_${studyLanguage}`];
+      delete copy[String(idx)];
       return copy;
     });
   };
 
+  const activeBaseKey = book.fileURL ? activePdfPage : currentIdx;
   const activeMorphArtifact =
-    morphArtifacts[book.fileURL ? activePdfPage : currentIdx];
+    morphArtifacts[`${activeBaseKey}_${studyLanguage}`] || morphArtifacts[String(activeBaseKey)];
   const activeQBankQuestion = dynamicQBankList.length > 0 ? dynamicQBankList[activeQBankIdx % dynamicQBankList.length] : null;
 
   // Resizable Splitter State
@@ -1347,6 +1366,12 @@ export default function LivingReader({
                 ))}
               </div>
 
+              {/* Universal Study Language Switch (Controls Voice, AI Chat, Morph, Q banks, Summaries) */}
+              <StudyLanguageSwitch
+                currentLanguage={studyLanguage}
+                onLanguageChange={setStudyLanguage}
+              />
+
               {/* Ascleon Live Voice Button */}
               <button
                 type="button"
@@ -1718,9 +1743,13 @@ export default function LivingReader({
                           </div>
                         )}
                         {m.sender === "ai" ? (
-                          <RichStudyMessage content={m.text} />
+                          <div dir="auto" className="ascleon-bidi">
+                            <RichStudyMessage content={m.text} />
+                          </div>
                         ) : (
-                          <p className="whitespace-pre-line font-bold text-[color:var(--ink)]">{m.text}</p>
+                          <p dir="auto" className="ascleon-bidi whitespace-pre-line font-bold text-[color:var(--ink)]">
+                            {m.text}
+                          </p>
                         )}
 
                         {/* Transparency Pills: Tools Used & Citations */}
@@ -1780,8 +1809,12 @@ export default function LivingReader({
                     }
                     selectedText={selectedText || undefined}
                     authoritativeReferences={activeReferences}
-                    language={language}
-                    onLanguageChange={setLanguage}
+                    studyLanguage={studyLanguage}
+                    onStudyLanguageChange={setStudyLanguage}
+                    onTriggerMorph={() => {
+                      setActiveIntent("morph");
+                      handleRunMorph();
+                    }}
                   />
                 </div>
               )}

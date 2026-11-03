@@ -20,11 +20,13 @@ export interface AgentContext {
   bookId: string;
   bookTitle: string;
   bookTopic?: string;
+  bookReferences?: string[];
   currentSegmentIndex: number;
   currentPageNumber?: number;
   currentSegmentContent: string;
   selectedText?: string;
   selectedImage?: string;
+  language?: "en" | "ar" | "mixed";
   history?: { sender: "user" | "ai"; text: string }[];
 }
 

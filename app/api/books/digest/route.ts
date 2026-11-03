@@ -29,6 +29,48 @@ interface DigestBlueprint {
 
 function generateFallbackBlueprint(title: string, preview: string): DigestBlueprint {
   const lower = `${title} ${preview}`.toLowerCase();
+
+  if (lower.includes("surg") || lower.includes("swelling") || lower.includes("hernia") || lower.includes("ulcer") || lower.includes("appendic") || lower.includes("thyroid")) {
+    return {
+      domain: "Clinical Surgery",
+      subspecialty: "Surgical History Taking, Bedside Examination & Operative Principles",
+      topic: "Surgery",
+      authoritativeReferences: [
+        "Bailey & Love's Short Practice of Surgery (28th Ed)",
+        "Browse's Introduction to the Symptoms & Signs of Surgical Disease (6th Ed)",
+        "Sabiston Textbook of Surgery: The Biological Basis of Modern Surgical Practice (21st Ed)",
+        "Schwartz's Principles of Surgery (11th Ed)"
+      ],
+      summary: `Comprehensive surgical study material covering systematic clinical history taking (O.C.D.), physical examination of swellings and ulcers, neurovascular pressure effects (V.A.N.), and operative principles.`,
+      initialQBank: [
+        {
+          vignette: "A 52-year-old patient presents with a painless, progressively enlarging mass in the supraclavicular fossa noticed accidentally 3 months ago. Over the past 2 weeks, the patient developed unilateral upper limb swelling with prominent superficial veins and tingling along the medial border of the forearm.",
+          question: "In systematic surgical history taking, what do these secondary limb symptoms represent?",
+          options: [
+            "Local pressure effects on adjacent Vein and Nerve structures (V.A.N. triad)",
+            "Systemic paraneoplastic endocrine syndrome",
+            "Primary intrinsic venous thrombosis unrelated to the mass",
+            "Acute inflammatory cellulitis of the extremity"
+          ],
+          correctAnswerIndex: 0,
+          explanation: "Progressive masses compress neighboring neurovascular bundles (V.A.N.): venous obstruction increases hydrostatic pressure causing edema and varicosities, while nerve compression produces paresthesia or paresis.",
+          keyConcept: "Surgical Swelling V.A.N. Pressure Symptoms"
+        }
+      ],
+      initialMnemonics: [
+        {
+          title: "Swelling History & Pressure Effects",
+          mnemonic: "O.C.D. + V.A.N.",
+          expansion: "Onset, Course, Duration + Vein, Artery, Nerve",
+          notes: "Framework for analyzing any surgical swelling chronologically and screening for local neurovascular compression."
+        }
+      ],
+      chapterMap: [
+        { title: "Surgical History & Swelling Sheet", description: "Chronological analysis (O.C.D.) and neurovascular pressure symptoms (V.A.N.)" },
+        { title: "Physical Examination & Differential", description: "Inspection, palpation, lymph node drainage, and operative indications" }
+      ]
+    };
+  }
   
   if (lower.includes("cardio") || lower.includes("heart") || lower.includes("murmur") || lower.includes("ecg") || lower.includes("valve")) {
     return {

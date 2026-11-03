@@ -245,7 +245,7 @@ export function ConceptMapCanvas({
               Core Principles Concept Map
             </span>
             <span className="hidden sm:inline-flex rounded-full border border-[color:var(--orange)]/30 bg-[color:var(--orange)]/15 px-2 py-0.5 text-[9.5px] font-bold text-[color:var(--orange)]">
-              Gemini Notebook Model
+              Ascleon Knowledge Model
             </span>
           </div>
         </div>

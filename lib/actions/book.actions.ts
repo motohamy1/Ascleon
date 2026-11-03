@@ -461,3 +461,44 @@ export const updateBookReadingStatus = async (
     };
   }
 };
+
+// Permanently delete a book, its segments and related session records
+export const deleteBook = async (bookId: string) => {
+  try {
+    await connectToDatabase();
+
+    const { userId } = await auth();
+    if (!userId) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      // If it's a sample/mock book not in DB, allow graceful client removal
+      return { success: true };
+    }
+
+    const book = await Book.findById(bookId);
+    if (!book) {
+      return { success: false, error: "Book not found" };
+    }
+
+    if (book.clerkId !== userId) {
+      return { success: false, error: "You can only delete your own books" };
+    }
+
+    // Delete segments and the book
+    await BookSegment.deleteMany({ bookId: book._id });
+    await Book.findByIdAndDelete(bookId);
+
+    revalidatePath("/library");
+    revalidatePath("/");
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error deleting book:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to delete book",
+    };
+  }
+};

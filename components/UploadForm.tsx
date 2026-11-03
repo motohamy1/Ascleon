@@ -33,9 +33,9 @@ import {
   saveBookSegments,
 } from "@/lib/actions/book.actions";
 import {
-  requestPresignedUpload,
   saveCoverImageAction,
 } from "@/lib/actions/storage.actions";
+import { uploadPdfWithProgress } from "@/lib/storage/client-upload";
 import { useRouter } from "next/navigation";
 import { parsePDFFile, withRetry } from "@/lib/utils";
 import { upload } from "@vercel/blob/client";
@@ -106,44 +106,18 @@ const UploadForm = () => {
 
       setStatusMessage("Digesting study source & uploading to cloud in parallel...");
 
-      // Task A: PDF Upload with Retry
+      // Task A: PDF Upload with live MB progress and smart stall detection
       const uploadPdfTask = async () => {
-        return await withRetry(
-          async () => {
-            let url = "";
-            let key = "";
-            try {
-              const presigned = await requestPresignedUpload(`${fileTitle}.pdf`, pdfFile.type || "application/pdf");
-              if (presigned.success && presigned.data) {
-                const r2Res = await fetch(presigned.data.uploadUrl, {
-                  method: "PUT",
-                  body: pdfFile,
-                  headers: {
-                    "Content-Type": pdfFile.type || "application/pdf",
-                  },
-                });
-                if (r2Res.ok) {
-                  url = presigned.data.publicUrl;
-                  key = presigned.data.key;
-                }
-              }
-            } catch (r2Err) {
-              console.warn("Direct R2 upload attempt failed, using fallback:", r2Err);
-            }
-
-            if (!url) {
-              const uploadedPdfBlob = await upload(`${fileTitle}.pdf`, pdfFile, {
-                access: "public",
-                handleUploadUrl: "/api/upload",
-                contentType: "application/pdf",
-              });
-              url = uploadedPdfBlob.url;
-              key = uploadedPdfBlob.pathname;
-            }
-            return { url, key };
+        return await uploadPdfWithProgress(pdfFile, {
+          onProgress: (p) => {
+            setStatusMessage(
+              `Uploading PDF (${(p.loaded / 1024 / 1024).toFixed(1)} / ${(p.total / 1024 / 1024).toFixed(1)} MB)...`
+            );
           },
-          { retries: 3, delayMs: 1200 }
-        );
+          onStatus: (st) => {
+            setStatusMessage(st);
+          },
+        });
       };
 
       // Task B: Cover Upload with Retry

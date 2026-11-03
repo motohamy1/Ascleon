@@ -169,7 +169,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
   const p2Offset = currentPreset?.waveformOffsets?.p2Offset ?? 264;
 
   return (
-    <div className="flex animate-in fade-in flex-col gap-4 duration-200">
+    <div dir="auto" className="flex animate-in fade-in flex-col gap-4 duration-200">
       {/* HEADER BANNER */}
       <div className="flex flex-col gap-2.5 rounded-[20px] border-2 border-[color:var(--orange)]/30 bg-[color:var(--ink-soft)] p-4 shadow-chip">
         <div className="flex flex-wrap items-center justify-between gap-2">

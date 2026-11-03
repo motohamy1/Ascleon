@@ -14,12 +14,14 @@ export async function POST(request: Request) {
     bookId,
     bookTitle,
     bookTopic,
+    bookReferences = [],
     query,
     currentSegmentIndex = 0,
     currentPageNumber,
     currentSegmentContent = "",
     selectedText = "",
     selectedImage = "",
+    language = "en",
     history = [],
   } = body || {};
 
@@ -42,11 +44,13 @@ export async function POST(request: Request) {
     bookId: String(bookId || ""),
     bookTitle: String(bookTitle || "Active Document"),
     bookTopic: String(bookTopic || ""),
+    bookReferences: Array.isArray(bookReferences) ? bookReferences.map(String).filter(Boolean) : [],
     currentSegmentIndex: Number(currentSegmentIndex) || 0,
     currentPageNumber: currentPageNumber ? Number(currentPageNumber) : undefined,
     currentSegmentContent: String(currentSegmentContent || ""),
     selectedText: String(selectedText || ""),
     selectedImage: typeof selectedImage === "string" && selectedImage ? selectedImage : undefined,
+    language: String(language || "en") as "en" | "ar" | "mixed",
     history: historyArray,
   };
 

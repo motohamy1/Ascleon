@@ -42,7 +42,7 @@ export default function RichStudyMessage({ content, className }: RichStudyMessag
   const processed = useMemo(() => cleanClinicalLatex(content), [content]);
 
   return (
-    <div className={cn("rich-study-message text-[12.5px] leading-relaxed text-[#1a191b]", className)}>
+    <div dir="auto" className={cn("rich-study-message ascleon-bidi text-[12.5px] leading-relaxed text-[#1a191b]", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
