@@ -1,19 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
+import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
+      bookId,
       bookTitle = "Study Material",
       pageNumber = 1,
       pageText = "",
       selectedText = "",
       language = "en",
+      studyScope,
     } = body;
 
-    const focalText = (selectedText || pageText || "").trim();
+    let focalText = (selectedText || pageText || "").trim();
+    let scopeLabel = `Page ${pageNumber}`;
+
+    if (bookId && studyScope && (studyScope.type === "range" || studyScope.type === "topic")) {
+      try {
+        const rangeRes = await getBookSegmentsByRange(
+          bookId,
+          studyScope.startPage,
+          studyScope.endPage
+        );
+        if (rangeRes.success && rangeRes.data && rangeRes.data.length > 0) {
+          focalText = rangeRes.data
+            .map((s) => `[Page ${s.pageNumber}]\n${s.content}`)
+            .join("\n\n");
+          scopeLabel = studyScope.type === "topic" && studyScope.topicTitle
+            ? `Topic "${studyScope.topicTitle}" (Pages ${studyScope.startPage}–${studyScope.endPage})`
+            : `Pages ${studyScope.startPage}–${studyScope.endPage}`;
+        }
+      } catch (err) {
+        console.warn("Could not fetch segments by range for Summary:", err);
+      }
+    }
+
     if (!focalText) {
       return NextResponse.json({ error: "Missing text to summarize" }, { status: 400 });
     }
@@ -23,11 +48,11 @@ export async function POST(req: NextRequest) {
       try {
         const ai = new GoogleGenAI({ apiKey });
         const prompt = `You are Ascleon's Deep Study Synthesizer.
-Generate an executive, high-yield summary for Page ${pageNumber} of "${bookTitle}".
+Generate an executive, high-yield summary for ${scopeLabel} of "${bookTitle}".
 
 Passage Text:
 """
-${focalText.slice(0, 3500)}
+${focalText.slice(0, 4500)}
 """
 
 Task:

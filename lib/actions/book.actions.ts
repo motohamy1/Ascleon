@@ -406,6 +406,40 @@ export const getBookSegments = async (bookId: string) => {
   }
 };
 
+// Fetches segments for a specific range of pages (inclusive)
+export const getBookSegmentsByRange = async (
+  bookId: string,
+  startPage: number,
+  endPage: number
+) => {
+  try {
+    await connectToDatabase();
+
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      return { success: true, data: [] as IBookSegmentData[] };
+    }
+
+    const segments = await BookSegment.find({
+      bookId: new mongoose.Types.ObjectId(bookId),
+      pageNumber: { $gte: startPage, $lte: endPage },
+    })
+      .sort({ pageNumber: 1, segmentIndex: 1 })
+      .lean();
+
+    return {
+      success: true,
+      data: serializeData(segments) as IBookSegmentData[],
+    };
+  } catch (error) {
+    console.error("Error fetching book segments by range:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to fetch segments by range",
+      data: [] as IBookSegmentData[],
+    };
+  }
+};
+
 // Toggle favorite state of a book
 export const toggleBookFavorite = async (bookId: string) => {
   try {

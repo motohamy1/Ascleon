@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import * as agentHarness from "@/lib/ai/agent-harness";
 import { runStudyAgent } from "@/lib/ai/agent-harness";
+import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
 
 export async function POST(request: Request) {
   let body: any = {};
@@ -23,6 +24,8 @@ export async function POST(request: Request) {
     selectedImage = "",
     language = "en",
     history = [],
+    studyScope,
+    topicMap,
   } = body || {};
 
   if (!query || typeof query !== "string" || !query.trim()) {
@@ -40,6 +43,65 @@ export async function POST(request: Request) {
       }))
     : [];
 
+  let effectiveContent = String(currentSegmentContent || "");
+  let effectiveTopicLocation: any = null;
+
+  // 1. If multi-page scope or topic is explicitly active, fetch full multi-page context
+  if (studyScope && studyScope.startPage && studyScope.endPage && bookId) {
+    if (studyScope.startPage !== studyScope.endPage || studyScope.type === "topic" || studyScope.type === "range") {
+      const segRes = await getBookSegmentsByRange(bookId, studyScope.startPage, studyScope.endPage);
+      if (segRes.success && segRes.data && segRes.data.length > 0) {
+        effectiveContent = segRes.data
+          .map((s) => `--- PAGE ${s.pageNumber || "?"} ---\n${s.content}`)
+          .join("\n\n");
+      }
+      effectiveTopicLocation = {
+        title: studyScope.topicTitle || `Pages ${studyScope.startPage}–${studyScope.endPage}`,
+        startPage: studyScope.startPage,
+        endPage: studyScope.endPage,
+      };
+    }
+  } else if (topicMap?.topics && Array.isArray(topicMap.topics) && topicMap.topics.length > 0) {
+    // 2. Option B Smart Topic Detection: Check if user query matches any topic in the book's topicMap
+    const qLower = cleanQuery.toLowerCase();
+    const matchingTopics = topicMap.topics.filter((t: any) => {
+      const tLower = (t.title || "").toLowerCase();
+      const words = tLower.split(/\s+/).filter((w: string) => w.length > 3);
+      return words.some((w: string) => qLower.includes(w)) || qLower.includes(tLower);
+    });
+
+    if (matchingTopics.length === 1) {
+      // Unambiguous topic found -> immediately fetch all pages for this topic
+      const matched = matchingTopics[0];
+      if (bookId && matched.startPage && matched.endPage) {
+        const segRes = await getBookSegmentsByRange(bookId, matched.startPage, matched.endPage);
+        if (segRes.success && segRes.data && segRes.data.length > 0) {
+          effectiveContent = segRes.data
+            .map((s) => `--- PAGE ${s.pageNumber || "?"} ---\n${s.content}`)
+            .join("\n\n");
+        }
+      }
+      effectiveTopicLocation = {
+        title: matched.title,
+        startPage: matched.startPage,
+        endPage: matched.endPage,
+      };
+    } else if (matchingTopics.length > 1) {
+      // Ambiguous: multiple matching sections found
+      effectiveTopicLocation = {
+        title: matchingTopics[0].title,
+        startPage: matchingTopics[0].startPage,
+        endPage: matchingTopics[0].endPage,
+        isAmbiguous: true,
+        candidates: matchingTopics.map((m: any) => ({
+          title: m.title,
+          startPage: m.startPage,
+          endPage: m.endPage,
+        })),
+      };
+    }
+  }
+
   const context = {
     bookId: String(bookId || ""),
     bookTitle: String(bookTitle || "Active Document"),
@@ -47,11 +109,13 @@ export async function POST(request: Request) {
     bookReferences: Array.isArray(bookReferences) ? bookReferences.map(String).filter(Boolean) : [],
     currentSegmentIndex: Number(currentSegmentIndex) || 0,
     currentPageNumber: currentPageNumber ? Number(currentPageNumber) : undefined,
-    currentSegmentContent: String(currentSegmentContent || ""),
+    currentSegmentContent: effectiveContent,
     selectedText: String(selectedText || ""),
     selectedImage: typeof selectedImage === "string" && selectedImage ? selectedImage : undefined,
     language: String(language || "en") as "en" | "ar" | "mixed",
     history: historyArray,
+    studyScope,
+    topicMap,
   };
 
   try {
@@ -67,6 +131,7 @@ export async function POST(request: Request) {
       authoritativeReferences: output.authoritativeReferences,
       qbankVignettes: output.qbankVignettes,
       mnemonics: output.mnemonics,
+      topicLocation: effectiveTopicLocation || output.topicLocation,
     });
   } catch (error) {
     console.error("Reader assistant agent error, falling back gracefully:", error);

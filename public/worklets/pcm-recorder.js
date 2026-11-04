@@ -47,8 +47,13 @@ class PcmRecorderProcessor extends AudioWorkletProcessor {
 
     // Report mic level approximately every ~1000 input samples (~20ms at 48kHz)
     if (this.rmsCount >= 1000) {
-      const rms = Math.sqrt(this.rmsSum / this.rmsCount);
-      this.port.postMessage({ type: "level", rms: Math.min(1, rms * 3.5) });
+      const rawRms = Math.sqrt(this.rmsSum / this.rmsCount);
+      // Scaled level for visual meter (capped at 1.0) and true physical rawRms for noise gating
+      this.port.postMessage({
+        type: "level",
+        rms: Math.min(1, rawRms * 2.5),
+        rawRms: rawRms,
+      });
       this.rmsSum = 0;
       this.rmsCount = 0;
     }
@@ -87,11 +92,17 @@ class PcmRecorderProcessor extends AudioWorkletProcessor {
     while (this.buffer.length >= chunkSize) {
       const chunk = this.buffer.splice(0, chunkSize);
       const pcm16 = new Int16Array(chunk.length);
+      let chunkSquareSum = 0;
       for (let j = 0; j < chunk.length; j++) {
         const s = Math.max(-1, Math.min(1, chunk[j]));
+        chunkSquareSum += s * s;
         pcm16[j] = s < 0 ? s * 0x8000 : s * 0x7fff;
       }
-      this.port.postMessage({ type: "audio", buffer: pcm16.buffer }, [pcm16.buffer]);
+      const chunkRms = Math.sqrt(chunkSquareSum / chunk.length);
+      this.port.postMessage(
+        { type: "audio", buffer: pcm16.buffer, chunkRms },
+        [pcm16.buffer]
+      );
     }
 
     return true;

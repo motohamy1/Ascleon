@@ -176,6 +176,15 @@ export async function parsePDFFile(file: File) {
     // Extract text 1:1 per page to eliminate page count mismatches
     const segments: TextSegment[] = [];
     const previewTexts: string[] = [];
+    const pageRoadmap: Array<{ page: number; title: string }> = [];
+
+    // Extract PDF bookmarks/outline if present
+    let rawOutline: any = null;
+    try {
+      rawOutline = await pdfDocument.getOutline();
+    } catch {
+      rawOutline = null;
+    }
 
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
       try {
@@ -197,8 +206,24 @@ export async function parsePDFFile(file: File) {
           wordCount: Math.max(words.length, 1),
         });
 
+        // Record page header / topic cue for whole-book understanding
+        const headerCandidate = pageText.slice(0, 120).replace(/\s+/g, " ").trim();
+        if (headerCandidate) {
+          pageRoadmap.push({ page: pageNum, title: headerCandidate });
+        }
+
+        // Preview: first 4 pages
         if (pageNum <= 4 && pageText) {
           previewTexts.push(`--- PAGE ${pageNum} ---\n${pageText}`);
+        } else if (
+          // And key milestones across the entire book (25%, 50%, 75%, 100%)
+          (pageNum === Math.floor(numPages * 0.25) ||
+            pageNum === Math.floor(numPages * 0.5) ||
+            pageNum === Math.floor(numPages * 0.75) ||
+            pageNum === numPages) &&
+          pageText
+        ) {
+          previewTexts.push(`--- PAGE ${pageNum} (Milestone) ---\n${pageText.slice(0, 800)}`);
         }
       } catch (pageErr) {
         console.warn(`Error extracting text on page ${pageNum}:`, pageErr);
@@ -211,7 +236,7 @@ export async function parsePDFFile(file: File) {
       }
     }
 
-    const textPreview = previewTexts.join("\n\n").slice(0, 4000);
+    const textPreview = previewTexts.join("\n\n").slice(0, 10000);
 
     // Clean up PDF document resources
     await pdfDocument.destroy();
@@ -222,6 +247,8 @@ export async function parsePDFFile(file: File) {
       numPages,
       totalPages: numPages,
       textPreview,
+      outline: rawOutline,
+      roadmap: pageRoadmap.slice(0, 150),
     };
   } catch (error) {
     console.error("Error parsing PDF:", error);

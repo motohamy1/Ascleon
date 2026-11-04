@@ -4,6 +4,7 @@ import React, { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { normalizeScientificNotation } from "@/lib/formatting/scientific-text";
 
 interface RichStudyMessageProps {
   content: string;
@@ -11,29 +12,15 @@ interface RichStudyMessageProps {
 }
 
 /**
- * Normalizes raw LaTeX arrows and common clinical notations to clean Unicode
+ * Normalizes raw LaTeX arrows, roots, fractions, and clinical/chemical notations to clean Unicode
  */
 function cleanClinicalLatex(raw: string): string {
   if (!raw) return "";
 
-  return raw
-    // LaTeX arrows
-    .replace(/\$\\rightarrow\$/gi, " → ")
-    .replace(/\\rightarrow\b/gi, " → ")
-    .replace(/\$\\leftarrow\$/gi, " ← ")
-    .replace(/\\leftarrow\b/gi, " ← ")
-    .replace(/\$\\uparrow\$/gi, " ↑ ")
-    .replace(/\\uparrow\b/gi, " ↑ ")
-    .replace(/\$\\downarrow\$/gi, " ↓ ")
-    .replace(/\\downarrow\b/gi, " ↓ ")
-    .replace(/\$\\Rightarrow\$/gi, " ⇒ ")
-    .replace(/\\Rightarrow\b/gi, " ⇒ ")
-    .replace(/\$\\Leftarrow\$/gi, " ⇐ ")
-    .replace(/\\Leftarrow\b/gi, " ⇐ ")
-    .replace(/\$\\leftrightarrow\$/gi, " ↔ ")
-    .replace(/\\leftrightarrow\b/gi, " ↔ ")
-    // Cleanup any lingering math fences around standalone Unicode arrows
-    .replace(/\$\s*([→←↑↓⇒⇐↔])\s*\$/g, " $1 ")
+  // Run full scientific & chemical normalizer first
+  let cleaned = normalizeScientificNotation(raw);
+
+  return cleaned
     // Multi-spaces
     .replace(/[ \t]{2,}/g, " ");
 }

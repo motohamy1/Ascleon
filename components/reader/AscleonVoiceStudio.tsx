@@ -14,10 +14,12 @@ import {
   ChevronDown,
   RefreshCw,
   SlidersHorizontal,
+  Hand,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StudyLanguage } from "@/lib/language";
-import { AVAILABLE_LIVE_VOICES, DEFAULT_LIVE_VOICE } from "@/lib/voice-config";
+import { AVAILABLE_LIVE_VOICES, DEFAULT_LIVE_VOICE, VOICE_BARGE_IN_MODES, VoiceBargeInMode } from "@/lib/voice-config";
 import { useLiveVoice, VisualTriggerEvent } from "@/hooks/useLiveVoice";
 import { StudyLanguageSwitch } from "@/components/reader/StudyLanguageSwitch";
 
@@ -56,8 +58,19 @@ export function AscleonVoiceStudio({
     studyLanguage || (language?.code === "ar" ? "ar" : language?.code === "mixed" ? "mixed" : "en");
 
   const [selectedVoice, setSelectedVoice] = useState<string>(DEFAULT_LIVE_VOICE);
+  const [bargeInMode, setBargeInModeState] = useState<VoiceBargeInMode>("smart");
   const [typedInput, setTypedInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Restore saved noise filter preference
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("ascleon_voice_barge_in_mode") as VoiceBargeInMode;
+      if (saved && (saved === "shield" || saved === "smart" || saved === "sensitive")) {
+        setBargeInModeState(saved);
+      }
+    } catch {}
+  }, []);
 
   const handleVisualTrigger = (event: VisualTriggerEvent) => {
     if (event.action === "open_morph" && onTriggerMorph) {
@@ -73,6 +86,8 @@ export function AscleonVoiceStudio({
     connect,
     disconnect,
     resetSession,
+    interrupt,
+    setBargeInMode,
     sendTextMessage,
     updatePageContext,
     messages,
@@ -91,8 +106,38 @@ export function AscleonVoiceStudio({
     authoritativeReferences,
     language: activeLang,
     voiceName: selectedVoice,
+    bargeInMode,
     onVisualTrigger: handleVisualTrigger,
   });
+
+  const handleModeChange = (mode: VoiceBargeInMode) => {
+    setBargeInModeState(mode);
+    setBargeInMode(mode);
+    try {
+      localStorage.setItem("ascleon_voice_barge_in_mode", mode);
+    } catch {}
+  };
+
+  // Keyboard shortcut: Spacebar interrupts mentor speech cleanly
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.code === "Space" &&
+        status === "mentor_speaking" &&
+        !(
+          e.target instanceof HTMLInputElement ||
+          e.target instanceof HTMLTextAreaElement ||
+          (e.target as HTMLElement)?.isContentEditable
+        )
+      ) {
+        e.preventDefault();
+        interrupt();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [status, interrupt]);
 
   // Track page changes during live call
   useEffect(() => {
@@ -170,7 +215,7 @@ export function AscleonVoiceStudio({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {/* New Session Button if paused with existing messages */}
             {messages.length > 0 && !isConnected && (
               <button
@@ -183,13 +228,31 @@ export function AscleonVoiceStudio({
               </button>
             )}
 
+            {/* Vocal Noise Shield & Barge-In Filter Mode Selector */}
+            <div className="relative">
+              <select
+                value={bargeInMode}
+                onChange={(e) => handleModeChange(e.target.value as VoiceBargeInMode)}
+                className="appearance-none cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] pl-2.5 pr-6 py-1 font-mono text-[10px] font-black text-[color:var(--ink)] shadow-chip focus:outline-none"
+                title="Vocal Noise Filter Mode (Shield / Smart / Sensitive)"
+              >
+                {VOICE_BARGE_IN_MODES.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.id === "shield" ? "🛡️ " : m.id === "smart" ? "🎯 " : "⚡ "}
+                    {activeLang === "ar" ? m.nameAr : m.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 size-3 text-[color:var(--ink)] stroke-[2.5]" />
+            </div>
+
             {/* Voice Persona Selector */}
             <div className="relative">
               <select
                 value={selectedVoice}
                 disabled={isConnected}
                 onChange={(e) => setSelectedVoice(e.target.value)}
-                className="appearance-none cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] pl-3 pr-7 py-1 font-mono text-[11px] font-black text-[color:var(--ink)] shadow-chip focus:outline-none disabled:opacity-50"
+                className="appearance-none cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] pl-2.5 pr-6 py-1 font-mono text-[10px] font-black text-[color:var(--ink)] shadow-chip focus:outline-none disabled:opacity-50"
                 title="Select Mentor Voice Persona"
               >
                 {AVAILABLE_LIVE_VOICES.map((v) => (
@@ -198,7 +261,7 @@ export function AscleonVoiceStudio({
                   </option>
                 ))}
               </select>
-              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-3 text-[color:var(--ink)] stroke-[2.5]" />
+              <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 size-3 text-[color:var(--ink)] stroke-[2.5]" />
             </div>
 
             {onClose && (
@@ -225,6 +288,21 @@ export function AscleonVoiceStudio({
             />
           </div>
         )}
+
+        {/* Studio Voice Isolation & Filter Badge */}
+        <div className="flex items-center justify-between pt-1 border-t border-white/10 text-[10px]">
+          <span className="font-mono font-bold text-[color:var(--cream)]/80 flex items-center gap-1">
+            <span className="size-1.5 rounded-full bg-[color:var(--mint)] animate-pulse" />
+            Vocal Filter:
+          </span>
+          <span className="font-mono text-[9.5px] font-bold text-[color:var(--cream)] bg-white/10 px-2 py-0.5 rounded-full">
+            {bargeInMode === "shield"
+              ? (activeLang === "ar" ? "🛡️ درع الضوضاء — عزل كامل بدون مقاطعة" : "🛡️ Noise Shield — Uninterrupted Turns")
+              : bargeInMode === "smart"
+              ? (activeLang === "ar" ? "🎯 تركيز صوتي ذكي — عزل أصوات الغرفة" : "🎯 Smart Vocal EQ — Adaptive Noise Gate")
+              : (activeLang === "ar" ? "⚡ حساسية عالية — للغرف الهادئة والسماعات" : "⚡ High Sensitivity — Quiet Space")}
+          </span>
+        </div>
       </div>
 
       {/* VISUAL TRIGGER ACTION BANNER ("Show while explaining") */}
@@ -339,10 +417,15 @@ export function AscleonVoiceStudio({
 
           {/* STATUS LABEL & LIVE MIC ENERGY */}
           <div className="mt-3 flex flex-col items-center gap-1.5">
-            <span className="font-mono text-[11px] font-black uppercase tracking-wider text-[color:var(--ink)]">
+            <span className="font-mono text-[11px] font-black uppercase tracking-wider text-[color:var(--ink)] text-center">
               {status === "connecting" && "SETTING UP ASCLEON VOICE AGENT..."}
               {status === "listening" && (isMuted ? "MIC MUTED (LISTENING PAUSED)" : "READY — SPEAK NATURALLY")}
-              {status === "mentor_speaking" && "ASCLEON MENTOR SPEAKING (BARGE-IN READY)"}
+              {status === "mentor_speaking" &&
+                (bargeInMode === "shield"
+                  ? (activeLang === "ar" ? "دكتور وائل يشرح (درع الضوضاء مفعل)" : "ASCLEON MENTOR SPEAKING (NOISE SHIELD)")
+                  : bargeInMode === "smart"
+                  ? (activeLang === "ar" ? "دكتور وائل يشرح (تركيز صوتي ذكي)" : "ASCLEON MENTOR SPEAKING (SMART FOCUS)")
+                  : (activeLang === "ar" ? "دكتور وائل يشرح (حساسية عالية)" : "ASCLEON MENTOR SPEAKING (QUICK BARGE-IN)"))}
               {status === "interrupted" && "INTERRUPTED! LISTENING TO YOUR QUESTION..."}
               {status === "disconnected" &&
                 (messages.length > 0
@@ -366,6 +449,22 @@ export function AscleonVoiceStudio({
                   );
                 })}
               </div>
+            )}
+
+            {/* Interactive "Interrupt & Speak" button when mentor is actively speaking */}
+            {status === "mentor_speaking" && (
+              <button
+                type="button"
+                onClick={interrupt}
+                className="mt-1.5 flex items-center gap-1.5 cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-4 py-1.5 font-sans text-xs font-black uppercase text-[color:var(--ink)] shadow-[2px_2px_0px_#0f0e10] hover:scale-105 active:translate-y-0.5 transition-all animate-pulse"
+                title={activeLang === "ar" ? "قاطع الشرح واسأل فوراً (أو اضغط زر المسافة)" : "Interrupt mentor immediately (or press Spacebar)"}
+              >
+                <Hand className="size-3.5 stroke-[2.5]" />
+                <span>{activeLang === "ar" ? "قاطع واسأل الآن" : "Interrupt & Ask"}</span>
+                <kbd className="rounded border border-[color:var(--ink)] bg-[color:var(--cream)] px-1.5 py-0.5 font-mono text-[9px] font-black uppercase text-[color:var(--ink)] shadow-[1px_1px_0px_#0f0e10]">
+                  Space
+                </kbd>
+              </button>
             )}
           </div>
         </div>

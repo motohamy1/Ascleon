@@ -1,3 +1,5 @@
+import { MorphJourney } from "@/lib/ai/schemas/decision-models";
+
 export type MorphBlockType =
   | "roadmap_cards"
   | "animated_simulator"
@@ -5,7 +7,8 @@ export type MorphBlockType =
   | "spatial_illustration"
   | "comparison_matrix"
   | "interactive_diagram"
-  | "concept_flow_map";
+  | "concept_flow_map"
+  | "interactive_journey";
 
 export interface ContextLink {
   targetPageOrSegment: number;
@@ -20,6 +23,8 @@ export interface RoadmapCardItem {
   title: string;
   subtitle: string;
   bulletPoints: string[];
+  mechanismSteps?: string[];
+  clinicalSignificance?: string;
   contextLink?: ContextLink;
 }
 
@@ -75,6 +80,9 @@ export interface MindMapNode {
   category: "root" | "pillar" | "mechanism" | "clinical" | "diagnostic";
   color?: string;
   details: string;
+  mechanismSteps?: string[];
+  clinicalSignificance?: string;
+  sourcePage?: number;
   parent?: string;
   level: number; // 0 = root, 1 = branch/pillar, 2 = leaf
   x?: number;
@@ -126,6 +134,7 @@ export interface MorphArtifactData {
     subsequentBridge?: string;
   };
   blocks: MorphBlock[];
+  journey?: MorphJourney;
   createdAt?: string;
 }
 

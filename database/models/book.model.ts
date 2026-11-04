@@ -33,9 +33,22 @@ const BookSchema = new Schema<IBook>(
     isFavorite: { type: Boolean, default: false },
     year: { type: Number },
     summary: { type: String },
-      language: { type: String, default: "en" },
+    language: { type: String, default: "en" },
+    sourceCategory: {
+      type: String,
+      enum: ["lecture_notes", "textbook", "clinical_sheet", "guideline_paper", "exam_review"],
+      default: "textbook",
+    },
+    domain: { type: String },
+    subspecialty: { type: String },
+    pedagogicalStyle: { type: String },
+    ingestionStatus: {
+      type: String,
+      enum: ["pending", "processing", "completed", "failed"],
+      default: "completed",
+    },
   },
-    { timestamps: true },
+  { timestamps: true },
 );
 
 const Book = models.Book || model<IBook>("Book", BookSchema);

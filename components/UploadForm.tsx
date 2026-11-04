@@ -38,7 +38,7 @@ import {
 import { uploadPdfWithProgress } from "@/lib/storage/client-upload";
 import { useRouter } from "next/navigation";
 import { parsePDFFile, withRetry } from "@/lib/utils";
-import { upload } from "@vercel/blob/client";
+import { cachePdfBuffer } from "@/lib/storage/pdf-local-cache";
 
 const UploadForm = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -120,7 +120,7 @@ const UploadForm = () => {
         });
       };
 
-      // Task B: Cover Upload with Retry
+      // Task B: Cover Upload with Non-Blocking Fallback
       const uploadCoverTask = async () => {
         let coverUrl = "https://covers.openlibrary.org/b/isbn/9780132350884-L.jpg";
         let coverBlobKey = "";
@@ -140,18 +140,8 @@ const UploadForm = () => {
               coverUrl = coverRes.data.url;
               coverBlobKey = coverRes.data.key;
             }
-          } catch {
-            const uploadedCoverBlob = await upload(
-              `${fileTitle}_cover.png`,
-              data.coverImage,
-              {
-                access: "public",
-                handleUploadUrl: "/api/upload",
-                contentType: data.coverImage.type || "image/png",
-              },
-            );
-            coverUrl = uploadedCoverBlob.url;
-            coverBlobKey = uploadedCoverBlob.pathname;
+          } catch (coverErr) {
+            console.warn("Custom cover upload failed, using default cover fallback:", coverErr);
           }
         } else if (parsedPDF.cover && parsedPDF.cover.startsWith("data:image")) {
           try {
@@ -196,6 +186,11 @@ const UploadForm = () => {
         digestTask(),
       ]);
 
+      // Cache in IndexedDB immediately for instant reader opening
+      pdfFile.arrayBuffer().then((buf) => {
+        cachePdfBuffer(pdfUploadRes.url, buf);
+      }).catch(() => {});
+
       setStatusMessage("Creating your interactive study space...");
       const book = await createBook({
         clerkId: userId,
@@ -211,6 +206,11 @@ const UploadForm = () => {
         totalSegments: parsedPDF.content.length,
         topic: digestBlueprint?.topic || "General",
         summary: digestBlueprint?.summary || "",
+        sourceCategory: digestBlueprint?.sourceCategory || "textbook",
+        domain: digestBlueprint?.domain,
+        subspecialty: digestBlueprint?.subspecialty,
+        pedagogicalStyle: digestBlueprint?.pedagogicalStyle,
+        ingestionStatus: "processing",
         blueprint: digestBlueprint || {},
       });
 
@@ -256,6 +256,13 @@ const UploadForm = () => {
           { retries: 3, delayMs: 1000 }
         );
       }
+
+      // Trigger whole-source background topic ingestion worker asynchronously
+      fetch("/api/books/ingest-background", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookId: book.data._id }),
+      }).catch((e) => console.warn("Background ingestion trigger notice:", e));
 
       toast.success("Book uploaded successfully! Opening interactive study...");
       form.reset();

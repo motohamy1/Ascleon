@@ -8,6 +8,7 @@ import { synthesizeMorphBlocks } from "@/lib/morph/synthesizer";
 import { auth } from "@clerk/nextjs/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
+import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,6 +21,7 @@ export async function POST(req: NextRequest) {
       forceRefresh = false,
       snippedDiagram = null,
       language = "en",
+      studyScope,
     } = body;
 
     const bookId = body.bookId || body.id || "default-book";
@@ -30,7 +32,7 @@ export async function POST(req: NextRequest) {
         ? body.currentSegmentIndex
         : 0;
 
-    const focalText =
+    let focalText =
       body.focalText ||
       body.currentSegmentContent ||
       body.content ||
@@ -41,6 +43,18 @@ export async function POST(req: NextRequest) {
       body.pageNumber ||
       body.currentPageNumber ||
       (typeof segmentIndex === "number" ? segmentIndex + 1 : 1);
+
+    // If multi-page study scope or complete topic is requested, fetch full range
+    if (studyScope && studyScope.startPage && studyScope.endPage && bookId) {
+      if (studyScope.startPage !== studyScope.endPage || studyScope.type === "topic" || studyScope.type === "range") {
+        const segRes = await getBookSegmentsByRange(bookId, studyScope.startPage, studyScope.endPage);
+        if (segRes.success && segRes.data && segRes.data.length > 0) {
+          focalText = segRes.data
+            .map((s) => `--- PAGE ${s.pageNumber || "?"} ---\n${s.content}`)
+            .join("\n\n");
+        }
+      }
+    }
 
     if (!focalText && !snippedDiagram) {
       return NextResponse.json(
@@ -99,46 +113,67 @@ export async function POST(req: NextRequest) {
       try {
         const ai = new GoogleGenAI({ apiKey });
         const prompt = `You are Ascleon's elite Multi-Modal Morph Engine.
-Transform this study passage from "${bookTitle}" (Page ${pageNumber}) into interactive conceptual cards, a visual causal flow diagram, and a comparison contrast matrix for deep retention.
+Transform this study material from "${bookTitle}" (Page ${pageNumber}${studyScope?.endPage && studyScope.endPage > pageNumber ? ` to ${studyScope.endPage}` : ""}) into an interactive conceptual learning micro-site featuring structured roadmap cards, an interactive concept mind map, and a living multi-stage journey.
 
 Source Text to Morph:
 """
-${targetPassage.slice(0, 3000)}
+${targetPassage.slice(0, 5000)}
 """
 
 Instructions:
-1. Ground every card, node, and matrix row strictly in this passage.
-2. Produce:
+1. Ground every card, node, checkpoint, and simulation strictly in this study material.
+2. Produce a JSON object with:
    - "focalConcept": Punchy concept title (max 6 words).
-   - "conceptMap": Hierarchical mind map of the core principles:
+   - "conceptMap": Hierarchical mind map:
      - "root": Central topic title (max 5 words)
-     - "pillars": Array of 3-4 key pillars/branches with:
+     - "pillars": Array of 3-4 key pillars with:
        - "label": Pillar title (max 4 words)
        - "category": Category (e.g. "Hemodynamics", "Remodeling", "ECG", "Rule")
        - "details": 1-2 sentence core mechanism
-       - "leafLabel": Concrete metric, rule or cutoff (max 5 words)
+       - "leafLabel": Concrete metric or cutoff (max 5 words)
        - "leafDetails": Exact finding or clinical significance
    - "cards": 3-4 structured cards with:
-     - "badge": e.g. "Core Invariant", "Key Mechanism", "Clinical Pearl", "Rule of Thumb", "Warning"
-     - "badgeType": one of "accent-orange", "accent-teal", "accent-magenta", "accent-cream"
-     - "title": Short title (max 5 words)
-     - "subtitle": Concise 1-sentence insight
+     - "badge": e.g. "Core Invariant", "Key Mechanism", "Clinical Pearl", "Rule of Thumb"
+     - "badgeType": "accent-orange" | "accent-teal" | "accent-magenta" | "accent-cream"
+     - "title": Clear descriptive title (max 6 words)
+     - "subtitle": 1-sentence insight
      - "bulletPoints": 3 high-yield bullet points directly from the text
    - "flowNodes": 3-4 causal nodes representing the process flow:
      - "id": "node-1", "node-2", etc.
-     - "label": Short step label (max 3 words)
+     - "label": Step label (max 3 words)
      - "sublabel": Brief context (max 4 words)
      - "category": "input" | "process" | "decision" | "output"
      - "details": Clear explanation of this step
-   - "comparison": Contrast matrix comparing 2 key concepts or states mentioned in the passage:
-     - "leftTitle": First concept title
-     - "leftBadge": Badge text
-     - "leftPoints": Array of 3 { "label": string, "value": string, "isPositive": boolean }
-     - "rightTitle": Second concept title
-     - "rightBadge": Badge text
-     - "rightPoints": Array of 3 { "label": string, "value": string, "isPositive": boolean }
+   - "journey": A multi-stage interactive clinical journey:
+     - "title": Canonical journey title (e.g. "Interactive Journey: [Topic]")
+     - "topic": Topic name
+     - "summary": 1-2 sentence overview
+     - "stages": Array of 3 sequential stages:
+       - "id": "stage-1", "stage-2", "stage-3"
+       - "stageNumber": 1, 2, 3
+       - "title": Milestone title
+       - "phase": "etiology_triggers" | "cellular_pathology" | "clinical_presentation" | "treatment_algorithm"
+       - "description": Comprehensive clinical explanation of this milestone
+       - "keyPathologyPoints": 2-3 key pathological/physiological mechanisms
+       - "interactiveSimulation": {
+           "simulationType": "plaque_rupture" | "flow_pressure" | "cellular_cascade" | "ecg_rhythm",
+           "primaryMetricLabel": string,
+           "defaultMetricValue": number,
+           "metricUnit": string,
+           "hotspots": [
+             { "id": "hs-1", "label": string, "description": string, "xPercent": number, "yPercent": number },
+             { "id": "hs-2", "label": string, "description": string, "xPercent": number, "yPercent": number }
+           ]
+         }
+       - "checkpoint": {
+           "prompt": "Clinical decision question to advance to the next step",
+           "options": ["Option A", "Option B", "Option C", "Option D"],
+           "correctOptionIndex": number,
+           "explanation": "Detailed clinical rationale"
+         }
+       - "visualPrompt": "Visual panel description"
 
-Return ONLY a JSON object matching this structure.
+Return ONLY a valid JSON object matching this structure.
 
 ${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
@@ -350,6 +385,10 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
             if (comparisonBlock) {
               newBlocks.push(comparisonBlock);
+            }
+
+            if (parsed.journey && Array.isArray(parsed.journey.stages) && parsed.journey.stages.length > 0) {
+              artifactData.journey = parsed.journey;
             }
 
             artifactData.blocks = newBlocks;

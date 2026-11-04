@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+import { getCachedPdfBuffer, cachePdfBuffer } from "@/lib/storage/pdf-local-cache";
+
 interface OriginalPdfViewerProps {
   fileURL: string;
   currentPage: number;
@@ -457,16 +459,33 @@ export default function OriginalPdfViewer({
           pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
         }
 
-        const loadingTask = pdfjsLib.getDocument({
-          url: fileURL,
-          withCredentials: false,
-          disableAutoFetch: true,
-          disableStream: false,
-          rangeChunkSize: 65536,
-        });
+        // Resolve URL: proxy private Vercel blobs via local streaming route
+        const effectiveUrl = fileURL.includes(".private.blob.vercel-storage.com")
+          ? `/api/storage/file?url=${encodeURIComponent(fileURL)}`
+          : fileURL;
+
+        // Check local IndexedDB cache first for instant <100ms loading
+        const cachedBuffer = await getCachedPdfBuffer(fileURL);
+
+        const loadingTask = pdfjsLib.getDocument(
+          cachedBuffer
+            ? { data: cachedBuffer }
+            : {
+                url: effectiveUrl,
+                withCredentials: false,
+                disableAutoFetch: true,
+                disableStream: false,
+                rangeChunkSize: 65536,
+              }
+        );
 
         const doc = await loadingTask.promise;
         if (!isMounted) return;
+
+        // Cache for all future reader sessions if not cached yet
+        if (!cachedBuffer) {
+          doc.getData().then((u8) => cachePdfBuffer(fileURL, u8.buffer as ArrayBuffer)).catch(() => {});
+        }
 
         try {
           const firstPage = await doc.getPage(1);
@@ -496,8 +515,12 @@ export default function OriginalPdfViewer({
           const workerVer = pdfjsLib.version || "5.5.207";
           pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${workerVer}/build/pdf.worker.min.mjs`;
 
+          const effectiveUrl = fileURL.includes(".private.blob.vercel-storage.com")
+            ? `/api/storage/file?url=${encodeURIComponent(fileURL)}`
+            : fileURL;
+
           const fallbackTask = pdfjsLib.getDocument({
-            url: fileURL,
+            url: effectiveUrl,
             withCredentials: false,
             disableAutoFetch: true,
             disableStream: false,

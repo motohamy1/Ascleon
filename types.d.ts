@@ -12,6 +12,8 @@ import { VoiceLanguage } from "@/lib/constants";
 // ============================================
 
 export type ReadingStatus = "not_started" | "in_progress" | "read";
+export type SourceCategoryType = "lecture_notes" | "textbook" | "clinical_sheet" | "guideline_paper" | "exam_review";
+export type IngestionStatusType = "pending" | "processing" | "completed" | "failed";
 
 export interface IBook extends Document {
   _id: string;
@@ -27,6 +29,11 @@ export interface IBook extends Document {
   fileSize: number;
   totalSegments: number;
   totalPages?: number;
+  sourceCategory?: SourceCategoryType;
+  domain?: string;
+  subspecialty?: string;
+  pedagogicalStyle?: string;
+  ingestionStatus?: IngestionStatusType;
   blueprint?: {
     domain?: string;
     subspecialty?: string;
@@ -34,6 +41,7 @@ export interface IBook extends Document {
     initialQBank?: any[];
     initialMnemonics?: any[];
     chapterMap?: any[];
+    topicMap?: any;
     [key: string]: any;
   };
   topic?: string;
@@ -101,6 +109,11 @@ export interface CreateBook {
   fileSize: number;
   totalSegments?: number;
   totalPages?: number;
+  sourceCategory?: SourceCategoryType;
+  domain?: string;
+  subspecialty?: string;
+  pedagogicalStyle?: string;
+  ingestionStatus?: IngestionStatusType;
   blueprint?: any;
   topic?: string;
   readingTimeMinutes?: number;
@@ -126,6 +139,7 @@ export interface BookCardProps {
   readingTimeMinutes?: number;
   isFavorite?: boolean;
   color?: string;
+  sourceCategory?: SourceCategoryType;
   onDelete?: () => void;
 }
 

@@ -13,9 +13,9 @@ export interface UploadResult {
 /**
  * Robust, resilient PDF uploader with live upload progress tracking and smart stall detection.
  * Pipeline:
- * 1. Direct Browser XHR PUT to Cloudflare R2 (0 server load, 0 egress)
- * 2. If blocked by CORS or stalled for 8s: XHR POST to /api/storage/upload (Server R2 -> Server Vercel Blob)
- * 3. Final Fallback: Direct @vercel/blob/client upload
+ * 1. Direct Browser XHR PUT to Cloudflare R2 (0 server load, 0 egress, global edge)
+ * 2. Next.js Server Action direct R2 stream (resilient bypass of client CORS/firewalls)
+ * 3. Server-side pipeline via /api/storage/upload (R2 -> Private Vercel Blob with proxy)
  */
 export async function uploadPdfWithProgress(
   file: File,
@@ -41,8 +41,8 @@ export async function uploadPdfWithProgress(
           clearTimeout(stallTimer);
           stallTimer = setTimeout(() => {
             xhr.abort();
-            reject(new Error("Direct R2 upload stalled (no progress for 8s)"));
-          }, 8000);
+            reject(new Error("Direct R2 upload stalled (no progress for 35s)"));
+          }, 35000);
         };
 
         xhr.upload.onprogress = (e) => {
@@ -71,7 +71,7 @@ export async function uploadPdfWithProgress(
 
         xhr.onerror = () => {
           clearTimeout(stallTimer);
-          reject(new Error("Direct R2 network / CORS error"));
+          reject(new Error("Direct R2 network error"));
         };
 
         xhr.onabort = () => {
@@ -88,97 +88,88 @@ export async function uploadPdfWithProgress(
       return result;
     }
   } catch (r2Err) {
-    console.warn("Direct R2 upload failed, switching to /api/storage/upload:", r2Err);
+    console.warn("Direct R2 upload failed, switching to server R2 action:", r2Err);
   }
 
-  // 2. Attempt Next.js Server-Side Upload via /api/storage/upload (Server R2 -> Server Vercel Blob)
-  onStatus?.("Uploading to cloud via secure server pipeline...");
+  // 2. Resilient Server Action to Cloudflare R2
+  onStatus?.("Uploading via resilient server pipeline...");
   try {
-    const serverResult = await new Promise<UploadResult>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      let stallTimer: NodeJS.Timeout;
+    const { uploadFileToR2Action } = await import("@/lib/actions/storage.actions");
+    const formData = new FormData();
+    formData.append("file", file);
 
-      const resetStallTimer = () => {
-        clearTimeout(stallTimer);
-        stallTimer = setTimeout(() => {
-          xhr.abort();
-          reject(new Error("Server upload stalled (no progress for 25s)"));
-        }, 25000);
+    const actionRes = await uploadFileToR2Action(formData);
+    if (actionRes.success && actionRes.data?.url) {
+      return {
+        url: actionRes.data.url,
+        key: actionRes.data.key,
+        provider: "r2",
       };
-
-      xhr.upload.onprogress = (e) => {
-        resetStallTimer();
-        if (e.lengthComputable && onProgress) {
-          onProgress({
-            loaded: e.loaded,
-            total: e.total,
-            percentage: Math.round((e.loaded / e.total) * 100),
-          });
-        }
-      };
-
-      xhr.onload = () => {
-        clearTimeout(stallTimer);
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const json = JSON.parse(xhr.responseText);
-            if (json.success && json.data?.url) {
-              resolve(json.data);
-            } else {
-              reject(new Error(json.error || "Server upload failed"));
-            }
-          } catch (parseErr) {
-            reject(parseErr);
-          }
-        } else {
-          reject(new Error(`Server upload responded with status ${xhr.status}`));
-        }
-      };
-
-      xhr.onerror = () => {
-        clearTimeout(stallTimer);
-        reject(new Error("Server upload network error"));
-      };
-
-      xhr.onabort = () => {
-        clearTimeout(stallTimer);
-        reject(new Error("Server upload aborted"));
-      };
-
-      resetStallTimer();
-      const formData = new FormData();
-      formData.append("file", file);
-      xhr.open("POST", "/api/storage/upload", true);
-      xhr.send(formData);
-    });
-
-    return serverResult;
-  } catch (srvErr) {
-    console.warn("Server upload endpoint failed, falling back to client Vercel Blob:", srvErr);
+    }
+    console.warn("Server action upload warning:", actionRes.error);
+  } catch (actErr) {
+    console.warn("Server action upload failed, trying /api/storage/upload:", actErr);
   }
 
-  // 3. Last-ditch Fallback: Direct @vercel/blob/client upload
-  onStatus?.("Finishing upload with Vercel Blob fallback...");
-  const { upload } = await import("@vercel/blob/client");
-  const fileSlug = file.name.replace(/\s+/g, "-").toLowerCase();
-  const uploadedBlob = await upload(fileSlug, file, {
-    access: "public",
-    handleUploadUrl: "/api/upload",
-    contentType: file.type || "application/pdf",
-    onUploadProgress: (p) => {
-      if (onProgress) {
+  // 3. Fallback to /api/storage/upload (Server R2 -> Server Vercel Blob with proxy)
+  onStatus?.("Finalizing upload with secure storage route...");
+  const serverResult = await new Promise<UploadResult>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let stallTimer: NodeJS.Timeout;
+
+    const resetStallTimer = () => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        xhr.abort();
+        reject(new Error("Server storage upload stalled"));
+      }, 45000);
+    };
+
+    xhr.upload.onprogress = (e) => {
+      resetStallTimer();
+      if (e.lengthComputable && onProgress) {
         onProgress({
-          loaded: p.loaded,
-          total: p.total,
-          percentage: p.percentage,
+          loaded: e.loaded,
+          total: e.total,
+          percentage: Math.round((e.loaded / e.total) * 100),
         });
       }
-    },
+    };
+
+    xhr.onload = () => {
+      clearTimeout(stallTimer);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          if (json.success && json.data?.url) {
+            resolve(json.data);
+          } else {
+            reject(new Error(json.error || "Server upload failed"));
+          }
+        } catch (parseErr) {
+          reject(parseErr);
+        }
+      } else {
+        reject(new Error(`Server upload responded with status ${xhr.status}`));
+      }
+    };
+
+    xhr.onerror = () => {
+      clearTimeout(stallTimer);
+      reject(new Error("Server upload network error"));
+    };
+
+    xhr.onabort = () => {
+      clearTimeout(stallTimer);
+      reject(new Error("Server upload aborted"));
+    };
+
+    resetStallTimer();
+    const formData = new FormData();
+    formData.append("file", file);
+    xhr.open("POST", "/api/storage/upload", true);
+    xhr.send(formData);
   });
 
-  return {
-    url: uploadedBlob.url,
-    key: uploadedBlob.pathname,
-    provider: "vercel-blob",
-  };
+  return serverResult;
 }

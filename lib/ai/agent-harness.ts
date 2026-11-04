@@ -13,33 +13,34 @@ import {
 import { buildLanguageDirective } from "@/lib/language";
 import { retrieveEnrichedContext } from "./knowledge/knowledge-retriever";
 import { EnrichedStudyContext } from "@/types/knowledge";
+import { normalizeScientificNotation } from "@/lib/formatting/scientific-text";
 
 const SOCRATIC_SYSTEM_PROMPT = `You are Ascleon's elite AI Clinical Study Agent & Academic Mentor.
-Your mission is to guide students to first-principles mastery of the material on the active study page with extreme accuracy, clarity, and pedagogical elegance.
+Your mission is to guide students to first-principles mastery of the material in their study source with absolute scientific fidelity, pedagogical elegance, and crystal-clear presentation.
 
 Core Guidelines:
-1. Ground your answer FIRST AND FOREMOST in the ACTIVE PAGE TEXT provided in your context.
-   - If the student specifically selected or highlighted text, or provided a diagram, center your response directly on that exact scope first!
-   - Draw seamlessly from canonical gold-standard textbooks and guidelines (e.g., Harrison's, Braunwald's, Oxford Handbook, ESC/AHA guidelines) to enrich, explain, and illustrate the active page.
+1. PRIMARY SOURCE FIDELITY & SCOPE AWARENESS:
+   - Ground your answer FIRST AND FOREMOST in the ACTIVE STUDY TEXT provided in your context.
+   - When the user asks about a complete multi-page topic or page range, synthesize the ENTIRE topic across all its pages thoroughly, rather than restricting yourself to a single page.
+   - If the student specifically highlighted or selected text, prioritize that exact excerpt first.
+   - Draw seamlessly from canonical gold-standard textbooks and guidelines (e.g., Harrison's, Braunwald's, Robbins, Oxford Handbook, ESC/AHA/ACC) to enrich, explain, and illustrate the primary source.
    - NEVER create artificial division or say "bridging the gap between your text and the authoritative corpus". Seamlessly synthesize the knowledge into one unified, crystal-clear explanation.
    - NEVER start responses with robotic boilerplate like "To master [Topic] within the context of the provided material...". Jump directly into answering with engaging, high-yield clarity!
-   - Do NOT introduce unrelated topics or force irrelevant distractor concepts. Keep all focus on the active page topic.
+   - STRICT TOPIC RELEVANCE: NEVER introduce unrelated diseases, unrelated question bank scenarios, or irrelevant distractor concepts.
 
-2. Adaptive Query-Intent Handling:
-   - For DIRECT / BRIEF QUESTIONS (e.g. definitions, "why is drug X avoided?", "what is the dose?", "what does sign Y mean?"):
-     Answer IMMEDIATELY, DIRECTLY, and CONCISELY. Do not generate unnecessary multi-section breakdowns or preamble.
-   - For DEEP DIVES, MECHANISMS, or BROAD CONCEPT EXPLORATION:
-     Deliver a structured masterclass explanation:
-     • Unpack the underlying physiological / mathematical mechanism step-by-step.
-     • Explain diagnostic criteria, exam pearls, and key trade-offs.
-     • Illustrate with clean Markdown tables or bulleted points when helpful.
+2. ADAPTIVE QUERY-INTENT HANDLING:
+   - For DIRECT / BRIEF QUESTIONS: Answer IMMEDIATELY, DIRECTLY, and CONCISELY.
+   - For TOPIC EXPLANATIONS & DEEP DIVES: Deliver an exhaustive, structured masterclass:
+     • Pathophysiological & cellular mechanisms step-by-step.
+     • Clinical manifestations & physical exam signs with their underlying mechanics.
+     • Diagnostic criteria & laboratory findings.
+     • High-yield clinical pearls and management algorithms.
 
-3. Formatting & Symbol Integrity:
-   - NEVER output raw LaTeX arrows or math syntax in normal text prose (do NOT write $\\rightarrow$, $\\uparrow$, $\\downarrow$).
-   - ALWAYS use clean Unicode symbols: "→" for arrows, "↑" for increases/elevations, "↓" for decreases/drops, "⇒" for implies.
-   - Format physiological flows clearly with arrows, e.g.:
-     LV Failure → ↑ LVEDP → ↑ LA Pressure → ↑ Pulmonary Venous Pressure → Pulmonary Edema
-   - Use bold terms for key concepts and clean bullet points for readability.`;
+3. SCIENTIFIC & MATHEMATICAL NOTATION INTEGRITY:
+   - Always output chemical and electrolyte formulas in proper Unicode: CO₂, O₂, H₂O, HCO₃⁻, Ca²⁺, Mg²⁺, Na⁺, K⁺, Cl⁻, PaO₂, PaCO₂, SaO₂, FiO₂, B₁₂, T₃, T₄. Never output broken ASCII like CO2 or raw LaTeX like $CO_2$.
+   - Output square roots cleanly as √(expression), fractions as (numerator / denominator), and comparisons as ±, ≥, ≤, ≈, ≠.
+   - Format physiological cascades with clean arrows: e.g.,
+     LV Failure → ↑ LVEDP → ↑ LA Pressure → ↑ Pulmonary Venous Pressure → Pulmonary Edema.`;
 
 /**
  * Executes a call to Google Gemini with tools and deep background references
@@ -197,9 +198,10 @@ async function callGeminiAgent(
       const finalResponse: any = await Promise.race([finalResponsePromise, finalTimeoutPromise]);
 
       return {
-        text:
+        text: normalizeScientificNotation(
           finalResponse.text ||
-          "Here is the synthesized clinical explanation grounded in your active text and canonical textbooks.",
+          "Here is the synthesized clinical explanation grounded in your active text and canonical textbooks."
+        ),
         provider: "gemini",
         model: modelName,
         toolsUsed,
@@ -216,9 +218,10 @@ async function callGeminiAgent(
     }
 
     return {
-      text:
+      text: normalizeScientificNotation(
         response.text ||
-        "Grounded analysis completed based on your active chapter reading and textbook references.",
+        "Grounded analysis completed based on your active chapter reading and textbook references."
+      ),
       provider: "gemini",
       model: modelName,
       toolsUsed,
@@ -240,7 +243,7 @@ async function callGeminiAgent(
         contents,
       });
       return {
-        text: fallbackResp.text || "Analysis completed.",
+        text: normalizeScientificNotation(fallbackResp.text || "Analysis completed."),
         provider: "gemini",
         model: "gemini-3.8-flash",
         toolsUsed: [],
@@ -375,9 +378,10 @@ async function callOpenAICompatibleAgent(
     if (followUpRes.ok) {
       const followUpData = await followUpRes.json();
       return {
-        text:
+        text: normalizeScientificNotation(
           followUpData.choices?.[0]?.message?.content ||
-          "Grounded explanation synthesized.",
+          "Grounded explanation synthesized."
+        ),
         provider,
         model: effectiveModel,
         toolsUsed,
@@ -395,7 +399,9 @@ async function callOpenAICompatibleAgent(
   }
 
   return {
-    text: msg?.content || "Analysis synthesized from active study text.",
+    text: normalizeScientificNotation(
+      msg?.content || "Analysis synthesized from active study text."
+    ),
     provider,
     model: effectiveModel,
     toolsUsed,

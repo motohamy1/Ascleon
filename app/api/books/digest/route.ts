@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 
 interface DigestBlueprint {
+  sourceCategory: "lecture_notes" | "textbook" | "clinical_sheet" | "guideline_paper" | "exam_review";
   domain: string;
   subspecialty: string;
   topic: string;
+  pedagogicalStyle: string;
   authoritativeReferences: string[];
   summary: string;
   initialQBank: Array<{
@@ -30,11 +32,24 @@ interface DigestBlueprint {
 function generateFallbackBlueprint(title: string, preview: string): DigestBlueprint {
   const lower = `${title} ${preview}`.toLowerCase();
 
+  let sourceCategory: DigestBlueprint["sourceCategory"] = "textbook";
+  if (lower.includes("lecture") || lower.includes("slide") || lower.includes("handout") || lower.includes("dr.") || lower.includes("univ")) {
+    sourceCategory = "lecture_notes";
+  } else if (lower.includes("sheet") || lower.includes("pocket") || lower.includes("bedside") || lower.includes("protocol") || lower.includes("checklist")) {
+    sourceCategory = "clinical_sheet";
+  } else if (lower.includes("guideline") || lower.includes("consensus") || lower.includes("trial") || lower.includes("lancet") || lower.includes("nejm")) {
+    sourceCategory = "guideline_paper";
+  } else if (lower.includes("first aid") || lower.includes("recall") || lower.includes("board") || lower.includes("qbank") || lower.includes("usmle")) {
+    sourceCategory = "exam_review";
+  }
+
   if (lower.includes("surg") || lower.includes("swelling") || lower.includes("hernia") || lower.includes("ulcer") || lower.includes("appendic") || lower.includes("thyroid")) {
     return {
+      sourceCategory: sourceCategory === "textbook" ? "clinical_sheet" : sourceCategory,
       domain: "Clinical Surgery",
       subspecialty: "Surgical History Taking, Bedside Examination & Operative Principles",
       topic: "Surgery",
+      pedagogicalStyle: "clinical_algorithm",
       authoritativeReferences: [
         "Bailey & Love's Short Practice of Surgery (28th Ed)",
         "Browse's Introduction to the Symptoms & Signs of Surgical Disease (6th Ed)",
@@ -74,6 +89,8 @@ function generateFallbackBlueprint(title: string, preview: string): DigestBluepr
   
   if (lower.includes("cardio") || lower.includes("heart") || lower.includes("murmur") || lower.includes("ecg") || lower.includes("valve")) {
     return {
+      sourceCategory,
+      pedagogicalStyle: "first_principles",
       domain: "Cardiovascular Medicine",
       subspecialty: "Clinical Cardiology & Valvular Pathophysiology",
       topic: "Cardiology",
@@ -116,6 +133,8 @@ function generateFallbackBlueprint(title: string, preview: string): DigestBluepr
 
   if (lower.includes("neuro") || lower.includes("brain") || lower.includes("cortex") || lower.includes("stroke") || lower.includes("synapse")) {
     return {
+      sourceCategory,
+      pedagogicalStyle: "first_principles",
       domain: "Neurology & Neuroscience",
       subspecialty: "Clinical Neurology & Neuroanatomy",
       topic: "Neurology",
@@ -158,6 +177,8 @@ function generateFallbackBlueprint(title: string, preview: string): DigestBluepr
 
   if (lower.includes("code") || lower.includes("algorithm") || lower.includes("software") || lower.includes("python") || lower.includes("javascript") || lower.includes("system")) {
     return {
+      sourceCategory,
+      pedagogicalStyle: "first_principles",
       domain: "Computer Science & Software Engineering",
       subspecialty: "System Architecture & Algorithms",
       topic: "Software Engineering",
@@ -200,6 +221,8 @@ function generateFallbackBlueprint(title: string, preview: string): DigestBluepr
 
   // General Academic / Scientific fallback
   return {
+    sourceCategory,
+    pedagogicalStyle: "comprehensive",
     domain: "Academic Science & Professional Studies",
     subspecialty: "Core Concepts & Practical Application",
     topic: "General Science",
@@ -268,14 +291,21 @@ ${(textPreview || "").slice(0, 3500)}
 
 Task:
 Analyze the document and generate a JSON study blueprint with:
-1. "domain": The exact high-level academic/clinical field (e.g. "Cardiology", "Neurology", "Organic Chemistry", "Computer Science", "Contract Law").
-2. "subspecialty": The specific subfield (e.g. "Valvular Heart Disease & Auscultation", "Distributed Systems").
-3. "topic": A concise 1-2 word topic tag.
-4. "authoritativeReferences": An array of 3-4 REAL world-class gold-standard textbooks, canonical reference treatises, or published societal guidelines in this exact field that an expert mentor would consult.
-5. "summary": A 2-3 sentence executive summary of the document's scope and study value.
-6. "initialQBank": An array of 2-3 high-yield multiple-choice questions grounded in the previewed material. Each with "vignette", "question", "options" (4 items), "correctAnswerIndex" (0-3), "explanation" (detailed rationale citing mechanisms), and "keyConcept".
-7. "initialMnemonics": An array of 1-2 high-yield memory anchors/mnemonics ("title", "mnemonic", "expansion", "notes").
-8. "chapterMap": An array of key sections or chapters ("title", "description").
+1. "sourceCategory": Choose EXACTLY ONE from: ["lecture_notes", "textbook", "clinical_sheet", "guideline_paper", "exam_review"].
+   - "lecture_notes": University lecture slides, handout notes, syllabi
+   - "textbook": Multi-chapter reference treatises or comprehensive textbooks
+   - "clinical_sheet": Bedside guides, clinical history sheets, pocket cards, protocols
+   - "guideline_paper": Consensus guidelines, societal recommendations, research papers
+   - "exam_review": Board review, rapid recall, First Aid / QBank style summaries
+2. "domain": The exact high-level academic/clinical field (e.g. "Cardiology", "Neurology", "Organic Chemistry", "Computer Science", "Contract Law").
+3. "subspecialty": The specific subfield (e.g. "Valvular Heart Disease & Auscultation", "Distributed Systems").
+4. "topic": A concise 1-2 word topic tag.
+5. "pedagogicalStyle": Choose one: "foundational_text", "bulleted_review", "clinical_algorithm", "case_oriented", "rapid_recall".
+6. "authoritativeReferences": An array of 3-4 REAL world-class gold-standard textbooks, canonical reference treatises, or published societal guidelines in this exact field that an expert mentor would consult.
+7. "summary": A 2-3 sentence executive summary of the document's scope and study value.
+8. "initialQBank": An array of 2-3 high-yield multiple-choice questions grounded in the previewed material. Each with "vignette", "question", "options" (4 items), "correctAnswerIndex" (0-3), "explanation" (detailed rationale citing mechanisms), and "keyConcept".
+9. "initialMnemonics": An array of 1-2 high-yield memory anchors/mnemonics ("title", "mnemonic", "expansion", "notes").
+10. "chapterMap": An array of key sections or chapters ("title", "description").
 
 Return ONLY a valid JSON object matching this structure.`;
 

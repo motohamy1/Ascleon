@@ -77,13 +77,13 @@ PEDAGOGICAL & ORAL CONVERSATION RULES:
       systemInstruction: {
         parts: [{ text: systemInstructionText }],
       },
-      // Real-time voice activity detection & barge-in tuning
+      // Real-time voice activity detection & barge-in tuning (tuned for clear voice isolation)
       realtimeInputConfig: {
         automaticActivityDetection: {
-          startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
+          startOfSpeechSensitivity: "START_SENSITIVITY_LOW",
           endOfSpeechSensitivity: "END_SENSITIVITY_LOW",
-          prefixPaddingMs: 120,
-          silenceDurationMs: 600,
+          prefixPaddingMs: 250,
+          silenceDurationMs: 900,
         },
       },
       // Enable seamless session resumption when pausing & resuming calls

@@ -1,11 +1,41 @@
 "use client";
 
 import React from "react";
-import { Library, LayoutGrid, Star, Clock, BookmarkCheck, Sparkles } from "lucide-react";
+import {
+  Library,
+  LayoutGrid,
+  Star,
+  Clock,
+  BookmarkCheck,
+  Sparkles,
+  BookMarked,
+  GraduationCap,
+  FileText,
+  FileCheck2,
+  Award,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type ViewMode = "shelf" | "grid";
-export type FilterType = "all" | "favorites" | "reading_now" | "quick_reads" | string;
+export type FilterType =
+  | "all"
+  | "favorites"
+  | "reading_now"
+  | "quick_reads"
+  | "cat_textbook"
+  | "cat_lecture_notes"
+  | "cat_clinical_sheet"
+  | "cat_guideline_paper"
+  | "cat_exam_review"
+  | string;
+
+export interface CategoryCount {
+  textbook: number;
+  lecture_notes: number;
+  clinical_sheet: number;
+  guideline_paper: number;
+  exam_review: number;
+}
 
 interface ViewControlsProps {
   viewMode: ViewMode;
@@ -17,6 +47,7 @@ interface ViewControlsProps {
   favoritesCount: number;
   inProgressCount: number;
   quickReadsCount: number;
+  categoryCounts?: CategoryCount;
 }
 
 export default function ViewControls({
@@ -29,6 +60,13 @@ export default function ViewControls({
   favoritesCount,
   inProgressCount,
   quickReadsCount,
+  categoryCounts = {
+    textbook: 0,
+    lecture_notes: 0,
+    clinical_sheet: 0,
+    guideline_paper: 0,
+    exam_review: 0,
+  },
 }: ViewControlsProps) {
   return (
     <div className="flex flex-col gap-3 w-full">
@@ -68,8 +106,8 @@ export default function ViewControls({
         {/* Keyboard navigation hint (visible in shelf mode) */}
         {viewMode === "shelf" && (
           <div className="hidden md:flex items-center gap-2 text-xs text-[#7A7267] italic font-serif">
-            <Sparkles className="w-3 h-3 text-[#A04000]" />
-            <span>Click a spine to take it off the shelf. Arrow keys navigate.</span>
+            <Sparkles className="w-3 h-3 text-[#ff4c00]" />
+            <span>Structured into architectural wooden bays by Source Type. Arrow keys navigate.</span>
           </div>
         )}
       </div>
@@ -87,9 +125,99 @@ export default function ViewControls({
               : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
           )}
         >
-          <span>All</span>
+          <span>All Sources</span>
           <span className="opacity-70 text-[10px]">({totalCount})</span>
         </button>
+
+        {/* Category: Textbooks */}
+        {categoryCounts.textbook > 0 && (
+          <button
+            type="button"
+            onClick={() => onFilterChange("cat_textbook")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
+              activeFilter === "cat_textbook"
+                ? "bg-[#663820] text-white border-[#663820]"
+                : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
+            )}
+          >
+            <BookMarked className="w-3 h-3 text-[#d4a853]" />
+            <span>Textbooks</span>
+            <span className="opacity-70 text-[10px]">({categoryCounts.textbook})</span>
+          </button>
+        )}
+
+        {/* Category: Lectures & Notes */}
+        {categoryCounts.lecture_notes > 0 && (
+          <button
+            type="button"
+            onClick={() => onFilterChange("cat_lecture_notes")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
+              activeFilter === "cat_lecture_notes"
+                ? "bg-[#2e6f68] text-white border-[#2e6f68]"
+                : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
+            )}
+          >
+            <GraduationCap className="w-3 h-3 text-[#7fd8c9]" />
+            <span>Lectures & Notes</span>
+            <span className="opacity-70 text-[10px]">({categoryCounts.lecture_notes})</span>
+          </button>
+        )}
+
+        {/* Category: Clinical Sheets */}
+        {categoryCounts.clinical_sheet > 0 && (
+          <button
+            type="button"
+            onClick={() => onFilterChange("cat_clinical_sheet")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
+              activeFilter === "cat_clinical_sheet"
+                ? "bg-[#ff4c00] text-white border-[#ff4c00]"
+                : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
+            )}
+          >
+            <FileText className="w-3 h-3" />
+            <span>Clinical Sheets</span>
+            <span className="opacity-70 text-[10px]">({categoryCounts.clinical_sheet})</span>
+          </button>
+        )}
+
+        {/* Category: Guidelines & Papers */}
+        {categoryCounts.guideline_paper > 0 && (
+          <button
+            type="button"
+            onClick={() => onFilterChange("cat_guideline_paper")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
+              activeFilter === "cat_guideline_paper"
+                ? "bg-[#a1156e] text-white border-[#a1156e]"
+                : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
+            )}
+          >
+            <FileCheck2 className="w-3 h-3 text-[#f6d7a1]" />
+            <span>Guidelines</span>
+            <span className="opacity-70 text-[10px]">({categoryCounts.guideline_paper})</span>
+          </button>
+        )}
+
+        {/* Category: Exam Review */}
+        {categoryCounts.exam_review > 0 && (
+          <button
+            type="button"
+            onClick={() => onFilterChange("cat_exam_review")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
+              activeFilter === "cat_exam_review"
+                ? "bg-[#3d485e] text-white border-[#3d485e]"
+                : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
+            )}
+          >
+            <Award className="w-3 h-3 text-[#d4a853]" />
+            <span>Exam Review</span>
+            <span className="opacity-70 text-[10px]">({categoryCounts.exam_review})</span>
+          </button>
+        )}
 
         {/* Favourites */}
         {favoritesCount > 0 && (
@@ -99,7 +227,7 @@ export default function ViewControls({
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
               activeFilter === "favorites"
-                ? "bg-[#A04000] text-white border-[#A04000]"
+                ? "bg-[#d4a853] text-[#212A3B] font-bold border-[#d4a853]"
                 : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
             )}
           >

@@ -1,9 +1,7 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import {
-  MindMapNode,
-} from "@/types/morph";
+import React, { useState, useRef, useMemo, useCallback } from "react";
+import { MindMapNode } from "@/types/morph";
 import {
   Sparkles,
   ZoomIn,
@@ -12,17 +10,15 @@ import {
   MessageSquare,
   HelpCircle,
   BookmarkPlus,
-  Compass,
   Check,
-  ChevronRight,
-  Layers,
-  Activity,
   Workflow,
   X,
-  Maximize2,
-  Lightbulb,
+  Layers,
+  Move,
+  Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BiDiText } from "@/components/ui/BiDiText";
 
 interface ConceptMapCanvasProps {
   rootLabel?: string;
@@ -48,9 +44,15 @@ export function ConceptMapCanvas({
   // Pan & Zoom Transform State
   const [zoom, setZoom] = useState<number>(0.92);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 20, y: 15 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStart = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
+  const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
+
+  // Local dragged node coordinate overrides
+  const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({});
+
+  const dragPointerStart = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const initialPan = useRef<{ x: number; y: number }>({ x: 20, y: 15 });
+  const initialNodePos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Selected Node State
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -61,60 +63,70 @@ export function ConceptMapCanvas({
     if (!nodes || nodes.length === 0) return [];
 
     const rootNodes = nodes.filter((n) => n.level === 0 || !n.parent);
-    const level1Nodes = nodes.filter((n) => n.level === 1 || (n.parent && n.parent === rootNodes[0]?.id));
-    const level2Nodes = nodes.filter((n) => n.level === 2 || (n.parent && n.parent !== rootNodes[0]?.id));
+    const level1Nodes = nodes.filter(
+      (n) => n.level === 1 || (n.parent && n.parent === rootNodes[0]?.id)
+    );
+    const level2Nodes = nodes.filter(
+      (n) => n.level === 2 || (n.parent && n.parent !== rootNodes[0]?.id)
+    );
 
-    const result: Array<MindMapNode & { xPos: number; yPos: number; width: number; height: number }> = [];
+    const result: Array<
+      MindMapNode & { xPos: number; yPos: number; width: number; height: number }
+    > = [];
 
-    // 1. Position Root Node (Left column, centered vertically)
+    // 1. Root Node (Left column)
     const root = rootNodes[0] || nodes[0];
     const totalPillars = Math.max(level1Nodes.length, 1);
     const totalHeight = totalPillars * 96;
     const rootY = Math.max(60, totalHeight / 2 - 20);
 
+    const rootOverride = nodePositions[root.id];
     result.push({
       ...root,
-      xPos: root.x ?? 30,
-      yPos: root.y ?? rootY,
-      width: 175,
+      xPos: rootOverride?.x ?? (root.x ?? 30),
+      yPos: rootOverride?.y ?? (root.y ?? rootY),
+      width: 180,
       height: 64,
     });
 
-    // 2. Position Level 1 Pillars (Middle column)
+    // 2. Level 1 Pillars (Middle column)
     const pillarYMap = new Map<string, number>();
     level1Nodes.forEach((pNode, pIdx) => {
-      const y = 25 + pIdx * 94;
-      pillarYMap.set(pNode.id, y);
+      const defaultY = 25 + pIdx * 94;
+      pillarYMap.set(pNode.id, defaultY);
+
+      const override = nodePositions[pNode.id];
       result.push({
         ...pNode,
-        xPos: pNode.x ?? 250,
-        yPos: pNode.y ?? y,
-        width: 180,
+        xPos: override?.x ?? (pNode.x ?? 260),
+        yPos: override?.y ?? (pNode.y ?? defaultY),
+        width: 185,
         height: 68,
       });
     });
 
-    // 3. Position Level 2 Leaves (Right column, aligned to their parent pillar)
+    // 3. Level 2 Leaves (Right column)
     const pillarLeafCounts = new Map<string, number>();
     level2Nodes.forEach((lNode) => {
       const parentId = lNode.parent || level1Nodes[0]?.id;
       const count = pillarLeafCounts.get(parentId) || 0;
       pillarLeafCounts.set(parentId, count + 1);
 
-      const parentY = pillarYMap.get(parentId) ?? (25 + count * 80);
-      const leafY = parentY + (count * 60) - 10;
+      const parentY = pillarYMap.get(parentId) ?? 25 + count * 80;
+      const defaultLeafY = parentY + count * 60 - 10;
 
+      const override = nodePositions[lNode.id];
       result.push({
         ...lNode,
-        xPos: lNode.x ?? 480,
-        yPos: lNode.y ?? Math.max(15, leafY),
-        width: 200,
+        xPos: override?.x ?? (lNode.x ?? 490),
+        yPos: override?.y ?? (lNode.y ?? Math.max(15, defaultLeafY)),
+        width: 210,
         height: 58,
       });
     });
 
     return result;
-  }, [nodes]);
+  }, [nodes, nodePositions]);
 
   // Find currently active node object
   const activeNode = useMemo(() => {
@@ -138,18 +150,22 @@ export function ConceptMapCanvas({
       const parent = computedNodes.find((p) => p.id === child.parent);
       if (!parent) return;
 
-      const sx = parent.xPos + parent.width;
-      const sy = parent.yPos + parent.height / 2;
-      const tx = child.xPos;
-      const ty = child.yPos + child.height / 2;
+      const startX = parent.xPos + parent.width;
+      const startY = parent.yPos + parent.height / 2;
+      const endX = child.xPos;
+      const endY = child.yPos + child.height / 2;
 
-      const deltaX = Math.max(30, (tx - sx) / 2);
-      const path = `M ${sx} ${sy} C ${sx + deltaX} ${sy}, ${tx - deltaX} ${ty}, ${tx} ${ty}`;
+      const deltaX = Math.max(30, (endX - startX) / 2);
+      const cp1X = startX + deltaX;
+      const cp1Y = startY;
+      const cp2X = endX - deltaX;
+      const cp2Y = endY;
 
+      const path = `M ${startX} ${startY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${endX} ${endY}`;
       const isHighlighted =
         selectedNodeId === child.id ||
         selectedNodeId === parent.id ||
-        (activeNode?.parent === parent.id);
+        activeNode?.parent === parent.id;
 
       const color = child.color || parent.color || "#ff4c00";
 
@@ -166,42 +182,88 @@ export function ConceptMapCanvas({
     return list;
   }, [computedNodes, selectedNodeId, activeNode]);
 
-  // Pan Handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    // Only drag on canvas background, not when clicking interactive buttons
-    if ((e.target as HTMLElement).closest(".mindmap-interactive")) return;
+  // Pointer Events (Pan Canvas or Drag Node with Mouse or Touch)
+  const handlePointerDownCanvas = (e: React.PointerEvent<HTMLDivElement>) => {
+    // If pointer-down was on an inspector button, skip
+    if ((e.target as HTMLElement).closest(".mindmap-controls")) return;
 
-    setIsDragging(true);
-    dragStart.current = { x: e.clientX, y: e.clientY };
+    // Capture pointer for continuous tracking outside canvas boundary
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+
+    setIsDraggingCanvas(true);
+    dragPointerStart.current = { x: e.clientX, y: e.clientY };
     initialPan.current = { ...pan };
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return;
-    const dx = e.clientX - dragStart.current.x;
-    const dy = e.clientY - dragStart.current.y;
-    setPan({
-      x: initialPan.current.x + dx,
-      y: initialPan.current.y + dy,
-    });
+  const handlePointerDownNode = (
+    e: React.PointerEvent<HTMLDivElement>,
+    node: MindMapNode & { xPos: number; yPos: number }
+  ) => {
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+
+    setDraggedNodeId(node.id);
+    dragPointerStart.current = { x: e.clientX, y: e.clientY };
+    initialNodePos.current = { x: node.xPos, y: node.yPos };
   };
 
-  const handleMouseUp = () => {
-    setIsDragging(false);
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (draggedNodeId) {
+      // Dragging a specific node
+      const dx = (e.clientX - dragPointerStart.current.x) / zoom;
+      const dy = (e.clientY - dragPointerStart.current.y) / zoom;
+      setNodePositions((prev) => ({
+        ...prev,
+        [draggedNodeId]: {
+          x: Math.max(10, initialNodePos.current.x + dx),
+          y: Math.max(10, initialNodePos.current.y + dy),
+        },
+      }));
+    } else if (isDraggingCanvas) {
+      // Panning the canvas
+      const dx = e.clientX - dragPointerStart.current.x;
+      const dy = e.clientY - dragPointerStart.current.y;
+      setPan({
+        x: initialPan.current.x + dx,
+        y: initialPan.current.y + dy,
+      });
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isDraggingCanvas) {
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {}
+      setIsDraggingCanvas(false);
+    }
+    if (draggedNodeId) {
+      setDraggedNodeId(null);
+    }
+  };
+
+  // Wheel Zoom Support
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.08 : -0.08;
+    setZoom((z) => Math.min(1.6, Math.max(0.5, z + delta)));
   };
 
   // Zoom Controls
-  const handleZoomIn = () => setZoom((z) => Math.min(1.4, z + 0.12));
-  const handleZoomOut = () => setZoom((z) => Math.max(0.55, z - 0.12));
+  const handleZoomIn = () => setZoom((z) => Math.min(1.6, z + 0.12));
+  const handleZoomOut = () => setZoom((z) => Math.max(0.5, z - 0.12));
   const handleResetView = () => {
     setZoom(0.92);
     setPan({ x: 20, y: 15 });
+    setNodePositions({});
   };
 
   // Action Dispatchers for Selected Node
   const handleAskAIAboutNode = useCallback(() => {
     if (!activeNode) return;
-    const prompt = `Explain the core mechanism, clinical significance, and practical exam pearls for "${activeNode.label}": ${activeNode.details || "as presented on this page"}`;
+    const prompt = `Explain the core mechanism, clinical significance, and practical exam pearls for "${activeNode.label}": ${
+      activeNode.details || "as presented in this study source"
+    }`;
     onAskAI?.(prompt);
   }, [activeNode, onAskAI]);
 
@@ -219,267 +281,234 @@ export function ConceptMapCanvas({
 
   return (
     <div
+      ref={containerRef}
+      onPointerDown={handlePointerDownCanvas}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onWheel={handleWheel}
       className={cn(
-        // Strict boundary: bounded height, solid border, never overlays cards below
-        "relative flex h-[410px] w-full flex-col overflow-hidden rounded-[20px] border-2 border-[color:var(--orange)]/35 shadow-chip select-none",
+        "relative flex h-[460px] w-full flex-col overflow-hidden rounded-[20px] border-2 border-[#ff4c00]/40 shadow-chip select-none cursor-grab active:cursor-grabbing",
         className
       )}
-      // Project's signature Ink color with subtle Ascleon Orange radial dot grid
       style={{
-        backgroundColor: "var(--ink, #16151a)",
+        backgroundColor: "var(--ink, #0f0e10)",
         backgroundImage:
-          "radial-gradient(circle, rgba(255, 76, 0, 0.14) 1.2px, transparent 1.2px)",
+          "radial-gradient(circle, rgba(255, 76, 0, 0.16) 1.2px, transparent 1.2px)",
         backgroundSize: "22px 22px",
+        touchAction: "none",
       }}
     >
-      {/* ===================================================================== */}
-      {/* CANVAS HEADER BAR (Pinned inside the container)                       */}
-      {/* ===================================================================== */}
-      <div className="mindmap-interactive relative z-20 flex h-11 shrink-0 items-center justify-between border-b border-white/10 bg-[#16151a]/90 px-3.5 backdrop-blur-md">
+      {/* Header Controls Bar */}
+      <div className="mindmap-controls relative z-20 flex h-11 shrink-0 items-center justify-between border-b border-white/10 bg-[#0f0e10]/95 px-3.5 backdrop-blur-md">
         <div className="flex items-center gap-2">
-          <div className="flex size-6 items-center justify-center rounded-lg bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs">
+          <div className="flex size-6 items-center justify-center rounded-lg bg-[#ff4c00] text-[#0f0e10] shadow-xs">
             <Workflow className="size-3.5" />
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-xs font-black tracking-tight text-[color:var(--cream)]">
-              Core Principles Concept Map
+            <span className="text-xs font-black tracking-tight text-[#f6d7a1]">
+              {rootLabel}
             </span>
-            <span className="hidden sm:inline-flex rounded-full border border-[color:var(--orange)]/30 bg-[color:var(--orange)]/15 px-2 py-0.5 text-[9.5px] font-bold text-[color:var(--orange)]">
-              Ascleon Knowledge Model
+            <span className="hidden sm:inline-flex rounded-full border border-[#ff4c00]/30 bg-[#ff4c00]/15 px-2 py-0.5 text-[9.5px] font-bold text-[#ff4c00]">
+              Interactive Node Canvas
             </span>
           </div>
         </div>
 
-        {/* Canvas Toolbar Controls: Zoom & Reset */}
+        {/* Pan/Zoom Controls */}
         <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={handleZoomOut}
-            className="flex size-6.5 cursor-pointer items-center justify-center rounded-md border border-white/10 bg-white/5 text-[color:var(--cream)]/80 hover:bg-white/15 hover:text-[color:var(--cream)] transition-colors"
-            title="Zoom Out (-)"
-          >
-            <ZoomOut className="size-3.5" />
-          </button>
-          <span className="w-8 text-center font-mono text-[10.5px] font-bold text-[color:var(--cream)]/70">
-            {Math.round(zoom * 100)}%
+          <span className="text-[10px] font-mono text-white/50 mr-1 hidden sm:inline">
+            Drag canvas or nodes • Pinch/scroll to zoom
           </span>
           <button
             type="button"
             onClick={handleZoomIn}
-            className="flex size-6.5 cursor-pointer items-center justify-center rounded-md border border-white/10 bg-white/5 text-[color:var(--cream)]/80 hover:bg-white/15 hover:text-[color:var(--cream)] transition-colors"
-            title="Zoom In (+)"
+            className="flex size-7 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-white/80 hover:bg-white/15 hover:text-white cursor-pointer"
+            title="Zoom In"
           >
             <ZoomIn className="size-3.5" />
           </button>
           <button
             type="button"
+            onClick={handleZoomOut}
+            className="flex size-7 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-white/80 hover:bg-white/15 hover:text-white cursor-pointer"
+            title="Zoom Out"
+          >
+            <ZoomOut className="size-3.5" />
+          </button>
+          <button
+            type="button"
             onClick={handleResetView}
-            className="flex size-6.5 cursor-pointer items-center justify-center rounded-md border border-white/10 bg-white/5 text-[color:var(--cream)]/80 hover:bg-white/15 hover:text-[color:var(--cream)] transition-colors"
-            title="Reset Pan & Zoom"
+            className="flex size-7 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-white/80 hover:bg-white/15 hover:text-white cursor-pointer"
+            title="Reset View"
           >
             <RotateCcw className="size-3.5" />
           </button>
         </div>
       </div>
 
-      {/* ===================================================================== */}
-      {/* INTERACTIVE PAN/ZOOM WORKSPACE                                        */}
-      {/* ===================================================================== */}
+      {/* Main Interactive Scalable Canvas Surface */}
       <div
-        ref={containerRef}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        className={cn(
-          "relative flex-1 overflow-hidden",
-          isDragging ? "cursor-grabbing" : "cursor-grab"
-        )}
+        className="relative flex-1 origin-top-left"
+        style={{
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transition: isDraggingCanvas || draggedNodeId ? "none" : "transform 0.15s ease-out",
+        }}
       >
-        <div
-          className="absolute origin-top-left transition-transform duration-75 ease-out"
-          style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-            width: "780px",
-            height: "460px",
-          }}
+        {/* SVG Curved Connectors Layer */}
+        <svg
+          className="absolute inset-0 pointer-events-none"
+          style={{ width: 1400, height: 900 }}
         >
-          {/* SVG Connecting Edges Layer */}
-          <svg className="pointer-events-none absolute inset-0 h-full w-full">
-            <defs>
-              <linearGradient id="activeEdgeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="#ff4c00" stopOpacity="0.95" />
-                <stop offset="100%" stopColor="#43a08f" stopOpacity="0.95" />
-              </linearGradient>
-              <filter id="edgeGlow" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="3" result="blur" />
-                <feComposite in="SourceGraphic" in2="blur" operator="over" />
-              </filter>
-            </defs>
+          {computedEdges.map((edge) => (
+            <path
+              key={edge.id}
+              d={edge.path}
+              fill="none"
+              stroke={edge.isHighlighted ? "#ff4c00" : edge.color}
+              strokeWidth={edge.isHighlighted ? 3.5 : 2}
+              strokeOpacity={edge.isHighlighted ? 1 : 0.45}
+              strokeDasharray={edge.isHighlighted ? undefined : "6,4"}
+              className="transition-all duration-200"
+            />
+          ))}
+        </svg>
 
-            {computedEdges.map((edge) => (
-              <g key={edge.id}>
-                <path
-                  d={edge.path}
-                  fill="none"
-                  stroke={edge.isHighlighted ? "url(#activeEdgeGrad)" : "rgba(255, 255, 255, 0.18)"}
-                  strokeWidth={edge.isHighlighted ? "2.5" : "1.5"}
-                  strokeDasharray={edge.isHighlighted ? "5 3" : undefined}
-                  filter={edge.isHighlighted ? "url(#edgeGlow)" : undefined}
-                  className={edge.isHighlighted ? "animate-pulse" : undefined}
-                />
-              </g>
-            ))}
-          </svg>
+        {/* Nodes Layer */}
+        {computedNodes.map((node) => {
+          const isSelected = selectedNodeId === node.id;
+          const isRoot = node.level === 0;
+          const isPillar = node.level === 1;
 
-          {/* Render All Hierarchical Node Cards */}
-          {computedNodes.map((node) => {
-            const isSelected = selectedNodeId === node.id;
-            const isRoot = node.level === 0;
-            const isPillar = node.level === 1;
-
-            return (
-              <div
-                key={node.id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelectedNodeId(isSelected ? null : node.id);
-                }}
-                style={{
-                  left: `${node.xPos}px`,
-                  top: `${node.yPos}px`,
-                  width: `${node.width}px`,
-                }}
-                className={cn(
-                  "mindmap-interactive group absolute cursor-pointer rounded-xl border p-2.5 transition-all duration-200 shadow-md",
-                  isSelected
-                    ? "scale-105 border-[color:var(--orange)] bg-[#211f29] shadow-lg ring-2 ring-[color:var(--orange)]/60 z-30"
-                    : isRoot
-                    ? "border-[color:var(--orange)]/70 bg-[#241a18] hover:border-[color:var(--orange)] z-20"
-                    : isPillar
-                    ? "border-white/20 bg-[#1c1b22] hover:border-white/40 z-10"
-                    : "border-white/10 bg-[#151419]/90 hover:border-white/25 z-10"
-                )}
-              >
-                {/* Node Category Pill */}
-                <div className="mb-1 flex items-center justify-between gap-1">
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wider",
-                      isRoot
-                        ? "bg-[color:var(--orange)] text-[color:var(--ink)]"
-                        : "bg-white/10 text-[color:var(--cream)]/70"
-                    )}
-                    style={
-                      !isRoot && node.color
-                        ? { color: node.color, backgroundColor: `${node.color}20` }
-                        : undefined
-                    }
-                  >
-                    {isRoot ? "Root Topic" : node.category || "Principle"}
-                  </span>
-
-                  {node.sublabel && (
-                    <span className="truncate text-[8px] font-mono text-[color:var(--cream)]/50">
-                      {node.sublabel}
-                    </span>
-                  )}
-                </div>
-
-                {/* Node Main Title (Full text, wrapped, zero truncation) */}
-                <h4
-                  className={cn(
-                    "font-bold leading-snug line-clamp-2",
-                    isRoot
-                      ? "text-xs font-black text-[color:var(--cream)]"
-                      : "text-[11px] text-[color:var(--cream)]"
-                  )}
-                >
-                  {node.label}
-                </h4>
-
-                {/* Node Brief Footnote / Hint */}
-                {node.details && (
-                  <p className="mt-1 line-clamp-1 text-[9.5px] text-[color:var(--cream)]/65 leading-tight">
-                    {node.details}
-                  </p>
-                )}
+          return (
+            <div
+              key={node.id}
+              onPointerDown={(e) => handlePointerDownNode(e, node)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedNodeId(isSelected ? null : node.id);
+              }}
+              className={cn(
+                "absolute rounded-[14px] p-2.5 transition-all cursor-move flex flex-col justify-between border-2",
+                isSelected
+                  ? "border-[#ff4c00] bg-[#f6d7a1] text-[#0f0e10] shadow-[0_0_20px_rgba(255,76,0,0.5)] scale-105 z-30"
+                  : isRoot
+                  ? "border-[#ff4c00] bg-[#1a1820] text-[#f6d7a1] shadow-lg z-20 hover:scale-102"
+                  : isPillar
+                  ? "border-[#2e6f68] bg-[#151c1c] text-[#7fd8c9] shadow-md z-15 hover:scale-102"
+                  : "border-white/20 bg-[#16151a] text-white/90 shadow-sm z-10 hover:border-white/50"
+              )}
+              style={{
+                left: node.xPos,
+                top: node.yPos,
+                width: node.width,
+                minHeight: node.height,
+              }}
+            >
+              <div className="flex items-center justify-between gap-1 pb-1">
+                <span className="text-[9px] font-black uppercase tracking-wider opacity-70 truncate">
+                  {node.category || (isRoot ? "Root Topic" : isPillar ? "Core Pillar" : "Key Rule")}
+                </span>
+                <Move className="size-2.5 opacity-40 shrink-0" />
               </div>
-            );
-          })}
-        </div>
 
-        {/* Canvas Background Pan Hint */}
-        <div className="pointer-events-none absolute bottom-2 left-3 z-10 text-[9.5px] font-mono text-[color:var(--cream)]/40">
-          ✦ Drag canvas to pan • Click node to open deep study actions
-        </div>
+              <div className="font-bold text-xs leading-snug line-clamp-2">
+                <BiDiText text={node.label} />
+              </div>
 
-        {/* =================================================================== */}
-        {/* ACTION DOCK (Docked inside canvas bottom when a node is selected)     */}
-        {/* =================================================================== */}
-        {activeNode && (
-          <div className="mindmap-interactive animate-in fade-in slide-in-from-bottom-3 duration-150 absolute bottom-3 left-3 right-3 z-30 flex flex-col gap-2 rounded-2xl border-2 border-[color:var(--orange)] bg-[#17161c]/95 p-3 text-xs text-[color:var(--cream)] shadow-2xl backdrop-blur-md">
-            <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
-              <div className="flex items-center gap-2 min-w-0">
-                <span
-                  className="size-2 rounded-full shrink-0"
-                  style={{ backgroundColor: activeNode.color || "#ff4c00" }}
-                />
-                <strong className="truncate text-xs font-black text-[color:var(--orange)]">
-                  {activeNode.label}
-                </strong>
-                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] uppercase font-mono text-[color:var(--cream)]/60">
+              {node.sublabel && (
+                <div className="text-[10px] opacity-75 truncate mt-0.5">
+                  <BiDiText text={node.sublabel} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Deep Comprehensive Node Inspector Drawer (Non-truncated) */}
+      {activeNode && (
+        <div className="mindmap-controls absolute bottom-2 inset-x-2 z-30 rounded-[16px] border-2 border-[#ff4c00] bg-[#0f0e10]/95 p-3.5 text-[#f6d7a1] shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-2 duration-150 max-h-56 overflow-y-auto">
+          <div className="flex items-start justify-between gap-2 pb-2 border-b border-white/10 mb-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-[#ff4c00] text-[#0f0e10] px-2 py-0.5 text-[9.5px] font-black uppercase">
                   {activeNode.category}
                 </span>
+                <h4 className="font-serif font-bold text-xs sm:text-sm text-white">
+                  <BiDiText text={activeNode.label} />
+                </h4>
               </div>
-
-              <button
-                type="button"
-                onClick={() => setSelectedNodeId(null)}
-                className="rounded-full p-1 text-[color:var(--cream)]/60 hover:bg-white/10 hover:text-[color:var(--cream)] cursor-pointer"
-                title="Close Inspector"
-              >
-                <X className="size-3.5" />
-              </button>
+              {activeNode.sublabel && (
+                <p className="text-[11px] text-[#7fd8c9] mt-0.5">
+                  <BiDiText text={activeNode.sublabel} />
+                </p>
+              )}
             </div>
 
-            {/* Full Concept Explanation */}
-            <p className="line-clamp-2 text-[11px] leading-relaxed text-[color:var(--cream)]/90">
-              {activeNode.details || "Core structural insight extracted directly from the active passage."}
-            </p>
-
-            {/* Action Buttons: Ask AI, Test in QBank, Pin to Vault */}
-            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-white/10">
-              <button
-                type="button"
-                onClick={handleAskAIAboutNode}
-                className="flex cursor-pointer items-center gap-1.5 rounded-full border border-[color:var(--ink)] bg-[color:var(--orange)] px-3 py-1 text-[11px] font-black text-[color:var(--ink)] shadow-xs hover:scale-105 transition-transform"
-              >
-                <MessageSquare className="size-3" />
-                <span>Explain in AI Chat</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleQuizAboutNode}
-                className="flex cursor-pointer items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] font-bold text-[color:var(--cream)] hover:bg-white/15 transition-colors"
-              >
-                <HelpCircle className="size-3 text-amber-400" />
-                <span>Test in QBank</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handlePinActiveNode}
-                className="flex cursor-pointer items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/20 transition-colors"
-              >
-                {pinnedSuccess ? <Check className="size-3 text-emerald-400" /> : <BookmarkPlus className="size-3" />}
-                <span>{pinnedSuccess ? "Pinned to Vault!" : "Pin to Vault"}</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedNodeId(null)}
+              className="text-white/60 hover:text-white p-1 rounded-md"
+              title="Close Drawer"
+            >
+              <X className="size-4" />
+            </button>
           </div>
-        )}
-      </div>
+
+          {/* Full Non-Truncated Explanation */}
+          <div className="text-xs leading-relaxed text-white/90 mb-3">
+            <BiDiText text={activeNode.details} />
+          </div>
+
+          {/* Step-by-Step Mechanisms if available */}
+          {activeNode.mechanismSteps && activeNode.mechanismSteps.length > 0 && (
+            <div className="mb-3 p-2 rounded-lg bg-white/5 border border-white/10 text-xs">
+              <span className="text-[10px] font-black uppercase text-[#ff4c00] block mb-1">
+                ✦ Step-by-Step Mechanism:
+              </span>
+              <ul className="space-y-1">
+                {activeNode.mechanismSteps.map((step, sIdx) => (
+                  <li key={sIdx} className="flex items-start gap-1.5 text-[11px]">
+                    <span className="font-bold text-[#ff4c00]">{sIdx + 1}.</span>
+                    <BiDiText text={step} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/10">
+            <button
+              type="button"
+              onClick={handleAskAIAboutNode}
+              className="flex cursor-pointer items-center gap-1.5 rounded-full border border-[#0f0e10] bg-[#ff4c00] px-3 py-1 text-[11px] font-black text-[#0f0e10] shadow-xs hover:bg-[#ff4c00]/80"
+            >
+              <MessageSquare className="size-3" />
+              <span>Explain in AI Chat</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleQuizAboutNode}
+              className="flex cursor-pointer items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-bold text-white hover:bg-white/20"
+            >
+              <HelpCircle className="size-3 text-amber-400" />
+              <span>Test in QBank</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePinActiveNode}
+              className="flex cursor-pointer items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/20"
+            >
+              {pinnedSuccess ? <Check className="size-3 text-emerald-400" /> : <BookmarkPlus className="size-3" />}
+              <span>{pinnedSuccess ? "Pinned!" : "Pin to Vault"}</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

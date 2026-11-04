@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { StudyLanguage, joinStreamingTranscript, isHallucinatedNoiseTranscript } from "@/lib/language";
-import { DEFAULT_LIVE_VOICE } from "@/lib/voice-config";
+import { DEFAULT_LIVE_VOICE, VoiceBargeInMode } from "@/lib/voice-config";
 
 export interface LiveVoiceMessage {
   id: string;
@@ -26,6 +26,7 @@ export interface UseLiveVoiceOptions {
   authoritativeReferences?: any[];
   language?: StudyLanguage;
   voiceName?: string;
+  bargeInMode?: VoiceBargeInMode;
   onVisualTrigger?: (event: VisualTriggerEvent) => void;
 }
 
@@ -45,10 +46,12 @@ export function useLiveVoice({
   authoritativeReferences = [],
   language = "en",
   voiceName = DEFAULT_LIVE_VOICE,
+  bargeInMode: initialBargeInMode = "smart",
   onVisualTrigger,
 }: UseLiveVoiceOptions) {
   const [status, setStatus] = useState<LiveVoiceStatus>("disconnected");
   const [isMuted, setIsMuted] = useState(false);
+  const [bargeInMode, setBargeInMode] = useState<VoiceBargeInMode>(initialBargeInMode);
   const [messages, setMessages] = useState<LiveVoiceMessage[]>([]);
   const [currentInputTranscript, setCurrentInputTranscript] = useState("");
   const [currentOutputTranscript, setCurrentOutputTranscript] = useState("");
@@ -66,6 +69,7 @@ export function useLiveVoice({
   const silentGainRef = useRef<GainNode | null>(null);
 
   const statusRef = useRef<LiveVoiceStatus>("disconnected");
+  const bargeInModeRef = useRef<VoiceBargeInMode>(bargeInMode);
   const inputLevelRef = useRef(0);
   const outputLevelRef = useRef(0);
   const isMutedRef = useRef(false);
@@ -80,6 +84,10 @@ export function useLiveVoice({
   const resumptionHandleRef = useRef<string | null>(null);
   const ignoreModelAudioRef = useRef<boolean>(false);
   const isResumingRef = useRef<boolean>(false);
+  const speechStreakRef = useRef<number>(0);
+  const rawInputLevelRef = useRef<number>(0);
+  // Adaptive Ambient Noise Floor Tracker (exponential moving average of resting room acoustics)
+  const ambientNoiseFloorRef = useRef<number>(0.02);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -88,6 +96,10 @@ export function useLiveVoice({
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
+
+  useEffect(() => {
+    bargeInModeRef.current = bargeInMode;
+  }, [bargeInMode]);
 
   useEffect(() => {
     isMutedRef.current = isMuted;
@@ -153,9 +165,47 @@ export function useLiveVoice({
       outputAudioCtxRef.current = null;
     }
 
+    ambientNoiseFloorRef.current = 0.02;
+    speechStreakRef.current = 0;
+    rawInputLevelRef.current = 0;
     setInputLevel(0);
     setOutputLevel(0);
     isSetupCompleteRef.current = false;
+  }, []);
+
+  // Explicit user or deliberate auto barge-in interruption handler
+  const interrupt = useCallback(() => {
+    if (statusRef.current === "mentor_speaking") {
+      // 1. Flush player output audio worklet immediately to silence speakers
+      if (playerNodeRef.current) {
+        playerNodeRef.current.port.postMessage({ command: "flush" });
+      }
+      ignoreModelAudioRef.current = true;
+      outputLevelRef.current = 0;
+      setOutputLevel(0);
+
+      // 2. Commit spoken mentor fragment to transcript history
+      const interruptedMentorText = outputTranscriptAccRef.current.trim();
+      outputTranscriptAccRef.current = "";
+      setCurrentOutputTranscript("");
+
+      if (interruptedMentorText) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `mentor-interrupted-${Date.now()}`,
+            role: "mentor",
+            text: interruptedMentorText,
+            time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            interrupted: true,
+          },
+        ]);
+      }
+
+      speechStreakRef.current = 0;
+      statusRef.current = "listening";
+      setStatus("listening");
+    }
   }, []);
 
   const disconnect = useCallback(() => {
@@ -173,7 +223,7 @@ export function useLiveVoice({
     }
   }, [cleanupAudio]);
 
-  const sendRealtimeAudio = useCallback((pcmBuffer: ArrayBuffer) => {
+  const sendRealtimeAudio = useCallback((pcmBuffer: ArrayBuffer, chunkRms?: number) => {
     if (
       isMutedRef.current ||
       !isSetupCompleteRef.current ||
@@ -183,12 +233,42 @@ export function useLiveVoice({
       return;
     }
 
-    // Acoustic Echo Gate:
-    // If the mentor is actively speaking and the user's mic input is below the genuine speech threshold (< 0.13),
-    // zero out the audio chunk to prevent faint laptop speaker bleed from triggering ASR foreign hallucinations.
+    // Adaptive Vocal Focus & Studio Noise Suppressor Gate:
     let bufferToSend = pcmBuffer;
-    if (statusRef.current === "mentor_speaking" && inputLevelRef.current < 0.13) {
-      bufferToSend = new ArrayBuffer(pcmBuffer.byteLength);
+    const mode = bargeInModeRef.current;
+    const currentEnergy = typeof chunkRms === "number" ? chunkRms : rawInputLevelRef.current;
+    const noiseFloor = ambientNoiseFloorRef.current;
+
+    // 1. While the mentor is actively speaking:
+    if (statusRef.current === "mentor_speaking") {
+      if (mode === "shield") {
+        // NOISE SHIELD MODE: Send 100% pure silence (zeros) to Gemini Live while mentor speaks.
+        // Server-side VAD receives 0 amplitude and will NEVER trigger sc.interrupted!
+        // The mentor speaks smoothly and completely without any unwanted cuts.
+        bufferToSend = new ArrayBuffer(pcmBuffer.byteLength);
+      } else if (mode === "smart") {
+        // SMART VOCAL FOCUS:
+        // Only un-gate if the user has sustained loud, deliberate speech directly into the mic
+        // (speechStreak >= 12 frames ~240ms) AND energy beats both ambient noise and laptop speaker bleed.
+        const speakerDuck = outputLevelRef.current * 1.5;
+        const requiredThreshold = Math.max(0.18, noiseFloor * 2.8, speakerDuck + 0.12);
+        if (speechStreakRef.current < 12 || currentEnergy < requiredThreshold) {
+          bufferToSend = new ArrayBuffer(pcmBuffer.byteLength);
+        }
+      } else {
+        // SENSITIVE MODE (Quiet study room / Headset):
+        const sensitiveThreshold = Math.max(0.08, noiseFloor * 2.0);
+        if (speechStreakRef.current < 5 || currentEnergy < sensitiveThreshold) {
+          bufferToSend = new ArrayBuffer(pcmBuffer.byteLength);
+        }
+      }
+    } else if (statusRef.current === "listening") {
+      // 2. While waiting for the student to speak:
+      // Filter out low-level room noise, HVAC hum, and mic hiss when the user is silent.
+      const listeningGate = Math.max(0.035, noiseFloor * 1.6);
+      if (currentEnergy < listeningGate && speechStreakRef.current === 0) {
+        bufferToSend = new ArrayBuffer(pcmBuffer.byteLength);
+      }
     }
 
     const base64Chunk = arrayBufferToBase64(bufferToSend);
@@ -274,13 +354,13 @@ export function useLiveVoice({
 
         lastReportedPageRef.current = pageNumber;
 
-        // 2. Request microphone stream first (respects hardware sample rate)
+        // 2. Request microphone stream with voice-isolation audio constraints
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             channelCount: 1,
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true },
           },
         });
         mediaStreamRef.current = stream;
@@ -313,13 +393,29 @@ export function useLiveVoice({
           }
         };
 
+        // 5. Studio Vocal Bandpass Equalizer (85Hz – 4200Hz)
+        // Highpass filter cuts desk knocks, floor thumps, HVAC rumble, and deep handling noise (<85Hz)
+        const highpassFilter = inputCtx.createBiquadFilter();
+        highpassFilter.type = "highpass";
+        highpassFilter.frequency.value = 85;
+        highpassFilter.Q.value = 0.7;
+
+        // Lowpass filter cuts keyboard clatter, mouse clicks, high-frequency coil whine, and hiss (>4200Hz)
+        const lowpassFilter = inputCtx.createBiquadFilter();
+        lowpassFilter.type = "lowpass";
+        lowpassFilter.frequency.value = 4200;
+        lowpassFilter.Q.value = 0.7;
+
         // Recorder worklet pipeline
         const micSource = inputCtx.createMediaStreamSource(stream);
         const recorderNode = new AudioWorkletNode(inputCtx, "pcm-recorder-processor");
         const silentGain = inputCtx.createGain();
         silentGain.gain.value = 0; // Completely muted sink to ensure Chromium pulls audio continually
 
-        micSource.connect(recorderNode);
+        // Connect chain: micSource -> highpass -> lowpass -> recorderNode -> silentGain -> destination
+        micSource.connect(highpassFilter);
+        highpassFilter.connect(lowpassFilter);
+        lowpassFilter.connect(recorderNode);
         recorderNode.connect(silentGain);
         silentGain.connect(inputCtx.destination);
 
@@ -329,54 +425,76 @@ export function useLiveVoice({
         // Listen for recorder worklet messages (live mic RMS level + PCM audio chunks)
         recorderNode.port.onmessage = (event) => {
           if (event.data?.type === "level") {
-            const rms = event.data.rms || 0;
-            inputLevelRef.current = rms;
-            setInputLevel(rms);
+            const visualRms = event.data.rms || 0;
+            const physicalRms = typeof event.data.rawRms === "number" ? event.data.rawRms : (visualRms / 2.5);
+            inputLevelRef.current = visualRms;
+            rawInputLevelRef.current = physicalRms;
+            setInputLevel(visualRms);
 
-            // Instant Sub-20ms Local Barge-In Detection:
-            // When the mentor is speaking and the student speaks into the mic (RMS > 0.16)
-            if (statusRef.current === "mentor_speaking" && rms > 0.16) {
-              if (playerNodeRef.current) {
-                playerNodeRef.current.port.postMessage({ command: "flush" });
+            // 1. Dynamic Ambient Noise Floor Tracking (Exponential Moving Average):
+            if (physicalRms < ambientNoiseFloorRef.current * 1.4) {
+              ambientNoiseFloorRef.current = ambientNoiseFloorRef.current * 0.98 + physicalRms * 0.02;
+            } else if (physicalRms < 0.12) {
+              ambientNoiseFloorRef.current = ambientNoiseFloorRef.current * 0.995 + physicalRms * 0.005;
+            }
+            ambientNoiseFloorRef.current = Math.max(0.012, Math.min(0.12, ambientNoiseFloorRef.current));
+            const noiseFloor = ambientNoiseFloorRef.current;
+            const mode = bargeInModeRef.current;
+
+            // 2. Determine if audio energy is genuine deliberate voice:
+            let isVocalEnergy = false;
+            let streakThreshold = 12;
+
+            if (statusRef.current === "mentor_speaking") {
+              if (mode === "shield") {
+                // In Shield Mode: Auto voice barge-in is disabled to guarantee zero accidental interrupts
+                isVocalEnergy = false;
+              } else if (mode === "smart") {
+                const speakerDuck = outputLevelRef.current * 1.5;
+                const requiredThreshold = Math.max(0.18, noiseFloor * 2.8, speakerDuck + 0.12);
+                isVocalEnergy = physicalRms > requiredThreshold;
+                streakThreshold = 12; // ~240ms of sustained loud human speech directly into mic
+              } else {
+                // sensitive mode (Headset / Quiet room)
+                const sensitiveThreshold = Math.max(0.08, noiseFloor * 2.0);
+                isVocalEnergy = physicalRms > sensitiveThreshold;
+                streakThreshold = 5; // ~100ms
               }
-              ignoreModelAudioRef.current = true;
-              outputLevelRef.current = 0;
-              setOutputLevel(0);
+            } else {
+              // Status is "listening" or others
+              const listeningThreshold = Math.max(0.045, noiseFloor * 1.6);
+              isVocalEnergy = physicalRms > listeningThreshold;
+            }
 
-              const interruptedMentorText = outputTranscriptAccRef.current.trim();
-              outputTranscriptAccRef.current = "";
-              setCurrentOutputTranscript("");
+            if (isVocalEnergy) {
+              speechStreakRef.current = Math.min(25, speechStreakRef.current + 1);
+            } else {
+              // Rapid decay when audio drops below vocal threshold
+              speechStreakRef.current = Math.max(0, speechStreakRef.current - 2);
+            }
 
-              if (interruptedMentorText) {
-                setMessages((prev) => [
-                  ...prev,
-                  {
-                    id: `mentor-interrupted-${Date.now()}`,
-                    role: "mentor",
-                    text: interruptedMentorText,
-                    time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                    interrupted: true,
-                  },
-                ]);
-              }
-
-              statusRef.current = "listening";
-              setStatus("listening");
+            // 3. High-Precision Deliberate Barge-In Execution:
+            if (
+              statusRef.current === "mentor_speaking" &&
+              mode !== "shield" &&
+              speechStreakRef.current >= streakThreshold
+            ) {
+              interrupt();
             }
           } else if (event.data?.type === "audio") {
-            sendRealtimeAudio(event.data.buffer);
+            sendRealtimeAudio(event.data.buffer, event.data.chunkRms);
           } else if (event.data instanceof ArrayBuffer) {
             sendRealtimeAudio(event.data);
           }
         };
 
-        // 5. Connect to Gemini Live WebSocket
+        // 6. Connect to Gemini Live WebSocket
         const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${token}`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
         ws.onopen = () => {
-          // Send setup frame with VAD tuning and resumption support
+          // Send setup frame with high-fidelity VAD tuning and resumption support
           const setupFrame = {
             setup: {
               model: "models/gemini-3.8-live",
@@ -392,10 +510,10 @@ export function useLiveVoice({
               },
               realtimeInputConfig: {
                 automaticActivityDetection: {
-                  startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
+                  startOfSpeechSensitivity: "START_SENSITIVITY_LOW",
                   endOfSpeechSensitivity: "END_SENSITIVITY_LOW",
-                  prefixPaddingMs: 120,
-                  silenceDurationMs: 600,
+                  prefixPaddingMs: 250,
+                  silenceDurationMs: 900,
                 },
               },
               sessionResumption: resumptionHandleRef.current ? { handle: resumptionHandleRef.current } : {},
@@ -876,6 +994,9 @@ export function useLiveVoice({
     connect,
     disconnect,
     resetSession,
+    interrupt,
+    bargeInMode,
+    setBargeInMode,
     sendTextMessage,
     updatePageContext,
     messages,

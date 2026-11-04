@@ -330,15 +330,13 @@ export async function retrieveEnrichedContext(
         // Do not inject random heart sound / S2 splitting distractors if the active topic is different
       }
 
-      // Add matching QBank vignette
+      // Add matching QBank vignette only if strictly relevant to active topic
       if (isHeartFailure) {
         const hfQ = CLINICAL_QBANK_REPOSITORY.find(q => q.topic.includes("Mitral Regurgitation Post-Myocardial") || q.topic.includes("Heart Failure"));
         if (hfQ) matchingQBank.push(hfQ);
       } else if (isHeartSounds) {
         const s2Q = CLINICAL_QBANK_REPOSITORY.find(q => q.topic.includes("S2"));
         if (s2Q) matchingQBank.push(s2Q);
-      } else {
-        matchingQBank.push(CLINICAL_QBANK_REPOSITORY[0]);
       }
       break;
     }
@@ -585,9 +583,12 @@ export async function retrieveEnrichedContext(
     .map((m) => `[MNEMONIC]: ${m.mnemonic} (${m.expansion})\nRule: ${m.rule}`)
     .join("\n\n");
 
-  const groundingSnippet = `=== BACKGROUND AUTHORITATIVE REFERENCE CORPUS (${domain.toUpperCase()}) ===\n${refSnippets}\n\n=== RELEVANT QBANK VIGNETTES ===\n${qbankSnippets}${
-    mnemonicsSnippet ? `\n\n=== HIGH-YIELD MNEMONICS ===\n${mnemonicsSnippet}` : ""
-  }`;
+  const groundingSnippet =
+    matchingRefs.length > 0 || matchingQBank.length > 0 || matchingMnemonics.length > 0
+      ? `=== CANONICAL REFERENCE ENRICHMENT (${domain.toUpperCase()}) ===\n(Use these gold-standard references strictly to enrich and explain concepts found in the user's primary study source, maintaining absolute fidelity to the source)\n${refSnippets}${
+          qbankSnippets ? `\n\n=== RELEVANT QBANK VIGNETTES ===\n${qbankSnippets}` : ""
+        }${mnemonicsSnippet ? `\n\n=== HIGH-YIELD MNEMONICS ===\n${mnemonicsSnippet}` : ""}`
+      : "";
 
   return {
     focalTopic,

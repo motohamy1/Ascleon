@@ -67,7 +67,10 @@ export default function BookSpine({
         )}
       >
         <div className="w-full flex items-center justify-between text-[10px] text-[#C4B5A5] font-mono">
-          <span className="truncate max-w-[100px]">{book.topic || "General"}</span>
+          <span className="truncate max-w-[90px]">{book.topic || "General"}</span>
+          <span className="text-[9px] uppercase font-bold text-[#ff4c00] bg-[#ff4c00]/15 px-1 rounded">
+            {book.sourceCategory?.replace('_', ' ') || 'textbook'}
+          </span>
           <span className="flex items-center gap-0.5">
             <Clock className="w-2.5 h-2.5" />
             {readingTime}m

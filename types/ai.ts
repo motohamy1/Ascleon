@@ -28,6 +28,14 @@ export interface AgentContext {
   selectedImage?: string;
   language?: "en" | "ar" | "mixed";
   history?: { sender: "user" | "ai"; text: string }[];
+  studyScope?: {
+    type: "page" | "range" | "topic";
+    startPage: number;
+    endPage: number;
+    topicTitle?: string;
+    topicId?: string;
+  };
+  topicMap?: any;
 }
 
 export interface AgentToolResult {
@@ -47,4 +55,11 @@ export interface AgentRunOutput {
   authoritativeReferences?: ReferenceResource[];
   qbankVignettes?: QBankVignette[];
   mnemonics?: HighYieldMnemonic[];
+  topicLocation?: {
+    title: string;
+    startPage: number;
+    endPage: number;
+    isAmbiguous?: boolean;
+    candidates?: Array<{ title: string; startPage: number; endPage: number }>;
+  };
 }

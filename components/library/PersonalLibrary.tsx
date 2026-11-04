@@ -59,6 +59,26 @@ export default function PersonalLibrary({
     [books],
   );
 
+  // Compute category counts for the 5 type-safe categories
+  const categoryCounts = useMemo(() => {
+    const counts = {
+      textbook: 0,
+      lecture_notes: 0,
+      clinical_sheet: 0,
+      guideline_paper: 0,
+      exam_review: 0,
+    };
+    books.forEach((b) => {
+      const cat = (b.sourceCategory as keyof typeof counts) || "textbook";
+      if (counts[cat] !== undefined) {
+        counts[cat]++;
+      } else {
+        counts.textbook++;
+      }
+    });
+    return counts;
+  }, [books]);
+
   // Filter books based on active filter
   const filteredBooks = useMemo(() => {
     return books.filter((book) => {
@@ -68,6 +88,19 @@ export default function PersonalLibrary({
         return book.readingStatus === "in_progress";
       if (activeFilter === "quick_reads")
         return getBookReadingTime(book) <= 15;
+
+      // Type-safe source category filters
+      if (activeFilter === "cat_textbook")
+        return (book.sourceCategory || "textbook") === "textbook";
+      if (activeFilter === "cat_lecture_notes")
+        return book.sourceCategory === "lecture_notes";
+      if (activeFilter === "cat_clinical_sheet")
+        return book.sourceCategory === "clinical_sheet";
+      if (activeFilter === "cat_guideline_paper")
+        return book.sourceCategory === "guideline_paper";
+      if (activeFilter === "cat_exam_review")
+        return book.sourceCategory === "exam_review";
+
       return (book.topic?.trim() || "General") === activeFilter;
     });
   }, [books, activeFilter]);
@@ -93,6 +126,7 @@ export default function PersonalLibrary({
         favoritesCount={favoritesCount}
         inProgressCount={inProgressCount}
         quickReadsCount={quickReadsCount}
+        categoryCounts={categoryCounts}
       />
 
       {/* 3. Main Views: Shelf or Grid */}
@@ -119,6 +153,7 @@ export default function PersonalLibrary({
                 readingTimeMinutes={book.readingTimeMinutes}
                 isFavorite={book.isFavorite}
                 color={book.color}
+                sourceCategory={book.sourceCategory}
                 onDelete={() => setSelectedBook(book)}
               />
             ))}

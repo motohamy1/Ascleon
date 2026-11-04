@@ -10,6 +10,8 @@ import {
   MindMapNode,
 } from "@/types/morph";
 import { ConceptMapCanvas } from "./ConceptMapCanvas";
+import InteractiveJourneyStage from "./InteractiveJourneyStage";
+import { BiDiText } from "@/components/ui/BiDiText";
 import {
   Sparkles,
   ArrowRight,
@@ -55,8 +57,8 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
   onPinNode,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    "all" | "cards" | "diagram" | "anatomy" | "matrix" | "simulator"
-  >("all");
+    "journey" | "all" | "cards" | "diagram" | "anatomy" | "matrix" | "simulator"
+  >(artifact.journey ? "journey" : "all");
   const [activeSimulatorPreset, setActiveSimulatorPreset] =
     useState<string>("clean");
   const [selectedCard, setSelectedCard] = useState<RoadmapCardItem | null>(null);
@@ -210,6 +212,22 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
 
         {/* VIEW SELECTOR CHIPS */}
         <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-white/10">
+          {artifact.journey && (
+            <button
+              type="button"
+              onClick={() => setActiveTab("journey")}
+              className={cn(
+                "flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-black transition-all",
+                activeTab === "journey"
+                  ? "bg-[#ff4c00] text-[#0f0e10] shadow-sm"
+                  : "bg-white/10 text-[#f6d7a1] hover:bg-white/20"
+              )}
+            >
+              <Sparkles className="size-3.5 text-[#ff4c00]" />
+              <span>Living Journey</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => setActiveTab("all")}
@@ -284,6 +302,17 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
           )}
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* 0. INTERACTIVE LIVING JOURNEY / WEBSITE                                   */}
+      {/* ========================================================================= */}
+      {artifact.journey && (activeTab === "journey" || activeTab === "all") && (
+        <InteractiveJourneyStage
+          journey={artifact.journey}
+          onAskAI={onAskAI}
+          onNavigateToPage={(p) => onNavigateSegment?.(p - 1)}
+        />
+      )}
 
       {/* ========================================================================= */}
       {/* 1. CONCEPT MIND MAP CANVAS (GEMINI NOTEBOOKLM PRINCIPLES)                */}
@@ -596,21 +625,49 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                     </div>
 
                     <h4 className="text-sm font-black leading-snug text-[color:var(--ink)] break-words">
-                      {card.title}
+                      <BiDiText text={card.title} />
                     </h4>
 
-                    <p className={cn("text-xs font-semibold leading-relaxed break-words", subStyle)}>
-                      {card.subtitle}
-                    </p>
+                    <div className={cn("text-xs font-semibold leading-relaxed break-words", subStyle)}>
+                      <BiDiText text={card.subtitle} />
+                    </div>
 
                     <ul className={cn("flex flex-col gap-1.5 pt-2 border-t text-[11px] font-medium text-[color:var(--ink)]", dividerStyle)}>
                       {card.bulletPoints.map((pt, idx) => (
                         <li key={idx} className="flex items-start gap-1.5 leading-relaxed">
                           <span className={cn("shrink-0 font-black", bulletBullet)}>›</span>
-                          <span className="break-words">{pt}</span>
+                          <span className="break-words">
+                            <BiDiText text={pt} />
+                          </span>
                         </li>
                       ))}
                     </ul>
+
+                    {/* Expanded Mechanism & Significance on Selection */}
+                    {isSelected && (
+                      <div className="mt-2.5 pt-2.5 border-t border-[color:var(--ink)]/20 text-[11px] flex flex-col gap-2 animate-in fade-in duration-150">
+                        {card.mechanismSteps && card.mechanismSteps.length > 0 && (
+                          <div className="p-2 rounded-lg bg-black/10">
+                            <span className="text-[10px] font-black uppercase text-[color:var(--ink)] block mb-1">
+                              ✦ Mechanistic Progression:
+                            </span>
+                            <ul className="space-y-1">
+                              {card.mechanismSteps.map((step, sIdx) => (
+                                <li key={sIdx} className="flex items-start gap-1">
+                                  <span className="font-bold text-[color:var(--ink)]">{sIdx + 1}.</span>
+                                  <BiDiText text={step} />
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {card.clinicalSignificance && (
+                          <div className="text-[10.5px] italic text-[color:var(--ink)]/90">
+                            <strong>Significance:</strong> <BiDiText text={card.clinicalSignificance} />
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {card.contextLink && (

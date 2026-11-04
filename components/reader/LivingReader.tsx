@@ -54,6 +54,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VoiceLanguage, DEFAULT_VOICE_LANGUAGE } from "@/lib/constants";
+import StudyScopeBar, { StudyScope } from "./StudyScopeBar";
 
 interface LivingReaderProps {
   book: IBook;
@@ -73,8 +74,15 @@ interface ChatMessage {
   model?: string;
   toolsUsed?: string[];
   citations?: string[];
-  authoritativeReferences?: ReferenceResource[];
   imageUrl?: string;
+  topicLocation?: {
+    title: string;
+    startPage: number;
+    endPage: number;
+    isAmbiguous?: boolean;
+    candidates?: Array<{ title: string; startPage: number; endPage: number }>;
+  };
+  authoritativeReferences?: ReferenceResource[];
 }
 
 const CHAT_SUGGESTION_CHIPS = [
@@ -119,6 +127,13 @@ export default function LivingReader({
     url: string;
     pageNumber: number;
   } | null>(null);
+
+  // Universal Multi-Page / Topic Study Scope State
+  const [studyScope, setStudyScope] = useState<StudyScope>(() => ({
+    type: "page",
+    startPage: 1,
+    endPage: 1,
+  }));
 
   // Right Panel: All Controls & Study Studio (Default: AI Chat)
   const [activeIntent, setActiveIntent] = useState<StudyIntent>("chat");
@@ -336,6 +351,7 @@ export default function LivingReader({
           snippedDiagram: diagramUrl || snippedDiagram?.url || null,
           language: studyLanguage,
           forceRefresh: Boolean(forceRefresh),
+          studyScope,
         }),
       });
 
@@ -365,9 +381,10 @@ export default function LivingReader({
   // Dynamic QBank generator with per-page caching
   const loadDynamicQBank = useCallback(async (diagramUrl?: string, forceRefresh = false) => {
     const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
-    const cacheKey = `${activePage}_${studyLanguage}`;
+    const scopePart = studyScope.type === "page" ? activePage : `${studyScope.type}_${studyScope.startPage}_${studyScope.endPage}`;
+    const cacheKey = `${scopePart}_${studyLanguage}`;
 
-    // Instant cache hit: if QBank was already generated for this page, load instantly (0ms)
+    // Instant cache hit: if QBank was already generated for this page/scope, load instantly (0ms)
     if (!forceRefresh && !diagramUrl && !selectedText && qbankCache[cacheKey]?.length) {
       setDynamicQBankList(qbankCache[cacheKey]);
       setQuizSubmitted(false);
@@ -386,12 +403,14 @@ export default function LivingReader({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          bookId: book._id,
           bookTitle: book.title,
           pageNumber: activePage,
           pageText: activeText,
           selectedText: selectedText || undefined,
           snippedDiagram: diagramUrl || snippedDiagram?.url || null,
           language: studyLanguage,
+          studyScope,
         }),
       });
       if (res.ok) {
@@ -407,14 +426,15 @@ export default function LivingReader({
     } finally {
       setIsQBankLoading(false);
     }
-  }, [book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, snippedDiagram, qbankCache, studyLanguage]);
+  }, [book._id, book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, snippedDiagram, qbankCache, studyLanguage, studyScope]);
 
   // Dynamic Summary generator with per-page caching
   const loadDynamicSummary = useCallback(async (forceRefresh = false) => {
     const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
-    const cacheKey = `${activePage}_${studyLanguage}`;
+    const scopePart = studyScope.type === "page" ? activePage : `${studyScope.type}_${studyScope.startPage}_${studyScope.endPage}`;
+    const cacheKey = `${scopePart}_${studyLanguage}`;
 
-    // Instant cache hit: if summary was already generated for this page, load instantly (0ms)
+    // Instant cache hit: if summary was already generated for this page/scope, load instantly (0ms)
     if (!forceRefresh && !selectedText && summaryCache[cacheKey]) {
       setDynamicSummary(summaryCache[cacheKey]);
       return;
@@ -428,11 +448,13 @@ export default function LivingReader({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          bookId: book._id,
           bookTitle: book.title,
           pageNumber: activePage,
           pageText: activeText,
           selectedText: selectedText || undefined,
           language: studyLanguage,
+          studyScope,
         }),
       });
       if (res.ok) {
@@ -447,7 +469,7 @@ export default function LivingReader({
     } finally {
       setIsSummaryLoading(false);
     }
-  }, [book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, summaryCache, studyLanguage]);
+  }, [book._id, book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, summaryCache, studyLanguage, studyScope]);
 
   // Pin active selection into Study Vault (background storage)
   const handlePinSelectionToVault = useCallback(
@@ -584,6 +606,8 @@ export default function LivingReader({
           selectedImage: imagePayload || snippedDiagram?.url || undefined,
           language: studyLanguage,
           history: historyPayload,
+          studyScope,
+          topicMap: book.blueprint?.topicMap,
         }),
       });
 
@@ -620,6 +644,7 @@ export default function LivingReader({
           toolsUsed: data.toolsUsed,
           citations: data.citations,
           authoritativeReferences: data.authoritativeReferences,
+          topicLocation: data.topicLocation,
         },
       ]);
     } catch (e) {
@@ -1426,6 +1451,26 @@ export default function LivingReader({
               </div>
             )}
 
+            {/* Universal Study Scope Bar (Single Page, Multi-Page Range, or Complete Topic) */}
+            <StudyScopeBar
+              currentPage={book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
+              totalPages={book.fileURL ? totalPdfPages : segments.length}
+              topics={book.blueprint?.topicMap?.topics || []}
+              currentScope={studyScope}
+              onScopeChange={(newScope) => {
+                setStudyScope(newScope);
+              }}
+              onNavigateToPage={(p) => {
+                if (book.fileURL) {
+                  setActivePdfPage(p);
+                } else {
+                  const matchedIdx = segments.findIndex((s) => s.pageNumber === p);
+                  if (matchedIdx !== -1) setCurrentIdx(matchedIdx);
+                  else setCurrentIdx(Math.min(segments.length - 1, p - 1));
+                }
+              }}
+            />
+
             {/* STUDIO SWITCHER TABS (4 CORE TABS: AI Chat, Morph, Voice, Q banks) */}
             <div className="grid shrink-0 grid-cols-4 gap-1 border-b border-white/10 bg-black/40 p-1.5 text-[11px]">
               <button
@@ -1674,40 +1719,6 @@ export default function LivingReader({
                     )}
                   </div>
 
-                  {/* Preset Action Bar: Executive Summary & Core Prompts */}
-                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                    <button
-                      type="button"
-                      disabled={isAiLoading}
-                      onClick={() => {
-                        const pageNum = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
-                        const prompt = `Generate a high-yield executive summary, core mechanism breakdown, and clinical exam pearls for Page ${pageNum} of "${book.title}".`;
-                        triggerDirectAIQuery(prompt);
-                      }}
-                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[color:var(--orange)] bg-[color:var(--orange)]/15 px-3 py-1 text-[11px] font-black text-[color:var(--orange)] hover:bg-[color:var(--orange)]/25 transition-all shadow-xs"
-                      title="Run executive summary prompt for the active page"
-                    >
-                      <FileText className="size-3 text-[color:var(--orange)]" />
-                      <span>Executive Page Summary</span>
-                    </button>
-
-                    {CHAT_SUGGESTION_CHIPS.map((chip) => (
-                      <button
-                        key={chip}
-                        type="button"
-                        disabled={isAiLoading}
-                        onClick={() => {
-                          if (isAiLoading) return;
-                          setActiveIntent("chat");
-                          triggerDirectAIQuery(chip);
-                        }}
-                        className="cursor-pointer rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-[color:var(--cream)]/80 transition-all hover:border-[color:var(--orange)]/60 hover:bg-[color:var(--orange)]/15 hover:text-[color:var(--cream)] disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {chip}
-                      </button>
-                    ))}
-                  </div>
-
                   {/* Messages Feed */}
                   <div className="flex flex-col gap-3">
                     {messages.map((m, idx) => (
@@ -1783,14 +1794,136 @@ export default function LivingReader({
                             ))}
                           </div>
                         )}
+
+                        {/* Topic Disambiguation Card (when AI detects multiple interconnected topics) */}
+                        {m.topicLocation?.isAmbiguous && m.topicLocation.candidates && m.topicLocation.candidates.length > 0 && (
+                          <div className="mt-2.5 rounded-xl border-2 border-[color:var(--ink)] bg-[#fbf7f0] p-3 text-[color:var(--ink)] shadow-xs">
+                            <div className="flex items-center gap-1.5 font-black text-[11px] text-[#ff4c00]">
+                              <MapPin className="size-3.5 text-[#ff4c00]" />
+                              <span>Clarify Which Topic to Study:</span>
+                            </div>
+                            <p className="mt-1 text-[10.5px] text-[color:var(--ink)]/80 leading-snug">
+                              This subject connects across several sections in the study source. Which area should we focus on?
+                            </p>
+                            <div className="mt-2 flex flex-col gap-1.5">
+                              {m.topicLocation.candidates.map((cand, ci) => (
+                                <button
+                                  key={ci}
+                                  type="button"
+                                  onClick={() => {
+                                    setStudyScope({
+                                      type: "topic",
+                                      topicTitle: cand.title,
+                                      startPage: cand.startPage,
+                                      endPage: cand.endPage,
+                                    });
+                                    if (book.fileURL) {
+                                      setActivePdfPage(cand.startPage);
+                                    } else {
+                                      const sIdx = segments.findIndex((s) => s.pageNumber === cand.startPage);
+                                      if (sIdx >= 0) setCurrentIdx(sIdx);
+                                    }
+                                    triggerDirectAIQuery(`Explain "${cand.title}" (Pages ${cand.startPage}–${cand.endPage}) thoroughly according to the study source.`);
+                                  }}
+                                  className="flex items-center justify-between rounded-lg border border-[color:var(--ink)]/30 bg-white px-2.5 py-1.5 text-[10.5px] font-bold text-[color:var(--ink)] hover:bg-[#ff4c00]/15 hover:border-[color:var(--orange)] transition-colors cursor-pointer text-left shadow-xs"
+                                >
+                                  <span>{cand.title}</span>
+                                  <span className="font-mono text-[9.5px] bg-[#2e6f68]/15 text-[#2e6f68] px-1.5 py-0.5 rounded font-black">
+                                    pp. {cand.startPage}–{cand.endPage} →
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Direct Topic Navigation Banner (Single Identified Topic) */}
+                        {m.topicLocation && !m.topicLocation.isAmbiguous && (
+                          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[color:var(--ink)]/30 bg-[#2e6f68]/15 p-2.5 text-[11px] text-[color:var(--ink)]">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <BookOpen className="size-4 shrink-0 text-[#2e6f68]" />
+                              <div className="truncate">
+                                <span className="font-bold">Topic in Source: </span>
+                                <span className="font-semibold text-[color:var(--ink)]/90">{m.topicLocation.title}</span>
+                                <span className="ml-1 text-[10px] font-mono font-bold text-[#2e6f68]">
+                                  (Pages {m.topicLocation.startPage}–{m.topicLocation.endPage})
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (book.fileURL) {
+                                    setActivePdfPage(m.topicLocation!.startPage);
+                                  } else {
+                                    const sIdx = segments.findIndex((s) => s.pageNumber === m.topicLocation!.startPage);
+                                    if (sIdx >= 0) setCurrentIdx(sIdx);
+                                  }
+                                }}
+                                className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-[color:var(--ink)] bg-[#ff4c00] px-2.5 py-1 text-[10px] font-black text-[color:var(--ink)] hover:brightness-105 transition-all shadow-xs"
+                                title={`Navigate reader to Page ${m.topicLocation.startPage}`}
+                              >
+                                <span>Navigate to Page {m.topicLocation.startPage}</span>
+                                <span>→</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
+
                     {isAiLoading && (
                       <div className="flex items-center gap-2 rounded-xl border-2 border-[color:var(--ink)] bg-[#f6d7a1] p-3 text-xs font-bold text-[color:var(--ink)] shadow-chip">
                         <RefreshCw className="size-3.5 animate-spin text-[#ff4c00]" />
                         <span>Querying deep textbook corpus &amp; synthesizing grounded response...</span>
                       </div>
                     )}
+
+                    {/* Bottom Action Bar: Executive Summary & Core Prompts pinned right below latest response */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-white/10">
+                      <button
+                        type="button"
+                        disabled={isAiLoading}
+                        onClick={() => {
+                          const scopeLabel = studyScope.type === "topic" && studyScope.topicTitle
+                            ? `Topic "${studyScope.topicTitle}" (pp. ${studyScope.startPage}–${studyScope.endPage})`
+                            : studyScope.type === "range"
+                            ? `Pages ${studyScope.startPage}–${studyScope.endPage}`
+                            : `Page ${book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}`;
+                          const prompt = `Generate a high-yield executive summary, core mechanism breakdown, and clinical exam pearls for ${scopeLabel} of "${book.title}".`;
+                          triggerDirectAIQuery(prompt);
+                        }}
+                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[color:var(--orange)] bg-[color:var(--orange)]/15 px-3 py-1 text-[11px] font-black text-[color:var(--orange)] hover:bg-[color:var(--orange)]/25 transition-all shadow-xs"
+                        title="Run executive summary prompt for the active scope"
+                      >
+                        <FileText className="size-3 text-[color:var(--orange)]" />
+                        <span>
+                          {studyScope.type === "topic"
+                            ? "Executive Topic Summary"
+                            : studyScope.type === "range"
+                            ? "Executive Range Summary"
+                            : "Executive Page Summary"}
+                        </span>
+                      </button>
+
+                      {CHAT_SUGGESTION_CHIPS.map((chip) => (
+                        <button
+                          key={chip}
+                          type="button"
+                          disabled={isAiLoading}
+                          onClick={() => {
+                            if (isAiLoading) return;
+                            setActiveIntent("chat");
+                            triggerDirectAIQuery(chip);
+                          }}
+                          className="cursor-pointer rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-[color:var(--cream)]/80 transition-all hover:border-[color:var(--orange)]/60 hover:bg-[color:var(--orange)]/15 hover:text-[color:var(--cream)] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {chip}
+                        </button>
+                      ))}
+                    </div>
+
                     <div ref={chatEndRef} />
                   </div>
                 </div>

@@ -15,6 +15,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import { cn, parsePDFFile, withRetry } from "@/lib/utils";
+import { cachePdfBuffer } from "@/lib/storage/pdf-local-cache";
 import { uploadPdfWithProgress } from "@/lib/storage/client-upload";
 import {
   checkBookExists,
@@ -266,6 +267,11 @@ export default function DirectBookUpload({
           setStatusText("Creating your interactive study space...");
         }
 
+        // Cache raw PDF in IndexedDB immediately for instant <100ms load times
+        file.arrayBuffer().then((buf) => {
+          cachePdfBuffer(uploadPdfRes.url, buf);
+        }).catch(() => {});
+
         // Step 4: Create or retrieve book record
         let book = cp.createdBook;
         if (!book) {
@@ -283,6 +289,11 @@ export default function DirectBookUpload({
             totalSegments: parsedPDF.content.length,
             topic: digestRes?.topic || "General",
             summary: digestRes?.summary || "",
+            sourceCategory: digestRes?.sourceCategory || "textbook",
+            domain: digestRes?.domain,
+            subspecialty: digestRes?.subspecialty,
+            pedagogicalStyle: digestRes?.pedagogicalStyle,
+            ingestionStatus: "processing",
             blueprint: digestRes || {},
           });
 
@@ -347,6 +358,13 @@ export default function DirectBookUpload({
         setProgress(100);
         setStage("ready");
         setStatusText("Synthesis complete! Opening study studio...");
+
+        // Trigger whole-source background topic ingestion worker asynchronously
+        fetch("/api/books/ingest-background", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bookId: book._id }),
+        }).catch((e) => console.warn("Background ingestion trigger notice:", e));
 
         // Clear checkpoint on success
         checkpointRef.current = {};

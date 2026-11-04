@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
     const contentType = file.type || "application/pdf";
 
-    // 1. Try Cloudflare R2
+    // 1. Try Cloudflare R2 (Primary Storage - 100% Free, Zero Egress)
     try {
       const r2Result = await uploadToR2(buffer, cleanFilename, contentType);
       if (r2Result && r2Result.url) {
@@ -54,17 +54,35 @@ export async function POST(req: NextRequest) {
       throw new Error("No cloud storage provider configured or available.");
     }
 
-    const blob = await put(`books/${cleanFilename}`, buffer, {
-      access: "public",
-      contentType,
-      token,
-    });
+    // Attempt upload with private access compatible with private stores
+    let finalUrl = "";
+    let finalKey = "";
+
+    try {
+      const blob = await put(`books/${cleanFilename}`, buffer, {
+        access: "private",
+        contentType,
+        token,
+      });
+      // Route private blobs through local secure streaming proxy so reader gets 200 OK
+      finalUrl = `/api/storage/file?url=${encodeURIComponent(blob.url)}`;
+      finalKey = blob.pathname;
+    } catch (privErr) {
+      // If store happens to be public, try public fallback
+      const blob = await put(`books/${cleanFilename}`, buffer, {
+        access: "public",
+        contentType,
+        token,
+      });
+      finalUrl = blob.url;
+      finalKey = blob.pathname;
+    }
 
     return NextResponse.json({
       success: true,
       data: {
-        url: blob.url,
-        key: blob.pathname,
+        url: finalUrl,
+        key: finalKey,
         provider: "vercel-blob",
       },
     });

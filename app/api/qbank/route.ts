@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
+import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
+      bookId,
       bookTitle = "Study Material",
       pageNumber = 1,
       pageText = "",
@@ -13,9 +15,32 @@ export async function POST(req: NextRequest) {
       snippedDiagram = null,
       authoritativeReferences = [],
       language = "en",
+      studyScope,
     } = body;
 
-    const focalText = (selectedText || pageText || "").trim();
+    let focalText = (selectedText || pageText || "").trim();
+    let scopeLabel = `Page ${pageNumber}`;
+
+    if (bookId && studyScope && (studyScope.type === "range" || studyScope.type === "topic")) {
+      try {
+        const rangeRes = await getBookSegmentsByRange(
+          bookId,
+          studyScope.startPage,
+          studyScope.endPage
+        );
+        if (rangeRes.success && rangeRes.data && rangeRes.data.length > 0) {
+          focalText = rangeRes.data
+            .map((s) => `[Page ${s.pageNumber}]\n${s.content}`)
+            .join("\n\n");
+          scopeLabel = studyScope.type === "topic" && studyScope.topicTitle
+            ? `Topic "${studyScope.topicTitle}" (Pages ${studyScope.startPage}–${studyScope.endPage})`
+            : `Pages ${studyScope.startPage}–${studyScope.endPage}`;
+        }
+      } catch (err) {
+        console.warn("Could not fetch segments by range for QBank:", err);
+      }
+    }
+
     if (!focalText && !snippedDiagram) {
       return NextResponse.json({ error: "Missing text or diagram to generate questions" }, { status: 400 });
     }
@@ -25,11 +50,11 @@ export async function POST(req: NextRequest) {
       try {
         const ai = new GoogleGenAI({ apiKey });
         const prompt = `You are Ascleon's elite Question Bank (QBank) Examiner.
-Generate 2 high-yield, exam-grade multiple-choice vignette questions grounded strictly in Page ${pageNumber} of "${bookTitle}".
+Generate 2 high-yield, exam-grade multiple-choice vignette questions grounded strictly in ${scopeLabel} of "${bookTitle}".
 
 Passage Text:
 """
-${focalText.slice(0, 3000)}
+${focalText.slice(0, 4500)}
 """
 
 Task:
