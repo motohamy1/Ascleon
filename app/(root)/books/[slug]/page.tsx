@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getBookBySlug, getBookSegments, getInitialBookSegments } from "@/lib/actions/book.actions";
+import { getUserStudyProgress } from "@/lib/actions/study-progress.actions";
 import BookExperience from "@/components/reader/BookExperience";
 import { sampleBooks } from "@/lib/constants";
 import { IBook, IBookSegmentData } from "@/types";
@@ -14,7 +15,10 @@ export default async function BookDetailsPage({
   const { userId } = await auth();
 
   const { slug } = await params;
-  const result = await getBookBySlug(slug);
+  const [result, progressResult] = await Promise.all([
+    getBookBySlug(slug),
+    getUserStudyProgress(slug),
+  ]);
 
   let book: IBook | null =
     result.success && result.data ? (result.data as IBook) : null;
@@ -57,6 +61,7 @@ export default async function BookDetailsPage({
       book={book}
       segments={segments}
       isAuthenticated={Boolean(userId)}
+      initialProgress={progressResult?.data || null}
     />
   );
 }

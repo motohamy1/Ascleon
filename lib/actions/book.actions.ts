@@ -1,6 +1,6 @@
 "use server";
 
-import { CreateBook, ReadingStatus, TextSegment, IBookSegmentData } from "@/types";
+import { CreateBook, ReadingStatus, TextSegment, IBookSegmentData, SourceCategoryType } from "@/types";
 import { connectToDatabase } from "@/database/mongoose";
 import { escapeRegex, generateSlug, serializeData } from "@/lib/utils";
 import Book from "@/database/models/book.model";
@@ -533,6 +533,65 @@ export const deleteBook = async (bookId: string) => {
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to delete book",
+    };
+  }
+};
+
+// Update shelf placement and custom section of a book
+export const updateBookShelfPlacement = async (
+  bookId: string,
+  payload: {
+    sourceCategory?: SourceCategoryType;
+    topic?: string;
+    customSection?: string | null;
+  },
+) => {
+  try {
+    await connectToDatabase();
+
+    const { userId } = await auth();
+    if (!userId) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      return { success: true };
+    }
+
+    const book = await Book.findById(bookId);
+    if (!book) {
+      return { success: false, error: "Book not found" };
+    }
+
+    if (book.clerkId !== userId) {
+      return { success: false, error: "Unauthorized to modify this book" };
+    }
+
+    const updates: Record<string, unknown> = {};
+    if (payload.sourceCategory !== undefined) {
+      updates.sourceCategory = payload.sourceCategory;
+    }
+    if (payload.topic !== undefined) {
+      updates.topic = payload.topic;
+    }
+    if (payload.customSection !== undefined) {
+      updates.customSection = payload.customSection ? payload.customSection.trim() : null;
+    }
+
+    const updated = await Book.findByIdAndUpdate(bookId, updates, { new: true }).lean();
+
+    revalidatePath("/library");
+    revalidatePath("/");
+
+    return {
+      success: true,
+      data: serializeData(updated),
+    };
+  } catch (error) {
+    console.error("Error updating book shelf placement:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to update shelf placement",
     };
   }
 };

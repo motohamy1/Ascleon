@@ -55,11 +55,33 @@ import {
 import { cn } from "@/lib/utils";
 import { VoiceLanguage, DEFAULT_VOICE_LANGUAGE } from "@/lib/constants";
 import StudyScopeBar, { StudyScope } from "./StudyScopeBar";
+import { UserStudyProgressData, ReadingStatus } from "@/types";
+import {
+  saveUserStudyProgress,
+  resetUserStudyProgress,
+} from "@/lib/actions/study-progress.actions";
+import { toast } from "sonner";
 
 interface LivingReaderProps {
   book: IBook;
   initialSegments: IBookSegmentData[];
   onSwitchToVoice?: () => void;
+  initialProgress?: UserStudyProgressData | null;
+}
+
+function formatTimeAgo(dateInput: string | Date | undefined) {
+  if (!dateInput) return "recently";
+  const date = new Date(dateInput);
+  const now = new Date();
+  const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  if (diffDays === 1) return "yesterday";
+  return `${diffDays}d ago`;
 }
 
 type ThemeMode = "paper" | "ink";
@@ -95,6 +117,8 @@ const CHAT_SUGGESTION_CHIPS = [
 export default function LivingReader({
   book,
   initialSegments,
+  onSwitchToVoice,
+  initialProgress = null,
 }: LivingReaderProps) {
   // Navigation & Viewport State
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -105,11 +129,85 @@ export default function LivingReader({
   const [mobileActivePane, setMobileActivePane] = useState<"reader" | "studio">("reader");
   const [isLgScreen, setIsLgScreen] = useState(true);
 
+  // Session Continuation & Progress State
+  const [resumedSessionInfo, setResumedSessionInfo] = useState<UserStudyProgressData | null>(null);
+  const [showResumeSourceHud, setShowResumeSourceHud] = useState<boolean>(false);
+  const [showStudioResumeBanner, setShowStudioResumeBanner] = useState<boolean>(false);
+  const [showStartNewModal, setShowStartNewModal] = useState<boolean>(false);
+  const isRestoringRef = useRef<boolean>(true);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     const checkLg = () => setIsLgScreen(window.innerWidth >= 1024);
     checkLg();
     window.addEventListener("resize", checkLg);
     return () => window.removeEventListener("resize", checkLg);
+  }, []);
+
+  // Virtual Keyboard & Viewport Height Detection on Mobile / Tablet
+  const [keyboardHeight, setKeyboardHeight] = useState<number>(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+
+    const handleVisualViewportChange = () => {
+      const vv = window.visualViewport;
+      if (!vv) return;
+      // Calculate keyboard offset from window height and visible viewport
+      const offset = Math.max(0, window.innerHeight - vv.height - (vv.offsetTop || 0));
+      setKeyboardHeight(offset > 50 ? offset : 0);
+    };
+
+    const vv = window.visualViewport;
+    vv.addEventListener("resize", handleVisualViewportChange);
+    vv.addEventListener("scroll", handleVisualViewportChange);
+
+    return () => {
+      vv.removeEventListener("resize", handleVisualViewportChange);
+      vv.removeEventListener("scroll", handleVisualViewportChange);
+    };
+  }, []);
+
+  // Lock outer document scrolling so momentum scroll in studio never scrolls the window or reveals blank areas
+  useEffect(() => {
+    const origBodyOverflow = document.body.style.overflow;
+    const origHtmlOverflow = document.documentElement.style.overflow;
+    const origBodyHeight = document.body.style.height;
+    const origHtmlHeight = document.documentElement.style.height;
+
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.height = "100%";
+    document.documentElement.style.height = "100%";
+
+    return () => {
+      document.body.style.overflow = origBodyOverflow;
+      document.documentElement.style.overflow = origHtmlOverflow;
+      document.body.style.height = origBodyHeight;
+      document.documentElement.style.height = origHtmlHeight;
+    };
+  }, []);
+
+  const handleInputFocus = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
+    setTimeout(() => {
+      if (window.visualViewport) {
+        const kb = Math.max(0, window.innerHeight - window.visualViewport.height - (window.visualViewport.offsetTop || 0));
+        setKeyboardHeight(kb > 50 ? kb : 0);
+      }
+      e.target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 250);
+  }, []);
+
+  const handleInputBlur = useCallback(() => {
+    setTimeout(() => {
+      if (window.visualViewport) {
+        const kb = Math.max(0, window.innerHeight - window.visualViewport.height - (window.visualViewport.offsetTop || 0));
+        setKeyboardHeight(kb > 50 ? kb : 0);
+      } else {
+        setKeyboardHeight(0);
+      }
+    }, 100);
   }, []);
 
   // Dual-Track View Mode: Original Authentic PDF vs Structured Reflow
@@ -153,6 +251,8 @@ export default function LivingReader({
     Record<string, MorphArtifactData>
   >({});
   const [isMorphLoading, setIsMorphLoading] = useState(false);
+  const [morphTopicInput, setMorphTopicInput] = useState<string>("");
+  const [morphActiveTopic, setMorphActiveTopic] = useState<string | null>(null);
 
   // Dynamic QBank State
   const [dynamicQBankList, setDynamicQBankList] = useState<QBankVignette[]>([]);
@@ -273,6 +373,283 @@ export default function LivingReader({
 
   const currentSegment = segments[currentIdx] || segments[0];
 
+  // --------------------------------------------------------------------------
+  // SESSION RESTORATION (On Mount)
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    try {
+      let saved: UserStudyProgressData | null = initialProgress || null;
+      const localStr =
+        typeof window !== "undefined"
+          ? localStorage.getItem(`ascleon_progress_${book.slug}`) ||
+            localStorage.getItem(`ascleon_progress_${book._id}`)
+          : null;
+
+      if (localStr) {
+        try {
+          const localParsed: UserStudyProgressData = JSON.parse(localStr);
+          if (
+            !saved ||
+            (localParsed.lastStudiedAt &&
+              saved.lastStudiedAt &&
+              new Date(localParsed.lastStudiedAt) > new Date(saved.lastStudiedAt))
+          ) {
+            saved = localParsed;
+          }
+        } catch { }
+      }
+
+      if (
+        saved &&
+        (saved.lastStudiedPage > 1 ||
+          (saved.studioState?.chatMessages && saved.studioState.chatMessages.length > 1) ||
+          (saved.studioState?.activeIntent && saved.studioState.activeIntent !== "chat"))
+      ) {
+        setResumedSessionInfo(saved);
+        setShowResumeSourceHud(true);
+        setShowStudioResumeBanner(true);
+
+        // Auto-dismiss floating source progression toast after 7s
+        const hudTimer = setTimeout(() => setShowResumeSourceHud(false), 7000);
+
+        // Restore page
+        if (saved.lastStudiedPage && saved.lastStudiedPage > 1) {
+          if (book.fileURL) {
+            setActivePdfPage(saved.lastStudiedPage);
+          } else {
+            const sIdx = segments.findIndex((s) => s.pageNumber === saved!.lastStudiedPage);
+            if (sIdx >= 0) setCurrentIdx(sIdx);
+            else setCurrentIdx(Math.min(segments.length - 1, saved.lastStudiedPage - 1));
+          }
+        }
+
+        // Restore studio state
+        if (saved.studioState) {
+          if (saved.studioState.activeIntent) {
+            setActiveIntent(saved.studioState.activeIntent as StudyIntent);
+          }
+          if (saved.studioState.studyLanguage) {
+            setStudyLanguage(saved.studioState.studyLanguage as StudyLanguage);
+          }
+          if (saved.studioState.studyScope) {
+            setStudyScope(saved.studioState.studyScope as StudyScope);
+          }
+          if (saved.studioState.morphActiveTopic) {
+            setMorphActiveTopic(saved.studioState.morphActiveTopic);
+          }
+          if (saved.studioState.chatMessages && saved.studioState.chatMessages.length > 0) {
+            setMessages(saved.studioState.chatMessages as ChatMessage[]);
+          }
+          if (typeof saved.studioState.activeQBankIdx === "number") {
+            setActiveQBankIdx(saved.studioState.activeQBankIdx);
+          }
+        }
+
+        setTimeout(() => {
+          isRestoringRef.current = false;
+        }, 1000);
+
+        return () => clearTimeout(hudTimer);
+      } else {
+        isRestoringRef.current = false;
+      }
+    } catch (err) {
+      console.warn("Failed to restore previous study session:", err);
+      isRestoringRef.current = false;
+    }
+  }, [book._id, book.slug, book.fileURL, initialProgress, segments]);
+
+  // --------------------------------------------------------------------------
+  // SESSION AUTO-PERSISTENCE (Debounced)
+  // --------------------------------------------------------------------------
+  const performSave = useCallback(
+    (override?: Partial<UserStudyProgressData>) => {
+      const curPage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+      const maxPages = book.fileURL ? totalPdfPages : (book.totalPages || segments.length || 1);
+      const pct = Math.min(100, Math.max(1, Math.round((curPage / maxPages) * 100)));
+      const status: ReadingStatus = pct >= 90 ? "read" : "in_progress";
+
+      const lastMsg = messages[messages.length - 1];
+      const snippet = lastMsg?.text
+        ? lastMsg.text.length > 60
+          ? `${lastMsg.text.slice(0, 60)}...`
+          : lastMsg.text
+        : undefined;
+
+      const data: UserStudyProgressData = {
+        bookSlug: book.slug,
+        bookId: book._id,
+        lastStudiedPage: curPage,
+        totalPages: maxPages,
+        progressPercent: pct,
+        readingStatus: status,
+        lastStudiedAt: new Date().toISOString(),
+        studioState: {
+          activeIntent,
+          studyLanguage,
+          studyScope,
+          morphActiveTopic,
+          chatMessages: messages,
+          activeQBankIdx,
+          lastActiveSnippet: snippet,
+        },
+        ...override,
+      };
+
+      try {
+        localStorage.setItem(`ascleon_progress_${book.slug}`, JSON.stringify(data));
+        localStorage.setItem(`ascleon_progress_${book._id}`, JSON.stringify(data));
+      } catch { }
+
+      saveUserStudyProgress(data).catch(() => {});
+    },
+    [
+      book.fileURL,
+      book.slug,
+      book._id,
+      book.totalPages,
+      activePdfPage,
+      currentSegment?.pageNumber,
+      currentIdx,
+      totalPdfPages,
+      segments.length,
+      messages,
+      activeIntent,
+      studyLanguage,
+      studyScope,
+      morphActiveTopic,
+      activeQBankIdx,
+    ]
+  );
+
+  useEffect(() => {
+    if (isRestoringRef.current) return;
+
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      performSave();
+    }, 1500);
+
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, [
+    activePdfPage,
+    currentIdx,
+    messages,
+    activeIntent,
+    studyLanguage,
+    studyScope,
+    morphActiveTopic,
+    activeQBankIdx,
+    performSave,
+  ]);
+
+  // Flush save on page exit
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (!isRestoringRef.current) {
+        performSave();
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [performSave]);
+
+  // --------------------------------------------------------------------------
+  // SESSION RESET HANDLERS ("Start New")
+  // --------------------------------------------------------------------------
+  const handleStartFreshStudio = useCallback(async () => {
+    setShowStartNewModal(false);
+    setShowStudioResumeBanner(false);
+
+    const defaultMessages: ChatMessage[] = [
+      {
+        sender: "ai",
+        text: `Fresh study session started for "${book.title}". I am your grounded Ascleon mentor, backed by active page analysis. What would you like to explore?`,
+        time: "Just now",
+        provider: "grounded-mentor",
+      },
+    ];
+    setMessages(defaultMessages);
+    setMorphActiveTopic(null);
+    setActiveQBankIdx(0);
+    setQuizAnswer(null);
+    setQuizSubmitted(false);
+
+    performSave({
+      studioState: {
+        activeIntent: "chat",
+        studyLanguage,
+        studyScope,
+        morphActiveTopic: null,
+        chatMessages: defaultMessages,
+        activeQBankIdx: 0,
+      },
+    });
+
+    resetUserStudyProgress(book.slug, "studio_only").catch(() => {});
+    toast.success("Fresh studio session started!");
+  }, [book.title, book.slug, performSave, studyLanguage, studyScope]);
+
+  const handleRestartFromBeginning = useCallback(async () => {
+    setShowStartNewModal(false);
+    setShowResumeSourceHud(false);
+    setShowStudioResumeBanner(false);
+
+    if (book.fileURL) {
+      setActivePdfPage(1);
+    } else {
+      setCurrentIdx(0);
+    }
+
+    const defaultMessages: ChatMessage[] = [
+      {
+        sender: "ai",
+        text: `Restarted from Page 1 of "${book.title}". I am your grounded Ascleon mentor, ready whenever you are!`,
+        time: "Just now",
+        provider: "grounded-mentor",
+      },
+    ];
+    setMessages(defaultMessages);
+    setMorphActiveTopic(null);
+    setActiveQBankIdx(0);
+    setQuizAnswer(null);
+    setQuizSubmitted(false);
+
+    performSave({
+      lastStudiedPage: 1,
+      progressPercent: 0,
+      readingStatus: "in_progress",
+      studioState: {
+        activeIntent: "chat",
+        studyLanguage,
+        studyScope: { type: "page", startPage: 1, endPage: 1 },
+        morphActiveTopic: null,
+        chatMessages: defaultMessages,
+        activeQBankIdx: 0,
+      },
+    });
+
+    resetUserStudyProgress(book.slug, "full").catch(() => {});
+    toast.success("Restarted book from Page 1");
+  }, [book.fileURL, book.title, book.slug, performSave, studyLanguage]);
+
+  // Keep studyScope in sync with active page when in single-page mode
+  useEffect(() => {
+    const cur = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+    setStudyScope((prev) => {
+      if (prev.type === "page" && (prev.startPage !== cur || prev.endPage !== cur)) {
+        return {
+          ...prev,
+          startPage: cur,
+          endPage: cur,
+        };
+      }
+      return prev;
+    });
+  }, [book.fileURL, activePdfPage, currentSegment, currentIdx]);
+
   // Split active segment content into interactive paragraph blocks
   const pageParagraphs = useMemo(() => {
     return (currentSegment?.content || "")
@@ -310,27 +687,51 @@ export default function LivingReader({
     }
   }, []);
 
-  // Trigger real Morph generation via /api/morph (supports custom override text, diagram & cached retrieval)
+  // Trigger real Morph generation via /api/morph (supports custom override text, diagram, specific whole topic & cached retrieval)
   const handleRunMorph = async (
     overrideSelection?: string,
     diagramUrl?: string,
-    forceRefresh = false
+    forceRefresh = false,
+    customTopic?: string | null,
   ) => {
+    const topicToMorph = customTopic !== undefined ? customTopic : morphActiveTopic;
     const targetSelection = overrideSelection ?? selectedText;
-    const baseKey = book.fileURL ? activePdfPage : currentIdx;
+    const baseKey = topicToMorph
+      ? `topic_${topicToMorph.toLowerCase().trim().replace(/[\s\/\\#?]+/g, "_")}`
+      : (book.fileURL ? activePdfPage : currentIdx);
     const activeKey = `${baseKey}_${studyLanguage}`;
     const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
     const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
 
     setActiveIntent("morph");
 
-    // Instant local cache hit: if this page was already morphed in this session and not forcing refresh, restore in 0ms!
-    if (!forceRefresh && !targetSelection && !diagramUrl && (morphArtifacts[activeKey] || morphArtifacts[baseKey])) {
+    // Instant local cache hit: if this page/topic was already morphed in this session and not forcing refresh, restore in 0ms!
+    if (!forceRefresh && !targetSelection && !diagramUrl && (morphArtifacts[activeKey] || morphArtifacts[String(baseKey)])) {
+      if (topicToMorph !== undefined) setMorphActiveTopic(topicToMorph);
       return;
     }
 
     setIsMorphLoading(true);
+    if (topicToMorph !== undefined) setMorphActiveTopic(topicToMorph);
+
     try {
+      let effectiveScope = studyScope;
+      if (topicToMorph) {
+        const matched = (book.blueprint?.topicMap?.topics || []).find(
+          (t: any) => t.title.toLowerCase() === topicToMorph.toLowerCase()
+        );
+        if (matched) {
+          effectiveScope = {
+            type: "topic",
+            startPage: matched.startPage,
+            endPage: matched.endPage,
+            topicTitle: matched.title,
+            topicId: matched.id,
+          };
+          setStudyScope(effectiveScope);
+        }
+      }
+
       const precedingSegments = segments
         .slice(Math.max(0, currentIdx - 2), currentIdx)
         .map((s) => s.content);
@@ -351,7 +752,8 @@ export default function LivingReader({
           snippedDiagram: diagramUrl || snippedDiagram?.url || null,
           language: studyLanguage,
           forceRefresh: Boolean(forceRefresh),
-          studyScope,
+          studyScope: effectiveScope,
+          customTopic: topicToMorph || undefined,
         }),
       });
 
@@ -368,6 +770,7 @@ export default function LivingReader({
         setMorphArtifacts((prev) => ({
           ...prev,
           [activeKey]: artifact,
+          [String(baseKey)]: artifact,
         }));
       }
     } catch (err) {
@@ -668,16 +1071,19 @@ export default function LivingReader({
     }
   };
 
-  const handleResetMorph = (idx: number) => {
+  const handleResetMorph = (idx: number | string) => {
     setMorphArtifacts((prev) => {
       const copy = { ...prev };
       delete copy[`${idx}_${studyLanguage}`];
       delete copy[String(idx)];
       return copy;
     });
+    setMorphActiveTopic(null);
   };
 
-  const activeBaseKey = book.fileURL ? activePdfPage : currentIdx;
+  const activeBaseKey = morphActiveTopic
+    ? `topic_${morphActiveTopic.toLowerCase().trim().replace(/[\s\/\\#?]+/g, "_")}`
+    : (book.fileURL ? activePdfPage : currentIdx);
   const activeMorphArtifact =
     morphArtifacts[`${activeBaseKey}_${studyLanguage}`] || morphArtifacts[String(activeBaseKey)];
   const activeQBankQuestion = dynamicQBankList.length > 0 ? dynamicQBankList[activeQBankIdx % dynamicQBankList.length] : null;
@@ -782,10 +1188,10 @@ export default function LivingReader({
   };
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[color:var(--ink)] pt-0 text-[color:var(--cream)] select-none">
+    <div className="fixed inset-0 z-30 flex h-[100dvh] w-full max-w-full flex-col overflow-hidden bg-[color:var(--ink)] pt-0 text-[color:var(--cream)] select-none overscroll-none">
       {/* COMPACT UNIFIED TOP BAR (44px) */}
-      <header className="flex h-11 shrink-0 items-center justify-between border-b border-white/10 bg-[#141318] px-3 z-30">
-        <div className="flex items-center gap-2 min-w-0">
+      <header className="flex h-11 shrink-0 items-center justify-between border-b border-white/10 bg-[#141318] px-2 sm:px-3 z-30 gap-1 sm:gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 max-w-[40%] sm:max-w-xs shrink">
           <Link
             href="/library"
             className="flex size-7 items-center justify-center rounded-full border border-[color:var(--ink)] bg-[color:var(--cream)] text-[color:var(--ink)] shadow-xs transition-transform hover:-translate-y-0.5 cursor-pointer shrink-0"
@@ -793,13 +1199,13 @@ export default function LivingReader({
           >
             <ArrowLeft className="size-3.5 stroke-[2.5]" />
           </Link>
-          <AscleonLogo size={24} className="shrink-0 transition-transform duration-200 hover:scale-105" />
-          <div className="flex items-center gap-2 min-w-0">
-            <h1 className="display line-clamp-1 text-xs font-bold text-[color:var(--cream)] sm:text-sm">
+          <AscleonLogo size={22} className="shrink-0 transition-transform duration-200 hover:scale-105" />
+          <div className="flex items-center gap-1.5 min-w-0">
+            <h1 className="display line-clamp-1 text-xs font-bold text-[color:var(--cream)] sm:text-sm truncate">
               {book.title}
             </h1>
             {(book.blueprint?.domain || book.topic) && (
-              <span className="hidden sm:inline-flex shrink-0 items-center rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[9.5px] font-bold text-emerald-300">
+              <span className="hidden md:inline-flex shrink-0 items-center rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[9.5px] font-bold text-emerald-300">
                 {book.blueprint?.domain || book.topic}
               </span>
             )}
@@ -922,9 +1328,9 @@ export default function LivingReader({
         </div>
 
         {/* Right Active Scope Badges & Navigation */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {selectedText && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--orange)]/60 bg-[color:var(--orange)]/20 px-2 py-0.5 text-[10px] font-bold text-[color:var(--orange)] animate-pulse">
+            <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-[color:var(--orange)]/60 bg-[color:var(--orange)]/20 px-2 py-0.5 text-[10px] font-bold text-[color:var(--orange)] animate-pulse">
               <Sparkles className="size-2.5" />
               <span>Selection Locked</span>
               <button
@@ -939,7 +1345,7 @@ export default function LivingReader({
           )}
 
           {snippedDiagram && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/60 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">
+            <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-amber-500/60 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">
               <Crop className="size-2.5" />
               <span>Diagram Locked</span>
               <button
@@ -1008,6 +1414,69 @@ export default function LivingReader({
             )}
             style={isLgScreen ? { width: `${splitRatio}%` } : undefined}
           >
+            {/* FLOATING SOURCE PROGRESSION HUD (Animated Session Resume Toast) */}
+            {showResumeSourceHud && resumedSessionInfo && (
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 max-w-md w-[92%] sm:w-auto animate-in fade-in slide-in-from-top-3 duration-500">
+                <div className="flex items-center gap-3 rounded-full border-2 border-[color:var(--ink)] bg-[#1d1b22]/95 px-4 py-2 text-[color:var(--cream)] shadow-chip backdrop-blur-md">
+                  {/* Animated Radial / Progress Ring */}
+                  <div className="relative size-7 shrink-0 flex items-center justify-center">
+                    <svg className="size-full -rotate-90" viewBox="0 0 36 36">
+                      <path
+                        className="text-white/15"
+                        strokeWidth="3.5"
+                        stroke="currentColor"
+                        fill="none"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                      <path
+                        className="text-[color:var(--orange)] transition-all duration-1000 ease-out"
+                        strokeDasharray={`${resumedSessionInfo.progressPercent}, 100`}
+                        strokeWidth="3.5"
+                        strokeLinecap="round"
+                        stroke="currentColor"
+                        fill="none"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                    </svg>
+                    <span className="absolute font-mono text-[9px] font-bold text-[color:var(--orange)]">
+                      {resumedSessionInfo.progressPercent}%
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col min-w-0 pr-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="size-2 shrink-0 rounded-full bg-[color:var(--orange)] animate-ping" />
+                      <span className="text-[11.5px] font-bold text-[color:var(--cream)] truncate">
+                        Resumed at Page {resumedSessionInfo.lastStudiedPage} of {resumedSessionInfo.totalPages}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-[color:var(--cream)]/60 font-medium">
+                      Last studied {formatTimeAgo(resumedSessionInfo.lastStudiedAt)}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0 pl-1 border-l border-white/15">
+                    <button
+                      type="button"
+                      onClick={handleRestartFromBeginning}
+                      className="cursor-pointer rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-bold text-[color:var(--cream)] hover:bg-white/20 transition-colors"
+                      title="Start from beginning (Page 1)"
+                    >
+                      Page 1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowResumeSourceHud(false)}
+                      className="cursor-pointer rounded-full p-1 text-[color:var(--cream)]/60 hover:text-white transition-colors"
+                      title="Dismiss"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Left Panel Body: Authentic PDF Viewer */}
             {book.fileURL ? (
               <div className="relative flex flex-1 overflow-hidden">
@@ -1069,7 +1538,7 @@ export default function LivingReader({
                 onMouseUp={handleTextSelection}
                 onTouchEnd={handleTextSelection}
                 className={cn(
-                  "custom-scrollbar relative flex-1 overflow-y-auto px-6 py-8 transition-colors sm:px-12 sm:py-10 select-text",
+                  "custom-scrollbar relative flex-1 overflow-y-auto overscroll-y-contain px-4 py-6 transition-colors sm:px-12 sm:py-10 select-text",
                   theme === "paper" &&
                   "bg-[#FAF4EB] text-[color:var(--ink)] font-serif",
                   theme === "ink" &&
@@ -1311,8 +1780,8 @@ export default function LivingReader({
               "lg:flex lg:flex-1"
             )}
           >
-            {/* TOP CONTROL BAR */}
-            <div className="flex h-14 shrink-0 items-center justify-between gap-2 sm:gap-3 border-b border-white/10 px-3 sm:px-4">
+            {/* TOP CONTROL BAR - Responsive & Aligned with Left Toolbar */}
+            <div className="flex h-11 shrink-0 items-center justify-between gap-1.5 sm:gap-2.5 border-b border-white/10 px-2.5 sm:px-3.5 bg-[#141318]">
               {/* Back to Source button on mobile */}
               <button
                 type="button"
@@ -1322,73 +1791,75 @@ export default function LivingReader({
                 <BookOpen className="size-3 text-[color:var(--orange)]" />
                 <span>Source</span>
               </button>
-              {/* Zoom & View Controls */}
-              <div className="flex items-center gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] p-1 text-xs">
+              {/* Zoom & View Controls - Desktop Only */}
+              <div className="hidden lg:flex shrink-0 items-center gap-0.5 sm:gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] p-0.5 sm:p-1 text-xs">
                 <button
                   type="button"
                   onClick={handleZoomOut}
-                  className="flex size-6 cursor-pointer items-center justify-center rounded-full text-[color:var(--ink)] transition-colors hover:bg-[color:var(--ink)]/10"
+                  className="flex size-5 sm:size-6 cursor-pointer items-center justify-center rounded-full text-[color:var(--ink)] transition-colors hover:bg-[color:var(--ink)]/10"
                   title="Zoom Out"
                 >
-                  <ZoomOut className="size-3.5" />
+                  <ZoomOut className="size-3 sm:size-3.5" />
                 </button>
-                <span className="w-10 text-center font-mono text-[11px] font-bold text-[color:var(--ink)]">
+                <span className="w-8 sm:w-10 text-center font-mono text-[10px] sm:text-[11px] font-bold text-[color:var(--ink)]">
                   {fitMode === "normal" ? `${zoomLevel}%` : "Auto"}
                 </span>
                 <button
                   type="button"
                   onClick={handleZoomIn}
-                  className="flex size-6 cursor-pointer items-center justify-center rounded-full text-[color:var(--ink)] transition-colors hover:bg-[color:var(--ink)]/10"
+                  className="flex size-5 sm:size-6 cursor-pointer items-center justify-center rounded-full text-[color:var(--ink)] transition-colors hover:bg-[color:var(--ink)]/10"
                   title="Zoom In"
                 >
-                  <ZoomIn className="size-3.5" />
+                  <ZoomIn className="size-3 sm:size-3.5" />
                 </button>
 
-                <div className="mx-1 h-3.5 w-px bg-[color:var(--ink)]/20" />
+                <div className="mx-0.5 sm:mx-1 h-3 w-px bg-[color:var(--ink)]/20" />
 
                 {/* Fit Modes */}
                 <button
                   type="button"
                   onClick={handleFitWidth}
                   className={cn(
-                    "cursor-pointer rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors",
+                    "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider transition-colors whitespace-nowrap",
                     fitMode === "fit-width"
                       ? "bg-[color:var(--ink)] text-[color:var(--cream)]"
                       : "text-[color:var(--ink)]/70 hover:text-[color:var(--ink)]",
                   )}
                 >
-                  Fit width
+                  <span className="hidden sm:inline">Fit </span>Width
                 </button>
                 <button
                   type="button"
                   onClick={handleFitPage}
                   className={cn(
-                    "cursor-pointer rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors",
+                    "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider transition-colors whitespace-nowrap",
                     fitMode === "fit-page"
                       ? "bg-[color:var(--ink)] text-[color:var(--cream)]"
                       : "text-[color:var(--ink)]/70 hover:text-[color:var(--ink)]",
                   )}
                 >
-                  Fit page
+                  <span className="hidden sm:inline">Fit </span>Page
                 </button>
 
-                <div className="mx-1 h-3.5 w-px bg-[color:var(--ink)]/20" />
+                <div className="hidden lg:block mx-0.5 sm:mx-1 h-3 w-px bg-[color:var(--ink)]/20" />
 
                 {/* Themes */}
-                {(["paper", "ink"] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setTheme(t)}
-                    className={cn(
-                      "size-3 rounded-full border border-[color:var(--ink)]/30 transition-transform cursor-pointer",
-                      t === "paper" && "bg-[#fbf7f0]",
-                      t === "ink" && "bg-[color:var(--ink)]",
-                      theme === t && "scale-125 ring-2 ring-[color:var(--orange)]",
-                    )}
-                    title={`Set theme to ${t}`}
-                  />
-                ))}
+                <div className="hidden lg:flex items-center gap-1">
+                  {(["paper", "ink"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setTheme(t)}
+                      className={cn(
+                        "size-2.5 sm:size-3 rounded-full border border-[color:var(--ink)]/30 transition-transform cursor-pointer",
+                        t === "paper" && "bg-[#fbf7f0]",
+                        t === "ink" && "bg-[color:var(--ink)]",
+                        theme === t && "scale-125 ring-2 ring-[color:var(--orange)]",
+                      )}
+                      title={`Set theme to ${t}`}
+                    />
+                  ))}
+                </div>
               </div>
 
               {/* Universal Study Language Switch (Controls Voice, AI Chat, Morph, Q banks, Summaries) */}
@@ -1397,6 +1868,17 @@ export default function LivingReader({
                 onLanguageChange={setStudyLanguage}
               />
 
+              {/* Start New Session Trigger */}
+              <button
+                type="button"
+                onClick={() => setShowStartNewModal(true)}
+                className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-white/20 bg-white/10 px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-bold text-[color:var(--cream)] shadow-xs transition-all hover:bg-white/20 whitespace-nowrap"
+                title="Start a new session or restart book"
+              >
+                <RotateCcw className="size-3 text-[color:var(--orange)]" />
+                <span className="hidden sm:inline">Start </span>New
+              </button>
+
               {/* Ascleon Live Voice Button */}
               <button
                 type="button"
@@ -1404,14 +1886,15 @@ export default function LivingReader({
                   setActiveIntent("voice");
                 }}
                 className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] px-3 py-1.5 text-xs font-bold transition-all",
+                  "flex shrink-0 cursor-pointer items-center gap-1 rounded-full border-2 border-[color:var(--ink)] px-2 sm:px-3 py-1 text-[11px] sm:text-xs font-bold transition-all whitespace-nowrap",
                   activeIntent === "voice"
                     ? "bg-[#43a08f] text-[color:var(--ink)] shadow-chip"
                     : "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip hover:-translate-y-0.5",
                 )}
               >
-                <Mic className="size-3.5" />
-                <span>Ascleon Voice</span>
+                <Mic className="size-3 sm:size-3.5" />
+                <span className="hidden md:inline">Ascleon </span>
+                <span>Voice</span>
               </button>
             </div>
 
@@ -1472,12 +1955,12 @@ export default function LivingReader({
             />
 
             {/* STUDIO SWITCHER TABS (4 CORE TABS: AI Chat, Morph, Voice, Q banks) */}
-            <div className="grid shrink-0 grid-cols-4 gap-1 border-b border-white/10 bg-black/40 p-1.5 text-[11px]">
+            <div className="grid shrink-0 grid-cols-4 gap-1 border-b border-white/10 bg-black/40 p-1 sm:p-1.5 text-[10.5px] sm:text-[11px]">
               <button
                 type="button"
                 onClick={() => setActiveIntent("chat")}
                 className={cn(
-                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1.5 font-bold transition-all",
+                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1 sm:py-1.5 font-bold transition-all whitespace-nowrap",
                   activeIntent === "chat"
                     ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
                     : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
@@ -1494,7 +1977,7 @@ export default function LivingReader({
                   handleRunMorph();
                 }}
                 className={cn(
-                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1.5 font-bold transition-all",
+                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1 sm:py-1.5 font-bold transition-all whitespace-nowrap",
                   activeIntent === "morph"
                     ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
                     : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
@@ -1508,7 +1991,7 @@ export default function LivingReader({
                 type="button"
                 onClick={() => setActiveIntent("voice")}
                 className={cn(
-                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1.5 font-bold transition-all",
+                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1 sm:py-1.5 font-bold transition-all whitespace-nowrap",
                   activeIntent === "voice"
                     ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
                     : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
@@ -1525,7 +2008,7 @@ export default function LivingReader({
                   loadDynamicQBank();
                 }}
                 className={cn(
-                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1.5 font-bold transition-all",
+                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1 sm:py-1.5 font-bold transition-all whitespace-nowrap",
                   activeIntent === "quiz"
                     ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
                     : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
@@ -1537,10 +2020,174 @@ export default function LivingReader({
             </div>
 
             {/* TAB CONTENTS CONTAINER */}
-            <div className="custom-scrollbar-dark flex-1 overflow-y-auto p-4">
+            <div className="custom-scrollbar-dark flex-1 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4">
+              {/* STUDIO SESSION CONTINUATION / RESUME BANNER */}
+              {showStudioResumeBanner && resumedSessionInfo && (
+                <div className="mb-3 rounded-[16px] border-2 border-[color:var(--ink)] bg-[#f6d7a1] p-3 text-[color:var(--ink)] shadow-chip animate-in fade-in slide-in-from-top-2 duration-300">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs">
+                        <RotateCcw className="size-3" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-black text-[color:var(--ink)]">
+                            Previous Study Session Restored
+                          </span>
+                          <span className="rounded-full bg-[color:var(--ink)] px-1.5 py-0.2 text-[9px] font-bold text-[color:var(--cream)] uppercase">
+                            {resumedSessionInfo.studioState?.activeIntent || "Studio Space"}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-[color:var(--ink)]/80 leading-snug line-clamp-2">
+                          Continuing from Page {resumedSessionInfo.lastStudiedPage}.
+                          {resumedSessionInfo.studioState?.lastActiveSnippet
+                            ? ` (${resumedSessionInfo.studioState.lastActiveSnippet})`
+                            : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowStudioResumeBanner(false)}
+                      className="cursor-pointer rounded-full p-1 text-[color:var(--ink)]/60 hover:text-[color:var(--ink)]"
+                      title="Dismiss banner"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="mt-2.5 flex items-center justify-end gap-2 border-t border-[color:var(--ink)]/15 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowStartNewModal(true)}
+                      className="cursor-pointer rounded-full border border-[color:var(--ink)]/30 bg-transparent px-3 py-1 text-[10.5px] font-bold text-[color:var(--ink)] hover:bg-[color:var(--ink)]/10 transition-colors"
+                    >
+                      Start New...
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowStudioResumeBanner(false)}
+                      className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-3 py-1 text-[10.5px] font-black text-[color:var(--ink)] shadow-xs hover:brightness-105 transition-all"
+                    >
+                      Continue Studying
+                    </button>
+                  </div>
+                </div>
+              )}
               {/* TAB 1: THE MORPH ENGINE */}
               {activeIntent === "morph" && (
                 <div className="flex animate-in fade-in flex-col gap-4 duration-200">
+                  {/* TOP CONTROLLER: Scope & Custom Whole Topic Bar */}
+                  <div className="rounded-[18px] border-2 border-[color:var(--ink)] bg-[#1d1b22] p-2.5 sm:p-3 shadow-chip flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-[color:var(--cream)]/60 mr-1 hidden sm:inline">
+                          Scope:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMorphActiveTopic(null);
+                            handleRunMorph(undefined, undefined, false, null);
+                          }}
+                          className={cn(
+                            "cursor-pointer px-2.5 py-1 rounded-full text-[11px] font-bold transition-all flex items-center gap-1 border",
+                            !morphActiveTopic
+                              ? "bg-[color:var(--orange)] text-[color:var(--ink)] border-[color:var(--ink)] shadow-xs"
+                              : "bg-white/5 text-[color:var(--cream)]/70 border-white/10 hover:bg-white/10"
+                          )}
+                        >
+                          <BookOpen className="size-3" />
+                          <span>Active Page ({book.fileURL ? activePdfPage : currentIdx + 1})</span>
+                        </button>
+
+                        {morphActiveTopic && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-[#43a08f]/20 border border-[#43a08f]/50 px-2.5 py-1 text-[11px] font-bold text-[#7fd8c9]">
+                            <Sparkles className="size-3" />
+                            <span className="max-w-[140px] truncate">{morphActiveTopic}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMorphActiveTopic(null);
+                                setMorphTopicInput("");
+                              }}
+                              className="hover:opacity-75 cursor-pointer ml-0.5 text-white/60"
+                              title="Clear topic filter"
+                            >
+                              <X className="size-3" />
+                            </button>
+                          </span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isMorphLoading}
+                        onClick={() => handleRunMorph(undefined, undefined, true, morphActiveTopic || undefined)}
+                        className="flex cursor-pointer items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10.5px] font-bold text-[color:var(--cream)]/80 hover:bg-white/15 hover:text-white disabled:opacity-40"
+                        title="Re-synthesize with fresh Gemini AI analysis"
+                      >
+                        <RefreshCw className={cn("size-3", isMorphLoading && "animate-spin")} />
+                        <span>Re-morph AI</span>
+                      </button>
+                    </div>
+
+                    {/* Topic Input Box: Write Any Specific Whole Topic */}
+                    <div className="flex items-center gap-1.5 pt-0.5">
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          value={morphTopicInput}
+                          onChange={(e) => setMorphTopicInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && morphTopicInput.trim()) {
+                              handleRunMorph(undefined, undefined, true, morphTopicInput.trim());
+                            }
+                          }}
+                          placeholder="Write a whole topic to turn into magic (e.g. Acute Coronary Syndrome, Heart Failure)..."
+                          className="w-full rounded-full border-2 border-[color:var(--ink)] bg-[#121114] px-3.5 py-1.5 text-xs font-medium text-[color:var(--cream)] placeholder:text-[color:var(--cream)]/40 focus:border-[color:var(--orange)] focus:outline-none pr-28 sm:pr-32"
+                        />
+                        {book.blueprint?.topicMap?.topics && book.blueprint.topicMap.topics.length > 0 && (
+                          <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                            <select
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  setMorphTopicInput(e.target.value);
+                                  handleRunMorph(undefined, undefined, true, e.target.value);
+                                }
+                              }}
+                              value=""
+                              className="bg-transparent text-[10px] font-bold text-[color:var(--orange)] outline-none cursor-pointer pr-1"
+                              title="Pick a detected topic from this book"
+                            >
+                              <option value="" disabled className="bg-[#1b1a20] text-white">
+                                Book Topics ▾
+                              </option>
+                              {book.blueprint.topicMap.topics.map((t: any) => (
+                                <option key={t.id} value={t.title} className="bg-[#1b1a20] text-white">
+                                  {t.title} (P.{t.startPage}–{t.endPage})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isMorphLoading || !morphTopicInput.trim()}
+                        onClick={() => {
+                          if (morphTopicInput.trim()) {
+                            handleRunMorph(undefined, undefined, true, morphTopicInput.trim());
+                          }
+                        }}
+                        className="cursor-pointer shrink-0 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-3.5 py-1.5 text-xs font-black uppercase tracking-wider text-[color:var(--ink)] shadow-chip hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                      >
+                        <span>Morph Topic ✦</span>
+                      </button>
+                    </div>
+                  </div>
+
                   {activeMorphArtifact ? (
                     <MorphCanvas
                       artifact={activeMorphArtifact}
@@ -1881,7 +2528,7 @@ export default function LivingReader({
                     )}
 
                     {/* Bottom Action Bar: Executive Summary & Core Prompts pinned right below latest response */}
-                    <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-white/10">
+                    <div className="flex items-center gap-1.5 pt-2 border-t border-white/10 overflow-x-auto no-scrollbar touch-pan-x whitespace-nowrap shrink-0">
                       <button
                         type="button"
                         disabled={isAiLoading}
@@ -2192,8 +2839,13 @@ export default function LivingReader({
               )}
             </div>
 
-            {/* BOTTOM PROMPT INPUT */}
-            <div className="shrink-0 border-t border-white/10 bg-black/40 p-3.5">
+            {/* BOTTOM PROMPT INPUT (Responsive & Keyboard-Aware on Mobile) */}
+            <div
+              className="shrink-0 border-t border-white/10 bg-[#141318] p-2.5 sm:p-3.5 transition-[padding] duration-150 ease-out"
+              style={{
+                paddingBottom: keyboardHeight > 0 ? `${keyboardHeight + 8}px` : undefined,
+              }}
+            >
               <form
                 onSubmit={handleSendMessage}
                 className="relative flex items-center"
@@ -2202,12 +2854,14 @@ export default function LivingReader({
                   type="text"
                   value={inputQuery}
                   onChange={(e) => setInputQuery(e.target.value)}
+                  onFocus={handleInputFocus}
+                  onBlur={handleInputBlur}
                   placeholder={
                     selectedText
                       ? `Ask about selected (${selectedText.split(/\s+/).length}w) passage...`
                       : `Ask the AI Study Agent about ${book.title}...`
                   }
-                  className="w-full rounded-full border border-white/15 bg-white/[0.06] py-2.5 pl-4 pr-11 text-xs text-[color:var(--cream)] placeholder-[color:var(--cream)]/40 transition-all focus:border-[color:var(--orange)] focus:outline-none"
+                  className="w-full rounded-full border border-white/15 bg-white/[0.06] py-2 pl-3.5 pr-10 sm:py-2.5 sm:pl-4 sm:pr-11 text-xs text-[color:var(--cream)] placeholder-[color:var(--cream)]/40 transition-all focus:border-[color:var(--orange)] focus:outline-none"
                 />
                 <button
                   type="submit"
@@ -2233,6 +2887,84 @@ export default function LivingReader({
           <Sparkles className="size-4" />
           <span>Open Studio</span>
         </button>
+      )}
+
+      {/* START NEW SESSION MODAL */}
+      {showStartNewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md rounded-[22px] border-2 border-[color:var(--ink)] bg-[color:var(--cream)] p-6 text-[color:var(--ink)] shadow-chip animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-[color:var(--ink)]/15">
+              <div className="flex items-center gap-2.5">
+                <div className="flex size-9 items-center justify-center rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs">
+                  <RotateCcw className="size-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-[color:var(--ink)]">Start New Study Session</h3>
+                  <p className="text-[11px] text-[color:var(--ink)]/65">Choose how you want to continue</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowStartNewModal(false)}
+                className="rounded-full p-1 text-[color:var(--ink)]/60 hover:text-[color:var(--ink)] cursor-pointer"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-3">
+              {/* Option 1: Fresh Studio Session */}
+              <button
+                type="button"
+                onClick={handleStartFreshStudio}
+                className="flex flex-col items-start gap-1 rounded-xl border-2 border-[color:var(--ink)] bg-white p-3.5 text-left transition-all hover:bg-[color:var(--orange)]/15 hover:border-[color:var(--orange)] shadow-xs cursor-pointer"
+              >
+                <div className="flex items-center justify-between w-full">
+                  <span className="font-bold text-xs text-[color:var(--ink)] flex items-center gap-1.5">
+                    <Sparkles className="size-3.5 text-[color:var(--orange)]" />
+                    Fresh Studio Session
+                  </span>
+                  <span className="rounded-full bg-[color:var(--ink)]/10 px-2 py-0.5 text-[9.5px] font-mono font-bold text-[color:var(--ink)]/70">
+                    Keep Page
+                  </span>
+                </div>
+                <p className="text-[11px] text-[color:var(--ink)]/75 leading-relaxed">
+                  Stay on your current page (Page {book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}), while resetting the AI chat, active topic, and studio tools to a clean slate.
+                </p>
+              </button>
+
+              {/* Option 2: Restart Entire Book */}
+              <button
+                type="button"
+                onClick={handleRestartFromBeginning}
+                className="flex flex-col items-start gap-1 rounded-xl border-2 border-[color:var(--ink)] bg-white p-3.5 text-left transition-all hover:bg-rose-50 hover:border-rose-400 shadow-xs cursor-pointer"
+              >
+                <div className="flex items-center justify-between w-full">
+                  <span className="font-bold text-xs text-rose-700 flex items-center gap-1.5">
+                    <BookOpen className="size-3.5 text-rose-600" />
+                    Restart Entire Book
+                  </span>
+                  <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[9.5px] font-mono font-bold text-rose-700">
+                    Page 1 • 0%
+                  </span>
+                </div>
+                <p className="text-[11px] text-[color:var(--ink)]/75 leading-relaxed">
+                  Jump back to Page 1, reset reading progress to 0%, and start a completely fresh studio session.
+                </p>
+              </button>
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowStartNewModal(false)}
+                className="rounded-full border border-[color:var(--ink)]/20 px-4 py-1.5 text-xs font-bold text-[color:var(--ink)]/70 hover:bg-[color:var(--ink)]/5 cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

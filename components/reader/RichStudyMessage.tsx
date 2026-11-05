@@ -83,34 +83,34 @@ export default function RichStudyMessage({ content, className }: RichStudyMessag
             </li>
           ),
           table: ({ children }) => (
-            <div className="my-3 overflow-x-auto rounded-xl border-2 border-[#1a191b] bg-white/80 shadow-sm">
+            <div className="my-3 overflow-x-auto rounded-xl border-2 border-[#1a191b] bg-white/95 shadow-sm">
               <table className="w-full text-left text-xs border-collapse">
                 {children}
               </table>
             </div>
           ),
           thead: ({ children }) => (
-            <thead className="bg-[#1a191b] text-[#f6d7a1] uppercase text-[10.5px] tracking-wider font-black">
+            <thead className="bg-[#1a191b] text-white uppercase text-[10.5px] tracking-wider font-black select-none border-b border-white/20 [&_*]:text-white">
               {children}
             </thead>
           ),
           tbody: ({ children }) => (
-            <tbody className="divide-y divide-[#1a191b]/15">
+            <tbody className="divide-y divide-[#1a191b]/15 bg-white/95">
               {children}
             </tbody>
           ),
           tr: ({ children }) => (
-            <tr className="hover:bg-[#ff4c00]/5 transition-colors">
+            <tr className="hover:bg-[#ff4c00]/10 transition-colors">
               {children}
             </tr>
           ),
           th: ({ children }) => (
-            <th className="px-3 py-2 font-black border-r border-white/10 last:border-r-0">
+            <th className="px-3.5 py-2.5 font-black border-r border-white/20 last:border-r-0 text-white text-[11px] tracking-wide [&_*]:text-white [&_strong]:text-[#f6d7a1] [&_strong]:bg-transparent [&_strong]:p-0 [&_strong]:font-black">
               {children}
             </th>
           ),
           td: ({ children }) => (
-            <td className="px-3 py-2 text-[#1a191b] border-r border-[#1a191b]/10 last:border-r-0 align-top">
+            <td className="px-3.5 py-2.5 text-[#1a191b] border-r border-[#1a191b]/10 last:border-r-0 align-top leading-relaxed text-xs">
               {children}
             </td>
           ),

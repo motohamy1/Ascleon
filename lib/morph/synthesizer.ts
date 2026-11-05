@@ -23,6 +23,7 @@ export function synthesizeMorphBlocks(
     segmentIndex,
     pageNumber,
     selectedText,
+    customTopic,
   } = envelope;
 
   const targetText = (selectedText || focalText || "").trim();
@@ -32,11 +33,16 @@ export function synthesizeMorphBlocks(
     .filter((s) => s.length > 15);
 
   // Derive a canonical focal concept
-  let focalConcept = `${bookTitle} — Study Concept (P.${pageNumber})`;
-  if (sentences.length > 0) {
+  let focalConcept = customTopic ? customTopic : `${bookTitle} — Study Concept (P.${pageNumber})`;
+  if (!customTopic && sentences.length > 0) {
     const rawFirst = sentences[0].replace(/^[0-9\.\-\s]+/, "").trim();
     focalConcept = rawFirst.length > 45 ? rawFirst.slice(0, 42) + "..." : rawFirst;
   }
+
+  const textLower = (targetText + " " + focalConcept).toLowerCase();
+  const isEcg = /ecg|ekg|rhythm|st\s*elevation|lead|arrhythmia|ischemia|infarct|troponin|chest pain/i.test(textLower);
+  const isCellular = /receptor|cell|enzyme|antibody|protein|hormone|cascade|membrane|pathway|cytokine/i.test(textLower);
+  const isAlgorithm = /algorithm|guideline|triage|treatment|criteria|management|stage|score/i.test(textLower);
 
   // 1. Build Comprehensive Roadmap Cards (Non-truncated, with mechanisms)
   const cardBadgeTypes: Array<"accent-orange" | "accent-teal" | "accent-magenta" | "accent-cream"> = [
@@ -197,120 +203,124 @@ export function synthesizeMorphBlocks(
     },
   };
 
-  // 4. Default Interactive Multi-Stage Journey
+  // 4. Dynamic Interactive Multi-Stage Journey
+  const stage1SimType = isEcg ? "ecg_rhythm" : isCellular ? "cellular_cascade" : isAlgorithm ? "treatment_tree" : "plaque_rupture";
+  const stage2SimType = isEcg ? "ecg_rhythm" : isCellular ? "cellular_cascade" : "flow_pressure";
+  const stage3SimType = isAlgorithm || isEcg ? "treatment_tree" : "generic_dynamic_flow";
+
   const journey: MorphJourney = {
     title: `Clinical Journey: ${focalConcept}`,
     topic: bookTitle,
-    summary: `Interactive multi-stage exploration grounded in Page ${pageNumber}`,
+    summary: `Interactive multi-stage exploration grounded in ${customTopic ? `Topic: "${customTopic}"` : `Page ${pageNumber}`}`,
     estimatedMinutesToExplore: 5,
     stages: [
       {
         id: "stage-1",
         stageNumber: 1,
-        title: "Etiological Trigger & Vascular Injury",
+        title: `${focalConcept}: Initiating Triggers`,
         phase: "etiology_triggers",
-        description: sentences[0] || `The foundational initiating event occurs at the cellular and tissue interface on Page ${pageNumber}.`,
+        description: sentences[0] || `The foundational initiating event occurs at the cellular and tissue interface for ${focalConcept}.`,
         keyPathologyPoints: [
-          "Disruption of normal homeostasis and protective barriers.",
-          "Release of inflammatory mediators and local cytokine cascade.",
-          "Alteration of baseline laminar fluid dynamics.",
+          "Disruption of normal homeostasis and protective tissue barriers.",
+          "Release of mediators driving local physiological response.",
+          "Initial baseline shift governing downstream presentation.",
         ],
         interactiveSimulation: {
-          simulationType: "plaque_rupture",
-          primaryMetricLabel: "Lesion Severity",
+          simulationType: stage1SimType,
+          primaryMetricLabel: isEcg ? "ST Elevation" : isCellular ? "Receptor Activation" : isAlgorithm ? "Severity Score" : "Lesion Stenosis",
           minMetricValue: 0,
           maxMetricValue: 100,
-          defaultMetricValue: 35,
-          metricUnit: "%",
+          defaultMetricValue: isEcg ? 65 : 35,
+          metricUnit: isEcg ? " mm" : "%",
           hotspots: [
-            { id: "hs-1", label: "Vascular Endothelium", description: "First line of defense against turbulent shear stress.", xPercent: 25, yPercent: 25 },
-            { id: "hs-2", label: "Lipid Core", description: "Sub-endothelial accumulation of oxidized lipoproteins.", xPercent: 50, yPercent: 75 },
+            { id: "hs-1", label: isEcg ? "J-Point Elevation" : "Trigger Boundary", description: "Primary diagnostic pivot indicating acute onset.", xPercent: 25, yPercent: 25 },
+            { id: "hs-2", label: isEcg ? "ST Segment" : "Effector Zone", description: "Critical zone reflecting ischemia or cascade activation.", xPercent: 50, yPercent: 75 },
           ],
         },
         checkpoint: {
-          prompt: "What is the immediate pathophysiological consequence of endothelial barrier breach?",
+          prompt: `What is the primary diagnostic takeaway for ${focalConcept}?`,
           options: [
-            "Sub-endothelial collagen exposure triggering platelet adhesion",
-            "Immediate complete resolution without inflammatory cell recruitment",
-            "Direct systemic alkalosis without localized vascular effects",
-            "Spontaneous arterial dilation and complete resistance to flow",
+            "Recognition of primary initiating markers and early physiological shifts",
+            "Immediate complete resolution without any diagnostic assessment",
+            "Total unresponsiveness of baseline parameters",
+            "Indiscriminate non-targeted observational approach",
           ],
           correctOptionIndex: 0,
-          explanation: "Exposure of sub-endothelial collagen and von Willebrand factor immediately tethers circulating platelets via Glycoprotein Ib-IX-V receptors.",
+          explanation: `Early identification of the core mechanism in ${focalConcept} allows prompt diagnostic categorization and optimal management.`,
         },
-        visualPrompt: "Caricature of platelets adhering to an injured vessel wall under turbulent blood flow.",
+        visualPrompt: `Dynamic visual representation of ${focalConcept} showing initial pathophysiological triggers.`,
       },
       {
         id: "stage-2",
         stageNumber: 2,
-        title: "Pathological Progression & Hemodynamic Shifts",
+        title: `${focalConcept}: Pathological Cascade`,
         phase: "cellular_pathology",
-        description: sentences[1] || `As the process evolves across Page ${pageNumber}, progressive lumen narrowing creates critical shear stress and downstream ischemia.`,
+        description: sentences[1] || `As the process evolves, secondary mechanisms and compensatory pathways alter functional capacity.`,
         keyPathologyPoints: [
-          "Platelet aggregation forming a cross-linked fibrin matrix.",
-          "Severe luminal encroachment (>70% cross-sectional area).",
-          "Mismatch between metabolic myocardial demand and downstream capillary perfusion.",
+          "Downstream signaling and cellular response pathways.",
+          "Critical threshold progression impacting functional tissue reserve.",
+          "Mismatch between metabolic demand and tissue perfusion/balance.",
         ],
         interactiveSimulation: {
-          simulationType: "flow_pressure",
-          primaryMetricLabel: "Lumen Stenosis",
+          simulationType: stage2SimType,
+          primaryMetricLabel: isEcg ? "ST Elevation" : isCellular ? "Cascade Throughput" : "System Load",
           minMetricValue: 0,
           maxMetricValue: 100,
-          defaultMetricValue: 75,
-          metricUnit: "%",
+          defaultMetricValue: 70,
+          metricUnit: isEcg ? " mm" : "%",
           hotspots: [
-            { id: "hs-1", label: "Fibrous Cap Fissure", description: "Thin fibrous cap vulnerable to rupture during sympathetic surges.", xPercent: 50, yPercent: 45 },
-            { id: "hs-2", label: "Downstream Ischemic Bed", description: "Tissue region suffering critical hypoxia and ATP depletion.", xPercent: 80, yPercent: 50 },
+            { id: "hs-1", label: "Threshold Peak", description: "Critical threshold determining stability versus decompensation.", xPercent: 50, yPercent: 45 },
+            { id: "hs-2", label: "Affected Bed", description: "Tissue territory experiencing functional impact.", xPercent: 80, yPercent: 50 },
           ],
         },
         checkpoint: {
-          prompt: "At what stenosis threshold does resting blood flow typically become critically compromised?",
+          prompt: "At what point does pathological compensation become unstable?",
           options: [
-            "At approximately 20% diameter narrowing",
-            "At approximately 50% with normal reserve",
-            "At ≥ 70–75% diameter stenosis (critical threshold)",
-            "Resting flow is never compromised regardless of diameter",
+            "When physiological reserve is exhausted by ongoing stress or injury",
+            "At baseline resting state with normal functional parameters",
+            "Instability is independent of severity or progression",
+            "Only when external interventions are withheld completely",
           ],
-          correctOptionIndex: 2,
-          explanation: "A stenosis of ≥ 70% critically impedes coronary flow reserve, producing symptoms during exertion; at ≥ 90%, resting ischemia ensues.",
+          correctOptionIndex: 0,
+          explanation: "Progressive pathological cascades exceed tissue reserve thresholds, precipitating acute clinical decompensation.",
         },
-        visualPrompt: "Dynamic vector diagram showing blood corpuscles squeezing through a severely stenosed arterial lumen.",
+        visualPrompt: `Dynamic vector diagram illustrating the advancing cascade of ${focalConcept}.`,
       },
       {
         id: "stage-3",
         stageNumber: 3,
-        title: "Clinical Differentiation & Definitive Management",
+        title: `${focalConcept}: Management & Decision Tree`,
         phase: "treatment_algorithm",
-        description: sentences[2] || `Final bedside synthesis: identifying biomarker patterns, ECG indicators, and instituting guideline-directed therapies.`,
+        description: sentences[2] || `Definitive bedside synthesis: interpreting clinical markers, differential diagnosis, and executing guideline-directed therapies.`,
         keyPathologyPoints: [
-          "High-sensitivity cardiac troponins reflect sub-endocardial necrosis.",
-          "Immediate anti-platelet and anti-coagulation therapy.",
-          "Coronary revascularization planning (PCI vs CABG).",
+          "Biomarker integration for definitive diagnostic confirmation.",
+          "Stratification into urgent versus conservative management tracks.",
+          "Evidence-based guideline-directed intervention protocol.",
         ],
         interactiveSimulation: {
-          simulationType: "ecg_rhythm",
-          primaryMetricLabel: "Serum Troponin",
+          simulationType: stage3SimType,
+          primaryMetricLabel: isAlgorithm || isEcg ? "Risk Score" : "Therapeutic Response",
           minMetricValue: 0,
-          maxMetricValue: 500,
-          defaultMetricValue: 120,
-          metricUnit: " ng/L",
+          maxMetricValue: 100,
+          defaultMetricValue: 75,
+          metricUnit: " pts",
           hotspots: [
-            { id: "hs-1", label: "ST Segment", description: "J-point elevation indicates transmural epicardial injury.", xPercent: 40, yPercent: 30 },
-            { id: "hs-2", label: "T Wave Inversion", description: "Sign of delayed ventricular repolarization due to sub-endocardial ischemia.", xPercent: 65, yPercent: 45 },
+            { id: "hs-1", label: "Decision Branch", description: "Critical cutoff determining invasive versus conservative protocol.", xPercent: 40, yPercent: 30 },
+            { id: "hs-2", label: "Target Outcome", description: "Expected endpoint following guideline-directed therapy.", xPercent: 65, yPercent: 45 },
           ],
         },
         checkpoint: {
-          prompt: "Which initial antiplatelet regimen is mandated immediately in suspected Acute Coronary Syndrome?",
+          prompt: `Which approach represents standard-of-care initial management for ${focalConcept}?`,
           options: [
-            "Oral Aspirin (162–325 mg chewed) plus a P2Y12 inhibitor",
-            "High-dose loop diuretics alone without antiplatelet therapy",
-            "Immediate oral anticoagulation with Warfarin monotherapy",
-            "Prophylactic calcium supplements and observation",
+            "Guideline-directed therapy targeted to risk-stratified severity criteria",
+            "High-dose monotherapy without monitoring or stratification",
+            "Delayed reassessment without baseline confirmation",
+            "Non-standard observational holding pattern",
           ],
           correctOptionIndex: 0,
-          explanation: "Dual antiplatelet therapy with non-enteric coated Aspirin (chewed for rapid absorption) and a P2Y12 inhibitor (e.g. Ticagrelor or Clopidogrel) is standard of care.",
+          explanation: "Modern clinical practice mandates objective risk stratification and targeted therapy matched to disease acuity.",
         },
-        visualPrompt: "Clinical algorithm schematic guiding rapid bedside triage and pharmacotherapy.",
+        visualPrompt: `Clinical decision tree guiding evidence-based management for ${focalConcept}.`,
       },
     ],
   };

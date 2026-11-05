@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { IBook, IBookSegmentData } from "@/types";
+import { IBook, IBookSegmentData, UserStudyProgressData } from "@/types";
 import LivingReader from "./LivingReader";
 import VapiControls from "@/components/VapiControls";
 import { BookOpen, LogIn } from "lucide-react";
@@ -12,6 +12,7 @@ interface BookExperienceProps {
   segments: IBookSegmentData[];
   initialMode?: "read" | "voice";
   isAuthenticated?: boolean;
+  initialProgress?: UserStudyProgressData | null;
 }
 
 export default function BookExperience({
@@ -19,6 +20,7 @@ export default function BookExperience({
   segments,
   initialMode = "read",
   isAuthenticated = false,
+  initialProgress = null,
 }: BookExperienceProps) {
   const [mode, setMode] = useState<"read" | "voice">(initialMode);
 
@@ -79,6 +81,7 @@ export default function BookExperience({
       book={book}
       initialSegments={segments}
       onSwitchToVoice={() => setMode("voice")}
+      initialProgress={initialProgress}
     />
   );
 }

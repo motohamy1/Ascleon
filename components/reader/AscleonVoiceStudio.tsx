@@ -599,6 +599,11 @@ export function AscleonVoiceStudio({
             dir="auto"
             value={typedInput}
             onChange={(e) => setTypedInput(e.target.value)}
+            onFocus={(e) => {
+              setTimeout(() => {
+                e.target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+              }, 250);
+            }}
             placeholder={
               isConnected
                 ? activeLang === "ar"

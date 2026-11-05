@@ -31,6 +31,15 @@ export default function PersonalLibrary({
     setSelectedBook(null);
   };
 
+  const handleBookUpdated = (updatedBook: IBook) => {
+    setBooks((prev) =>
+      prev.map((b) => (b._id === updatedBook._id ? ({ ...b, ...updatedBook } as IBook) : b)),
+    );
+    setSelectedBook((prev) =>
+      prev && prev._id === updatedBook._id ? ({ ...prev, ...updatedBook } as IBook) : prev,
+    );
+  };
+
   // Compute unique topics with count
   const topics = useMemo(() => {
     const map = new Map<string, number>();
@@ -137,6 +146,7 @@ export default function PersonalLibrary({
               books={filteredBooks}
               selectedBook={selectedBook}
               onSelectBook={setSelectedBook}
+              onBookUpdated={handleBookUpdated}
             />
           </div>
         ) : (
@@ -194,6 +204,7 @@ export default function PersonalLibrary({
               index={selectedIndex}
               onClose={() => setSelectedBook(null)}
               onDeleted={handleBookDeleted}
+              onUpdated={handleBookUpdated}
             />
           </div>
         </div>

@@ -11,7 +11,7 @@ export interface LanguageOption {
 export const STUDY_LANGUAGES: LanguageOption[] = [
   { id: "en", label: "EN", sublabel: "English only", dir: "ltr" },
   { id: "ar", label: "عربي", sublabel: "Egyptian Colloquial", dir: "rtl" },
-  { id: "mixed", label: "Mix عربي / EN", sublabel: "مكس مصري + English", dir: "ltr" },
+  { id: "mixed", label: "Mix عربي/EN", sublabel: "مكس مصري + English", dir: "ltr" },
 ];
 
 export const DEFAULT_STUDY_LANGUAGE: StudyLanguage = "en";

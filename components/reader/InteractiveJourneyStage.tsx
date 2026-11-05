@@ -71,6 +71,288 @@ export default function InteractiveJourneyStage({
   const lumenRadius = Math.max(8, 48 - (stenosisPercent / 100) * 36);
   const plaqueThickness = (stenosisPercent / 100) * 38;
 
+  // Shared Hotspots Renderer
+  const renderHotspots = () => (
+    <>
+      {sim.hotspots.map((hs) => {
+        const isSelected = selectedHotspotId === hs.id;
+        const cx = (hs.xPercent / 100) * 380 + 10;
+        const cy = (hs.yPercent / 100) * 200 + 20;
+
+        return (
+          <g
+            key={hs.id}
+            onClick={() => setSelectedHotspotId(isSelected ? null : hs.id)}
+            className="cursor-pointer group"
+          >
+            <circle
+              cx={cx}
+              cy={cy}
+              r={isSelected ? "14" : "10"}
+              fill={isSelected ? "#ff4c00" : "#7fd8c9"}
+              opacity="0.95"
+              stroke="#0f0e10"
+              strokeWidth="2"
+            />
+            <text
+              x={cx}
+              y={cy + 3}
+              textAnchor="middle"
+              fill="#0f0e10"
+              fontSize="9"
+              fontWeight="900"
+            >
+              {hs.id.slice(-1)}
+            </text>
+          </g>
+        );
+      })}
+    </>
+  );
+
+  // 1. Telemetry ECG Monitor Simulation (dynamic ST elevation/depression)
+  const renderEcgSimulation = () => {
+    const stShift = ((metricValue - 30) / 70) * 32;
+    const stElevatedY = 120 - Math.max(-15, Math.min(45, stShift));
+    const isStElevated = stShift > 8;
+    const isStDepressed = stShift < -4;
+
+    return (
+      <svg className="w-full h-full" viewBox="0 0 400 240" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <pattern id="ecgGridSmall" width="8" height="8" patternUnits="userSpaceOnUse">
+            <path d="M 8 0 L 0 0 0 8" fill="none" stroke="#251216" strokeWidth="0.5" />
+          </pattern>
+          <pattern id="ecgGridLarge" width="40" height="40" patternUnits="userSpaceOnUse">
+            <rect width="40" height="40" fill="url(#ecgGridSmall)" />
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#481822" strokeWidth="1" />
+          </pattern>
+        </defs>
+
+        <rect x="0" y="0" width="400" height="240" fill="#0d0b0f" />
+        <rect x="0" y="0" width="400" height="240" fill="url(#ecgGridLarge)" opacity="0.8" />
+
+        <text x="14" y="22" fill="#7fd8c9" fontSize="9" fontWeight="900" fontFamily="monospace">
+          LEAD II/V1-V4 • 25 mm/s • 10 mm/mV • HR: 78 BPM
+        </text>
+        <text x="386" y="22" textAnchor="end" fill={isStElevated ? "#ff4c00" : isStDepressed ? "#e0459a" : "#7fd8c9"} fontSize="9.5" fontWeight="900" fontFamily="monospace">
+          {isStElevated ? `⚡ ST-ELEVATION (+${(stShift / 10).toFixed(1)} mm)` : isStDepressed ? "ST-DEPRESSION" : "ISOELECTRIC BASELINE"}
+        </text>
+
+        <line x1="0" y1="120" x2="400" y2="120" stroke="rgba(246,215,161,0.15)" strokeDasharray="3,3" />
+
+        <path
+          d={`M 0 120 L 25 120 Q 38 108 50 120 L 70 120 L 76 132 L 86 35 L 96 155 L 102 120 L 115 ${stElevatedY} L 140 ${stElevatedY} Q 165 ${stElevatedY - 20} 185 120 L 220 120 Q 233 108 245 120 L 265 120 L 271 132 L 281 35 L 291 155 L 297 120 L 310 ${stElevatedY} L 335 ${stElevatedY} Q 360 ${stElevatedY - 20} 380 120 L 400 120`}
+          fill="none"
+          stroke={isStElevated ? "#ff4c00" : "#7fd8c9"}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="transition-all duration-200"
+        />
+
+        <circle cx="102" cy={stElevatedY} r="3" fill="#ff4c00" className="animate-ping" />
+        <text x="102" y={stElevatedY - 8} textAnchor="middle" fill="#f6d7a1" fontSize="9" fontWeight="bold">
+          J-Point
+        </text>
+
+        {renderHotspots()}
+      </svg>
+    );
+  };
+
+  // 2. Cellular & Molecular Cascade Simulation
+  const renderCellularCascadeSimulation = () => {
+    const activationLevel = Math.max(5, Math.min(100, metricValue));
+
+    return (
+      <svg className="w-full h-full" viewBox="0 0 400 240" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="extracellularBg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#121824" />
+            <stop offset="100%" stopColor="#0c111a" />
+          </linearGradient>
+          <linearGradient id="cytoplasmBg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#1a1118" />
+            <stop offset="100%" stopColor="#0f0c10" />
+          </linearGradient>
+        </defs>
+
+        <rect x="0" y="0" width="400" height="90" fill="url(#extracellularBg)" />
+        <text x="14" y="20" fill="#7fd8c9" fontSize="9" fontWeight="bold">EXTRACELLULAR FLUID</text>
+
+        <rect x="0" y="90" width="400" height="24" fill="#302028" stroke="#ff4c00" strokeWidth="1" strokeDasharray="4,2" />
+        <text x="200" y="106" textAnchor="middle" fill="#f6d7a1" fontSize="8" fontWeight="bold" letterSpacing="2">
+          PLASMA MEMBRANE BILAYER
+        </text>
+
+        <rect x="0" y="114" width="400" height="126" fill="url(#cytoplasmBg)" />
+        <text x="14" y="132" fill="#f6d7a1" fontSize="9" fontWeight="bold">INTRACELLULAR CYTOPLASM</text>
+
+        <rect x="180" y="70" width="40" height="64" rx="8" fill="#43a08f" stroke="#7fd8c9" strokeWidth="2" />
+        <text x="200" y="105" textAnchor="middle" fill="#0f0e10" fontSize="8" fontWeight="900">RECEPTOR</text>
+
+        <circle cx="200" cy="62" r={activationLevel > 30 ? "8" : "6"} fill="#ff4c00" stroke="#fff" strokeWidth="1.5" className="animate-pulse" />
+
+        <path d="M 200 134 L 200 170 L 140 195" fill="none" stroke="#ff4c00" strokeWidth="2" strokeDasharray="4,3" />
+        <path d="M 200 170 L 260 195" fill="none" stroke="#43a08f" strokeWidth="2" strokeDasharray="4,3" />
+
+        <circle cx="140" cy="195" r="16" fill="#a1156e" stroke="#f08dc7" strokeWidth="1.5" />
+        <text x="140" y="198" textAnchor="middle" fill="#fff" fontSize="8" fontWeight="bold">Effector</text>
+
+        <circle cx="260" cy="195" r="16" fill="#e0459a" stroke="#fff" strokeWidth="1.5" />
+        <text x="260" y="198" textAnchor="middle" fill="#fff" fontSize="8" fontWeight="bold">Kinase</text>
+
+        <rect x="100" y="215" width="200" height="20" rx="10" fill="#0f0e10" stroke="#ff4c00" strokeWidth="1" />
+        <text x="200" y="228" textAnchor="middle" fill="#ff4c00" fontSize="8.5" fontWeight="black">
+          Receptor Activation Level: {activationLevel}%
+        </text>
+
+        {renderHotspots()}
+      </svg>
+    );
+  };
+
+  // 3. Clinical Decision Algorithm / Treatment Tree Simulation
+  const renderTreatmentTreeSimulation = () => {
+    const score = metricValue;
+    const isHighRisk = score >= 50;
+
+    return (
+      <svg className="w-full h-full" viewBox="0 0 400 240" preserveAspectRatio="xMidYMid meet">
+        <rect x="0" y="0" width="400" height="240" fill="#0d0c11" />
+
+        <text x="14" y="22" fill="#f6d7a1" fontSize="9" fontWeight="900" letterSpacing="1">
+          CLINICAL ALGORITHM &bull; SCORE: {score}
+        </text>
+
+        <rect x="135" y="38" width="130" height="34" rx="8" fill="#1b1a22" stroke="#f6d7a1" strokeWidth="1.5" />
+        <text x="200" y="54" textAnchor="middle" fill="#fff" fontSize="8.5" fontWeight="bold">Initial Presentation</text>
+        <text x="200" y="66" textAnchor="middle" fill="#7fd8c9" fontSize="7.5">Diagnostic Evaluation</text>
+
+        <path d="M 200 72 L 200 95 L 90 95 L 90 120" fill="none" stroke={!isHighRisk ? "#43a08f" : "#333"} strokeWidth={!isHighRisk ? "2.5" : "1"} />
+        <path d="M 200 72 L 200 95 L 310 95 L 310 120" fill="none" stroke={isHighRisk ? "#ff4c00" : "#333"} strokeWidth={isHighRisk ? "2.5" : "1"} />
+
+        <rect x="25" y="120" width="130" height="42" rx="8" fill={!isHighRisk ? "#152420" : "#131215"} stroke={!isHighRisk ? "#43a08f" : "#2a2830"} strokeWidth={!isHighRisk ? "2" : "1"} />
+        <text x="90" y="137" textAnchor="middle" fill={!isHighRisk ? "#7fd8c9" : "#666"} fontSize="8.5" fontWeight="bold">Low-Risk / Stable</text>
+        <text x="90" y="151" textAnchor="middle" fill={!isHighRisk ? "#fff" : "#555"} fontSize="7.5">Medical Management</text>
+
+        <rect x="245" y="120" width="130" height="42" rx="8" fill={isHighRisk ? "#281216" : "#131215"} stroke={isHighRisk ? "#ff4c00" : "#2a2830"} strokeWidth={isHighRisk ? "2" : "1"} />
+        <text x="310" y="137" textAnchor="middle" fill={isHighRisk ? "#ff4c00" : "#666"} fontSize="8.5" fontWeight="bold">High-Risk / Acute</text>
+        <text x="310" y="151" textAnchor="middle" fill={isHighRisk ? "#fff" : "#555"} fontSize="7.5">Urgent Intervention</text>
+
+        <rect x="80" y="186" width="240" height="26" rx="13" fill="#0f0e10" stroke={isHighRisk ? "#ff4c00" : "#43a08f"} strokeWidth="1.5" />
+        <text x="200" y="202" textAnchor="middle" fill={isHighRisk ? "#ff4c00" : "#7fd8c9"} fontSize="8.5" fontWeight="black">
+          {isHighRisk ? "⚡ High-Risk Threshold Exceeded: Urgent Track" : "✓ Standard Medical Protocol Active"}
+        </text>
+
+        {renderHotspots()}
+      </svg>
+    );
+  };
+
+  // 4. Hemodynamic & Vascular Flow Simulation (for stenosis & pressures)
+  const renderHemodynamicSimulation = () => (
+    <svg
+      className="w-full h-full"
+      viewBox="0 0 400 240"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <defs>
+        <linearGradient id="vesselWall" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#a1156e" stopOpacity="0.8" />
+          <stop offset="100%" stopColor="#4a1525" stopOpacity="0.9" />
+        </linearGradient>
+
+        <linearGradient id="atheromaCore" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#ffdf88" />
+          <stop offset="60%" stopColor="#d4a853" />
+          <stop offset="100%" stopColor="#8a601e" />
+        </linearGradient>
+
+        <linearGradient id="bloodStream" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#ff4c00" stopOpacity="0.9" />
+          <stop offset="50%" stopColor="#d42c00" stopOpacity="1" />
+          <stop offset="100%" stopColor="#a1156e" stopOpacity="0.9" />
+        </linearGradient>
+      </defs>
+
+      <rect x="0" y="20" width="400" height="28" fill="url(#vesselWall)" rx="4" />
+      <rect x="0" y="192" width="400" height="28" fill="url(#vesselWall)" rx="4" />
+
+      <line x1="0" y1="48" x2="400" y2="48" stroke="#ff4c00" strokeWidth="2" strokeDasharray="6,3" />
+      <line x1="0" y1="192" x2="400" y2="192" stroke="#ff4c00" strokeWidth="2" strokeDasharray="6,3" />
+
+      <rect
+        x="0"
+        y={48 + plaqueThickness * 0.4}
+        width="400"
+        height={Math.max(16, 144 - plaqueThickness * 1.5)}
+        fill="url(#bloodStream)"
+        opacity="0.35"
+      />
+
+      <path
+        d={`M 0 120 Q 200 ${120 + (stenosisPercent > 70 ? 25 : 0)} 400 120`}
+        fill="none"
+        stroke="#ff4c00"
+        strokeWidth={Math.max(1.5, 4 - (stenosisPercent / 100) * 3)}
+        strokeDasharray="12,8"
+        className="animate-pulse"
+      />
+
+      {plaqueThickness > 4 && (
+        <path
+          d={`M 110 192 Q 200 ${192 - plaqueThickness * 2.2} 290 192 Z`}
+          fill="url(#atheromaCore)"
+          stroke="#ff4c00"
+          strokeWidth="2"
+          className="transition-all duration-300"
+        />
+      )}
+
+      {stenosisPercent >= 75 && (
+        <g className="animate-bounce">
+          <circle cx="200" cy={192 - plaqueThickness * 2.2} r="6" fill="#ff4c00" />
+          <path
+            d={`M 194 ${192 - plaqueThickness * 2.2} L 206 ${192 - plaqueThickness * 2.2}`}
+            stroke="#ffffff"
+            strokeWidth="2"
+          />
+          <text
+            x="200"
+            y={170 - plaqueThickness * 2.2}
+            textAnchor="middle"
+            fill="#ff4c00"
+            fontSize="10"
+            fontWeight="bold"
+            fontFamily="sans-serif"
+          >
+            &bull; Critical Narrowing Point
+          </text>
+        </g>
+      )}
+
+      {renderHotspots()}
+    </svg>
+  );
+
+  const renderActiveSimulationSvg = () => {
+    switch (sim.simulationType) {
+      case "ecg_rhythm":
+        return renderEcgSimulation();
+      case "cellular_cascade":
+        return renderCellularCascadeSimulation();
+      case "treatment_tree":
+      case "generic_dynamic_flow":
+        return renderTreatmentTreeSimulation();
+      case "flow_pressure":
+      case "plaque_rupture":
+      default:
+        return renderHemodynamicSimulation();
+    }
+  };
+
   return (
     <div className="w-full flex flex-col gap-4 text-[#0f0e10]">
       {/* 1. Journey Header & Multi-Stage Milestone Stepper */}
@@ -164,132 +446,9 @@ export default function InteractiveJourneyStage({
             </span>
           </div>
 
-          {/* SVG Canvas for Hemodynamic & Plaque Simulation */}
+          {/* Dynamic Interactive SVG Canvas */}
           <div className="relative w-full h-64 sm:h-72 rounded-xl bg-gradient-to-b from-[#18161c] to-[#0c0b0d] border border-white/10 flex items-center justify-center overflow-hidden">
-            <svg
-              className="w-full h-full"
-              viewBox="0 0 400 240"
-              preserveAspectRatio="xMidYMid meet"
-            >
-              <defs>
-                {/* Vessel wall gradient */}
-                <linearGradient id="vesselWall" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#a1156e" stopOpacity="0.8" />
-                  <stop offset="100%" stopColor="#4a1525" stopOpacity="0.9" />
-                </linearGradient>
-
-                {/* Atheroma / lipid core gradient */}
-                <linearGradient id="atheromaCore" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#ffdf88" />
-                  <stop offset="60%" stopColor="#d4a853" />
-                  <stop offset="100%" stopColor="#8a601e" />
-                </linearGradient>
-
-                {/* Blood flow gradient */}
-                <linearGradient id="bloodStream" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stopColor="#ff4c00" stopOpacity="0.9" />
-                  <stop offset="50%" stopColor="#d42c00" stopOpacity="1" />
-                  <stop offset="100%" stopColor="#a1156e" stopOpacity="0.9" />
-                </linearGradient>
-              </defs>
-
-              {/* Upper & Lower Arterial Vessel Walls */}
-              <rect x="0" y="20" width="400" height="28" fill="url(#vesselWall)" rx="4" />
-              <rect x="0" y="192" width="400" height="28" fill="url(#vesselWall)" rx="4" />
-
-              {/* Endothelial Borders */}
-              <line x1="0" y1="48" x2="400" y2="48" stroke="#ff4c00" strokeWidth="2" strokeDasharray="6,3" />
-              <line x1="0" y1="192" x2="400" y2="192" stroke="#ff4c00" strokeWidth="2" strokeDasharray="6,3" />
-
-              {/* Flowing Lumen (Blood Stream) */}
-              <rect
-                x="0"
-                y={48 + plaqueThickness * 0.4}
-                width="400"
-                height={Math.max(16, 144 - plaqueThickness * 1.5)}
-                fill="url(#bloodStream)"
-                opacity="0.35"
-              />
-
-              {/* Animated Blood Flow Streamlines */}
-              <path
-                d={`M 0 120 Q 200 ${120 + (stenosisPercent > 70 ? 25 : 0)} 400 120`}
-                fill="none"
-                stroke="#ff4c00"
-                strokeWidth={Math.max(1.5, 4 - (stenosisPercent / 100) * 3)}
-                strokeDasharray="12,8"
-                className="animate-pulse"
-              />
-
-              {/* Dynamic Atherosclerotic Plaque Mound */}
-              {plaqueThickness > 4 && (
-                <path
-                  d={`M 110 192 Q 200 ${192 - plaqueThickness * 2.2} 290 192 Z`}
-                  fill="url(#atheromaCore)"
-                  stroke="#ff4c00"
-                  strokeWidth="2"
-                  className="transition-all duration-300"
-                />
-              )}
-
-              {/* Fibrous Cap & Rupture Point (at > 75% stenosis) */}
-              {stenosisPercent >= 75 && (
-                <g className="animate-bounce">
-                  <circle cx="200" cy={192 - plaqueThickness * 2.2} r="6" fill="#ff4c00" />
-                  <path
-                    d={`M 194 ${192 - plaqueThickness * 2.2} L 206 ${192 - plaqueThickness * 2.2}`}
-                    stroke="#ffffff"
-                    strokeWidth="2"
-                  />
-                  <text
-                    x="200"
-                    y={170 - plaqueThickness * 2.2}
-                    textAnchor="middle"
-                    fill="#ff4c00"
-                    fontSize="10"
-                    fontWeight="bold"
-                    fontFamily="sans-serif"
-                  >
-                    ⚡ Plaque Fissure / Thrombus!
-                  </text>
-                </g>
-              )}
-
-              {/* Interactive Clickable Hotspots */}
-              {sim.hotspots.map((hs) => {
-                const isSelected = selectedHotspotId === hs.id;
-                const cx = (hs.xPercent / 100) * 380 + 10;
-                const cy = (hs.yPercent / 100) * 200 + 20;
-
-                return (
-                  <g
-                    key={hs.id}
-                    onClick={() => setSelectedHotspotId(isSelected ? null : hs.id)}
-                    className="cursor-pointer group"
-                  >
-                    <circle
-                      cx={cx}
-                      cy={cy}
-                      r={isSelected ? "14" : "10"}
-                      fill={isSelected ? "#ff4c00" : "#7fd8c9"}
-                      opacity="0.9"
-                      stroke="#0f0e10"
-                      strokeWidth="2"
-                    />
-                    <text
-                      x={cx}
-                      y={cy + 3}
-                      textAnchor="middle"
-                      fill="#0f0e10"
-                      fontSize="9"
-                      fontWeight="900"
-                    >
-                      {hs.id.slice(-1)}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
+            {renderActiveSimulationSvg()}
 
             {/* Hotspot Detailed Tooltip Overlay */}
             {selectedHotspotId && (

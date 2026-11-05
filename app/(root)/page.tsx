@@ -4,15 +4,17 @@ import {
   getUserSessions,
   SessionHistoryItem,
 } from "@/lib/actions/session.actions";
+import { getLatestUserStudyProgress } from "@/lib/actions/study-progress.actions";
 import Welcome from "@/components/welcome/Welcome";
 import ProgressView from "@/components/progress/ProgressView";
 import { IBook } from "@/types";
 
 const SpacePage = async () => {
-  const [user, booksResult, sessionsResult] = await Promise.all([
+  const [user, booksResult, sessionsResult, progressResult] = await Promise.all([
     currentUser(),
     getUserBooks(),
     getUserSessions(40),
+    getLatestUserStudyProgress(),
   ]);
 
   const books = (booksResult.success ? (booksResult.data as IBook[]) ?? [] : []);
@@ -20,7 +22,14 @@ const SpacePage = async () => {
     ? (sessionsResult.data as SessionHistoryItem[])
     : [];
 
-  return <ProgressView books={books} sessions={sessions} firstName={user?.firstName ?? null} />;
+  return (
+    <ProgressView
+      books={books}
+      sessions={sessions}
+      firstName={user?.firstName ?? null}
+      latestStudyProgress={progressResult?.data || null}
+    />
+  );
 };
 
 const HomePage = async () => {

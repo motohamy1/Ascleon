@@ -3,7 +3,8 @@
 import React, { useMemo } from "react";
 import { IBook } from "@/types";
 import { getBookSpinePalette, getBookReadingTime, cn } from "@/lib/utils";
-import { Star, Clock, BookOpen } from "lucide-react";
+import { classifyBookForShelf } from "@/lib/library/shelf-classifier";
+import { Star, Clock, BookOpen, Bookmark } from "lucide-react";
 
 interface BookSpineProps {
   book: IBook;
@@ -26,6 +27,7 @@ export default function BookSpine({
   );
 
   const readingTime = useMemo(() => getBookReadingTime(book), [book]);
+  const coords = useMemo(() => classifyBookForShelf(book), [book]);
 
   // Subtle height and width variety for realistic library shelf feel
   const dimensions = useMemo(() => {
@@ -67,9 +69,17 @@ export default function BookSpine({
         )}
       >
         <div className="w-full flex items-center justify-between text-[10px] text-[#C4B5A5] font-mono">
-          <span className="truncate max-w-[90px]">{book.topic || "General"}</span>
-          <span className="text-[9px] uppercase font-bold text-[#ff4c00] bg-[#ff4c00]/15 px-1 rounded">
-            {book.sourceCategory?.replace('_', ' ') || 'textbook'}
+          <span className="truncate max-w-[90px] font-semibold text-amber-200">
+            {coords.displaySpecialty}
+          </span>
+          <span
+            className="text-[9px] uppercase font-bold px-1 rounded shadow-xs"
+            style={{
+              backgroundColor: `${coords.formatMeta.accentColor}25`,
+              color: coords.formatMeta.accentColor,
+            }}
+          >
+            {coords.displayFormat}
           </span>
           <span className="flex items-center gap-0.5">
             <Clock className="w-2.5 h-2.5" />

@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
       snippedDiagram = null,
       language = "en",
       studyScope,
+      customTopic,
     } = body;
 
     const bookId = body.bookId || body.id || "default-book";
@@ -56,9 +57,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!focalText && !snippedDiagram) {
+    if (!focalText && !snippedDiagram && !customTopic) {
       return NextResponse.json(
-        { error: "Missing focal reading text or diagram to morph" },
+        { error: "Missing focal reading text, topic, or diagram to morph" },
         { status: 400 },
       );
     }
@@ -66,14 +67,17 @@ export async function POST(req: NextRequest) {
     const { userId } = await auth();
 
     // Compute true content hash to prevent stale cache collisions
-    const targetPassage = (selectedText || focalText).trim();
-    const hashInput = `${language}_${targetPassage.slice(0, 1000)}_${snippedDiagram ? "img" : "noimg"}`;
+    const targetPassage = customTopic
+      ? `FOCUS TOPIC: "${customTopic}"\n\n${(selectedText || focalText).trim()}`
+      : (selectedText || focalText).trim();
+    const hashInput = `${language}_${customTopic || ""}_${targetPassage.slice(0, 1000)}_${snippedDiagram ? "img" : "noimg"}`;
     const selectionHash = crypto.createHash("sha256").update(hashInput).digest("hex").slice(0, 16);
 
     // 1. Build Context Envelope & Baseline Fallback
     const envelope: ContextEnvelope = {
       bookId: String(bookId),
       bookTitle: bookTitle || "Study Document",
+      customTopic: customTopic || undefined,
       segmentIndex,
       pageNumber,
       focalText,
@@ -112,7 +116,65 @@ export async function POST(req: NextRequest) {
     if (apiKey) {
       try {
         const ai = new GoogleGenAI({ apiKey });
-        const prompt = `You are Ascleon's elite Multi-Modal Morph Engine.
+        const prompt = customTopic
+          ? `You are Ascleon's elite Multi-Modal Morph Engine.
+Transform the comprehensive topic "${customTopic}" from "${bookTitle}" into an end-to-end interactive conceptual learning micro-site featuring structured roadmap cards, an interactive concept mind map, and a living multi-stage journey.
+
+Target Topic: "${customTopic}"
+Book: "${bookTitle}"
+Source Reference Text:
+"""
+${targetPassage.slice(0, 5000)}
+"""
+
+Instructions:
+1. Ground every card, node, checkpoint, and simulation strictly in this topic and study material.
+2. Select the simulationType that best represents this topic:
+   - "ecg_rhythm" if topic involves ECG leads, rhythm, electrical conduction, myocardial infarction, or electrophysiology.
+   - "cellular_cascade" if topic involves cellular receptors, molecular pathways, hormones, enzymes, pharmacology, or genetics.
+   - "treatment_tree" if topic involves clinical decision pathways, guidelines, triage, diagnostic steps, or management algorithms.
+   - "flow_pressure" if topic involves vascular hemodynamics, pressures, stenosis, fluid mechanics, or respiratory flow.
+   - "generic_dynamic_flow" for other systems.
+3. Produce a JSON object matching this schema:
+   - "focalConcept": "${customTopic}"
+   - "conceptMap": Hierarchical mind map:
+     - "root": Central topic title (max 5 words)
+     - "pillars": Array of 3-4 key pillars with "label", "category", "details", "leafLabel", "leafDetails"
+   - "cards": 3-4 structured cards with "badge", "badgeType", "title", "subtitle", "bulletPoints" (3 points)
+   - "flowNodes": 3-4 causal nodes with "id", "label", "sublabel", "category", "details"
+   - "journey": A multi-stage interactive clinical journey:
+     - "title": "Clinical Journey: ${customTopic}"
+     - "topic": "${customTopic}"
+     - "summary": 1-2 sentence overview
+     - "stages": Array of 3 sequential stages:
+       - "id": "stage-1", "stage-2", "stage-3"
+       - "stageNumber": 1, 2, 3
+       - "title": Milestone title
+       - "phase": "etiology_triggers" | "cellular_pathology" | "clinical_presentation" | "treatment_algorithm"
+       - "description": Comprehensive clinical explanation
+       - "keyPathologyPoints": 2-3 key pathological/physiological mechanisms
+       - "interactiveSimulation": {
+           "simulationType": "ecg_rhythm" | "cellular_cascade" | "flow_pressure" | "plaque_rupture" | "treatment_tree" | "generic_dynamic_flow",
+           "primaryMetricLabel": string,
+           "defaultMetricValue": number,
+           "metricUnit": string,
+           "hotspots": [
+             { "id": "hs-1", "label": string, "description": string, "xPercent": number, "yPercent": number },
+             { "id": "hs-2", "label": string, "description": string, "xPercent": number, "yPercent": number }
+           ]
+         }
+       - "checkpoint": {
+           "prompt": "Clinical decision question to advance to the next step",
+           "options": ["Option A", "Option B", "Option C", "Option D"],
+           "correctOptionIndex": number,
+           "explanation": "Detailed clinical rationale"
+         }
+       - "visualPrompt": "Visual panel description"
+
+Return ONLY a valid JSON object matching this structure.
+
+${buildLanguageDirective(language as StudyLanguage, "json")}`
+          : `You are Ascleon's elite Multi-Modal Morph Engine.
 Transform this study material from "${bookTitle}" (Page ${pageNumber}${studyScope?.endPage && studyScope.endPage > pageNumber ? ` to ${studyScope.endPage}` : ""}) into an interactive conceptual learning micro-site featuring structured roadmap cards, an interactive concept mind map, and a living multi-stage journey.
 
 Source Text to Morph:
@@ -122,30 +184,21 @@ ${targetPassage.slice(0, 5000)}
 
 Instructions:
 1. Ground every card, node, checkpoint, and simulation strictly in this study material.
-2. Produce a JSON object with:
+2. Select the simulationType that best represents this topic:
+   - "ecg_rhythm" if topic involves ECG leads, rhythm, electrical conduction, myocardial infarction, or electrophysiology.
+   - "cellular_cascade" if topic involves cellular receptors, molecular pathways, hormones, enzymes, pharmacology, or genetics.
+   - "treatment_tree" if topic involves clinical decision pathways, guidelines, triage, diagnostic steps, or management algorithms.
+   - "flow_pressure" if topic involves vascular hemodynamics, pressures, stenosis, fluid mechanics, or respiratory flow.
+   - "generic_dynamic_flow" for other systems.
+3. Produce a JSON object with:
    - "focalConcept": Punchy concept title (max 6 words).
    - "conceptMap": Hierarchical mind map:
      - "root": Central topic title (max 5 words)
-     - "pillars": Array of 3-4 key pillars with:
-       - "label": Pillar title (max 4 words)
-       - "category": Category (e.g. "Hemodynamics", "Remodeling", "ECG", "Rule")
-       - "details": 1-2 sentence core mechanism
-       - "leafLabel": Concrete metric or cutoff (max 5 words)
-       - "leafDetails": Exact finding or clinical significance
-   - "cards": 3-4 structured cards with:
-     - "badge": e.g. "Core Invariant", "Key Mechanism", "Clinical Pearl", "Rule of Thumb"
-     - "badgeType": "accent-orange" | "accent-teal" | "accent-magenta" | "accent-cream"
-     - "title": Clear descriptive title (max 6 words)
-     - "subtitle": 1-sentence insight
-     - "bulletPoints": 3 high-yield bullet points directly from the text
-   - "flowNodes": 3-4 causal nodes representing the process flow:
-     - "id": "node-1", "node-2", etc.
-     - "label": Step label (max 3 words)
-     - "sublabel": Brief context (max 4 words)
-     - "category": "input" | "process" | "decision" | "output"
-     - "details": Clear explanation of this step
+     - "pillars": Array of 3-4 key pillars with "label", "category", "details", "leafLabel", "leafDetails"
+   - "cards": 3-4 structured cards with "badge", "badgeType", "title", "subtitle", "bulletPoints" (3 points)
+   - "flowNodes": 3-4 causal nodes with "id", "label", "sublabel", "category", "details"
    - "journey": A multi-stage interactive clinical journey:
-     - "title": Canonical journey title (e.g. "Interactive Journey: [Topic]")
+     - "title": Canonical journey title
      - "topic": Topic name
      - "summary": 1-2 sentence overview
      - "stages": Array of 3 sequential stages:
@@ -156,7 +209,7 @@ Instructions:
        - "description": Comprehensive clinical explanation of this milestone
        - "keyPathologyPoints": 2-3 key pathological/physiological mechanisms
        - "interactiveSimulation": {
-           "simulationType": "plaque_rupture" | "flow_pressure" | "cellular_cascade" | "ecg_rhythm",
+           "simulationType": "ecg_rhythm" | "cellular_cascade" | "flow_pressure" | "plaque_rupture" | "treatment_tree" | "generic_dynamic_flow",
            "primaryMetricLabel": string,
            "defaultMetricValue": number,
            "metricUnit": string,
@@ -189,24 +242,33 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
           });
         }
 
-        const generatePromise = ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: [{ role: "user", parts: userParts }],
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0.2,
-            thinkingConfig: {
-              thinkingBudget: 0,
+        let response: any = null;
+        try {
+          const generatePromise = ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: [{ role: "user", parts: userParts }],
+            config: {
+              responseMimeType: "application/json",
+              temperature: 0.2,
             },
-          },
-        });
+          });
 
-        // 30-second timeout guard to ensure complex multi-card schemas never drop prematurely
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Gemini generation timed out after 30s")), 30000)
-        );
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Gemini generation timed out after 28s")), 28000)
+          );
 
-        const response: any = await Promise.race([generatePromise, timeoutPromise]);
+          response = await Promise.race([generatePromise, timeoutPromise]);
+        } catch (primaryErr) {
+          console.warn("Primary Gemini 3 Flash morph generation failed, attempting gemini-3.8-flash fallback:", primaryErr);
+          response = await ai.models.generateContent({
+            model: "gemini-3.8-flash",
+            contents: [{ role: "user", parts: userParts }],
+            config: {
+              responseMimeType: "application/json",
+              temperature: 0.2,
+            },
+          });
+        }
 
         const responseText = response.text?.trim() || "";
         if (responseText) {

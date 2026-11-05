@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useMemo, useTransition } from "react";
+import React, { useMemo, useState, useTransition } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { IBook, ReadingStatus } from "@/types";
+import { IBook, ReadingStatus, SourceCategoryType } from "@/types";
 import {
   getBookReadingTime,
   getBookYear,
@@ -17,12 +17,22 @@ import {
   Calendar,
   Layers,
   Trash2,
+  FolderPlus,
+  Edit3,
+  Check,
+  Compass,
 } from "lucide-react";
 import {
   toggleBookFavorite,
   updateBookReadingStatus,
   deleteBook,
+  updateBookShelfPlacement,
 } from "@/lib/actions/book.actions";
+import {
+  classifyBookForShelf,
+  CANONICAL_SPECIALTIES,
+  FORMAT_META,
+} from "@/lib/library/shelf-classifier";
 import { toast } from "sonner";
 
 interface ExLibrisCardProps {
@@ -30,6 +40,7 @@ interface ExLibrisCardProps {
   onClose: () => void;
   index: number;
   onDeleted?: (bookId: string) => void;
+  onUpdated?: (updatedBook: IBook) => void;
 }
 
 export default function ExLibrisCard({
@@ -37,6 +48,7 @@ export default function ExLibrisCard({
   onClose,
   index,
   onDeleted,
+  onUpdated,
 }: ExLibrisCardProps) {
   const [isPending, startTransition] = useTransition();
   const [isFavorite, setIsFavorite] = React.useState(Boolean(book.isFavorite));
@@ -45,6 +57,44 @@ export default function ExLibrisCard({
   );
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
+
+  // Shelf Placement State
+  const initialCoords = useMemo(() => classifyBookForShelf(book), [book]);
+  const [isEditingPlacement, setIsEditingPlacement] = useState(false);
+  const [selectedFormat, setSelectedFormat] = useState<SourceCategoryType>(
+    (book.sourceCategory as SourceCategoryType) || initialCoords.sourceCategory,
+  );
+  const [customSectionInput, setCustomSectionInput] = useState<string>(
+    book.customSection || "",
+  );
+  const [selectedTopic, setSelectedTopic] = useState<string>(
+    book.topic || initialCoords.displaySpecialty,
+  );
+  const [isSavingPlacement, setIsSavingPlacement] = useState(false);
+
+  const [savedProgress, setSavedProgress] = React.useState<{
+    lastStudiedPage: number;
+    totalPages: number;
+    progressPercent: number;
+  } | null>(null);
+
+  React.useEffect(() => {
+    try {
+      const localStr =
+        localStorage.getItem(`ascleon_progress_${book.slug}`) ||
+        localStorage.getItem(`ascleon_progress_${book._id}`);
+      if (localStr) {
+        const parsed = JSON.parse(localStr);
+        if (parsed.lastStudiedPage && parsed.lastStudiedPage > 1) {
+          setSavedProgress({
+            lastStudiedPage: parsed.lastStudiedPage,
+            totalPages: parsed.totalPages || 1,
+            progressPercent: parsed.progressPercent || 0,
+          });
+        }
+      }
+    } catch { }
+  }, [book.slug, book._id]);
 
   const readingTime = getBookReadingTime(book);
   const year = getBookYear(book);
@@ -106,6 +156,30 @@ export default function ExLibrisCard({
     } finally {
       setIsDeleting(false);
       setShowDeleteConfirm(false);
+    }
+  };
+
+  const handleSaveShelfPlacement = async () => {
+    setIsSavingPlacement(true);
+    try {
+      const trimmedCustom = customSectionInput.trim() || null;
+      const res = await updateBookShelfPlacement(book._id, {
+        sourceCategory: selectedFormat,
+        topic: selectedTopic.trim() || undefined,
+        customSection: trimmedCustom,
+      });
+
+      if (res.success && res.data) {
+        toast.success("Shelf placement updated");
+        onUpdated?.(res.data as IBook);
+        setIsEditingPlacement(false);
+      } else {
+        toast.error(res.error || "Failed to update placement");
+      }
+    } catch {
+      toast.error("Error updating shelf placement");
+    } finally {
+      setIsSavingPlacement(false);
     }
   };
 
@@ -203,7 +277,16 @@ export default function ExLibrisCard({
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 text-xs font-sans text-[#736353]">
             <span className="inline-flex items-center gap-1 bg-[#EFE8DD] px-2.5 py-0.5 rounded-full font-medium text-[#4A3F35]">
               <Layers className="w-3 h-3 text-[#8B3A2B]" />
-              {topic}
+              {initialCoords.displaySpecialty}
+            </span>
+            <span
+              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider shadow-2xs"
+              style={{
+                backgroundColor: `${initialCoords.formatMeta.accentColor}20`,
+                color: initialCoords.formatMeta.accentColor,
+              }}
+            >
+              {initialCoords.displayFormat}
             </span>
             <span className="inline-flex items-center gap-1">
               <Calendar className="w-3 h-3" />
@@ -236,8 +319,116 @@ export default function ExLibrisCard({
         </div>
       </div>
 
+      {/* Shelf Bay & Placement Configuration Section */}
+      <div className="mt-5 p-3.5 bg-[#F4EDE2] border border-[#D8C7B0] rounded-xl font-sans">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Compass className="w-4 h-4 text-[#8C3A2B]" />
+            <span className="text-xs font-bold text-[#3B2F25] uppercase tracking-wider">
+              Shelf Section Placement
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsEditingPlacement((prev) => !prev)}
+            className="text-xs text-[#8C3A2B] font-semibold flex items-center gap-1 hover:underline cursor-pointer"
+          >
+            <Edit3 className="w-3 h-3" />
+            <span>{isEditingPlacement ? "Close Editor" : "Change Section"}</span>
+          </button>
+        </div>
+
+        {!isEditingPlacement ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[#5C4D3E]">
+            <span>Current Bay:</span>
+            <span className="font-semibold text-[#1C160F] bg-white/70 px-2 py-0.5 rounded border border-[#D8C7B0]">
+              {book.customSection ? `✦ Section: ${book.customSection}` : initialCoords.displaySpecialty}
+            </span>
+            <span>•</span>
+            <span className="font-medium text-[#7C5A35]">
+              Format: {initialCoords.displayFormat}
+            </span>
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-col gap-3 pt-2 border-t border-[#D8C7B0]/60 animate-in fade-in duration-150">
+            {/* 1. Source Format Picker */}
+            <div>
+              <label className="block text-[11px] font-bold text-[#5C4D3E] mb-1">
+                Source Format:
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-xs">
+                {(
+                  [
+                    { id: "textbook", label: "Textbook" },
+                    { id: "lecture_notes", label: "Lecture / Notes" },
+                    { id: "clinical_sheet", label: "Clinical Sheet" },
+                    { id: "guideline_paper", label: "Guideline" },
+                    { id: "exam_review", label: "Exam Review" },
+                  ] as const
+                ).map((fmt) => (
+                  <button
+                    key={fmt.id}
+                    type="button"
+                    onClick={() => setSelectedFormat(fmt.id)}
+                    className={cn(
+                      "px-2 py-1 rounded-md text-[11px] border font-medium transition-all text-left truncate cursor-pointer",
+                      selectedFormat === fmt.id
+                        ? "bg-[#212A3B] text-white border-[#212A3B] shadow-xs"
+                        : "bg-white text-[#5C4D3E] border-[#D8C7B0] hover:bg-[#EFE8DD]",
+                    )}
+                  >
+                    {fmt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 2. Custom Section Placement */}
+            <div>
+              <label className="block text-[11px] font-bold text-[#5C4D3E] mb-1">
+                Custom Shelf Section (creates dedicated wooden divider bay):
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={customSectionInput}
+                  onChange={(e) => setCustomSectionInput(e.target.value)}
+                  placeholder="e.g. Cardiology Lectures, MRCP Part 1, Ward Rotations..."
+                  className="flex-1 px-2.5 py-1.5 rounded-md bg-white border border-[#D8C7B0] text-xs text-[#1C160F] placeholder-[#8C7A68] focus:outline-hidden focus:border-[#8C3A2B]"
+                />
+                {customSectionInput && (
+                  <button
+                    type="button"
+                    onClick={() => setCustomSectionInput("")}
+                    className="text-[10px] text-gray-500 hover:text-black underline cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <p className="text-[10px] text-[#7C6C5C] mt-1 italic">
+                Leave blank to automatically group by Specialty ({initialCoords.specialtyMeta.badge}).
+              </p>
+            </div>
+
+            {/* Save Button */}
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                disabled={isSavingPlacement}
+                onClick={handleSaveShelfPlacement}
+                className="px-3 py-1 rounded-md bg-[#8C3A2B] hover:bg-[#722F23] text-white text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <Check className="w-3 h-3" />
+                <span>{isSavingPlacement ? "Updating..." : "Save Placement"}</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Reading Status Selector */}
-      <div className="mt-6 pt-4 border-t border-[#E8DCCB] flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-5 pt-4 border-t border-[#E8DCCB] flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-xs font-sans font-medium text-[#6B5E50]">
           <span>Reading status:</span>
           <div className="inline-flex rounded-lg border border-[#D8C7B0] p-0.5 bg-[#EFE8DD]">
@@ -299,13 +490,35 @@ export default function ExLibrisCard({
 
       {/* Action Button */}
       <div className="mt-5 pt-2 font-sans">
-        <Link
-          href={`/books/${book.slug}`}
-          className="flex w-full items-center justify-center gap-2.5 rounded-xl border-2 border-[color:var(--ink)] bg-[color:var(--ink)] px-5 py-3 text-center text-sm font-bold text-[color:var(--cream)] shadow-chip transition-all hover:bg-[#232029] active:scale-[0.99]"
-        >
-          <BookOpen className="size-4 text-[color:var(--orange)]" />
-          <span>Enter Study Space</span>
-        </Link>
+        {savedProgress && savedProgress.lastStudiedPage > 1 ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between text-xs text-[#6B5E50] font-medium">
+              <span>Continue from Page {savedProgress.lastStudiedPage} of {savedProgress.totalPages}</span>
+              <span className="font-bold text-[#A04000]">{savedProgress.progressPercent}%</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#E8DCCB]">
+              <div
+                className="h-full bg-[#A04000] transition-all duration-500 ease-out"
+                style={{ width: `${savedProgress.progressPercent}%` }}
+              />
+            </div>
+            <Link
+              href={`/books/${book.slug}`}
+              className="mt-1 flex w-full items-center justify-center gap-2.5 rounded-xl border-2 border-[color:var(--ink)] bg-[color:var(--ink)] px-5 py-3 text-center text-sm font-bold text-[color:var(--cream)] shadow-chip transition-all hover:bg-[#232029] active:scale-[0.99]"
+            >
+              <BookOpen className="h-4 w-4" />
+              <span>Resume Studying (p. {savedProgress.lastStudiedPage})</span>
+            </Link>
+          </div>
+        ) : (
+          <Link
+            href={`/books/${book.slug}`}
+            className="flex w-full items-center justify-center gap-2.5 rounded-xl border-2 border-[color:var(--ink)] bg-[color:var(--ink)] px-5 py-3 text-center text-sm font-bold text-[color:var(--cream)] shadow-chip transition-all hover:bg-[#232029] active:scale-[0.99]"
+          >
+            <BookOpen className="h-4 w-4" />
+            <span>Open Study Space</span>
+          </Link>
+        )}
       </div>
     </div>
   );

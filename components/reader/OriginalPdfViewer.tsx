@@ -681,6 +681,31 @@ export default function OriginalPdfViewer({
     []
   );
 
+  // Initial scroll when pdfDoc finishes loading and currentPage > 1
+  const initialScrollDoneRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!loading && pdfDoc && currentPage > 1 && !initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true;
+      const timer = setTimeout(() => {
+        const pageEl = document.getElementById(`pdf-page-container-${currentPage}`);
+        if (pageEl && containerRef.current) {
+          isInternalScrollRef.current = true;
+          pageEl.scrollIntoView({
+            behavior: "smooth",
+            block: scrollOrientation === "horizontal" ? "nearest" : "start",
+            inline: scrollOrientation === "horizontal" ? "center" : "nearest",
+          });
+          pageEl.classList.add("ring-4", "ring-[color:var(--orange)]", "shadow-xl", "transition-all", "duration-1000");
+          setTimeout(() => {
+            pageEl.classList.remove("ring-4", "ring-[color:var(--orange)]", "shadow-xl");
+            isInternalScrollRef.current = false;
+          }, 2500);
+        }
+      }, 350);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, pdfDoc, currentPage, scrollOrientation]);
+
   // 6. External Jump to Page (with strict loop guard against scroll fighting)
   useEffect(() => {
     // If invalid, already at page, just reported by our own scroll, or user is currently scrolling: DO NOT scroll!
@@ -1245,8 +1270,8 @@ export default function OriginalPdfViewer({
         className={cn(
           "custom-scrollbar relative flex-1 transition-colors select-text",
           scrollOrientation === "horizontal"
-            ? "overflow-x-auto overflow-y-hidden p-2 sm:p-4 flex items-center snap-x snap-mandatory"
-            : "p-3 sm:p-5 overflow-y-auto overflow-x-auto",
+            ? "overflow-x-auto overflow-y-hidden overscroll-x-contain p-2 sm:p-4 flex items-center snap-x snap-mandatory"
+            : "p-2 sm:p-5 overflow-y-auto overflow-x-auto overscroll-y-contain",
           theme === "paper" && "bg-[#2b2a31]",
           theme === "ink" && "bg-[#111014]",
           isSnipActive && "cursor-crosshair select-none"

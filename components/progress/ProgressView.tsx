@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { ArrowUpRight } from 'lucide-react';
-import { IBook } from '@/types';
+import { IBook, UserStudyProgressData } from '@/types';
 import { SessionHistoryItem } from '@/lib/actions/session.actions';
 import { AscleonLogo } from '@/components/ui/AscleonLogo';
 
@@ -9,6 +9,7 @@ interface ProgressViewProps {
   books: IBook[];
   sessions: SessionHistoryItem[];
   firstName: string | null;
+  latestStudyProgress?: UserStudyProgressData | null;
 }
 
 const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -71,7 +72,12 @@ const StatTile = ({
   </div>
 );
 
-const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
+const ProgressView = ({
+  books,
+  sessions,
+  firstName,
+  latestStudyProgress,
+}: ProgressViewProps) => {
   const name = (firstName ?? 'reader').toUpperCase();
   const favorites = books.filter((b) => b.isFavorite).length;
   const minutes = Math.round(
@@ -91,12 +97,29 @@ const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
   };
   const statusTotal = books.length;
 
-  // Resume target: book from the latest session, else an in-progress book, else newest book
+  // Resume target: book from latest study progress > latest voice session > in-progress book > newest book
+  const targetStudyBook = latestStudyProgress
+    ? books.find((b) => b.slug === latestStudyProgress.bookSlug)
+    : null;
+
   const resume =
+    (targetStudyBook && {
+      href: `/books/${targetStudyBook.slug}`,
+      title: targetStudyBook.title,
+      cover: targetStudyBook.coverURL,
+      page: latestStudyProgress?.lastStudiedPage,
+      totalPages: latestStudyProgress?.totalPages,
+      progressPercent: latestStudyProgress?.progressPercent,
+      activeIntent: latestStudyProgress?.studioState?.activeIntent,
+    }) ??
     (sessions[0]?.bookSlug && {
       href: `/books/${sessions[0].bookSlug}`,
       title: sessions[0].bookTitle,
       cover: sessions[0].bookCoverURL,
+      page: undefined,
+      totalPages: undefined,
+      progressPercent: undefined,
+      activeIntent: undefined,
     }) ??
     (books.find((b) => b.readingStatus === 'in_progress') ?? books[0]) ?? null;
 
@@ -157,13 +180,32 @@ const ProgressView = ({ books, sessions, firstName }: ProgressViewProps) => {
                     />
                   )}
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="meta-label text-[color:var(--ink)]/70">
                     Continue reading
                   </p>
-                  <h2 className="display mt-2 line-clamp-3 text-[26px] sm:text-[30px] leading-[1.05] text-[color:var(--ink)]">
+                  <h2 className="display mt-1 line-clamp-2 text-[24px] sm:text-[28px] leading-[1.05] text-[color:var(--ink)]">
                     {resume.title}
                   </h2>
+                  {"progressPercent" in resume && typeof (resume as any).progressPercent === "number" && (
+                    <div className="mt-3 flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-[color:var(--ink)]/80">
+                        <span>Page {(resume as any).page} of {(resume as any).totalPages}</span>
+                        <span>{(resume as any).progressPercent}%</span>
+                      </div>
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--ink)]/15">
+                        <div
+                          className="h-full bg-[color:var(--ink)] transition-all duration-700 ease-out"
+                          style={{ width: `${(resume as any).progressPercent}%` }}
+                        />
+                      </div>
+                      {(resume as any).activeIntent && (
+                        <span className="text-[9.5px] font-bold uppercase tracking-wider text-[color:var(--ink)]/65">
+                          Studio: {(resume as any).activeIntent}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </Link>

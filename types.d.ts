@@ -15,6 +15,44 @@ export type ReadingStatus = "not_started" | "in_progress" | "read";
 export type SourceCategoryType = "lecture_notes" | "textbook" | "clinical_sheet" | "guideline_paper" | "exam_review";
 export type IngestionStatusType = "pending" | "processing" | "completed" | "failed";
 
+export interface StudioSessionState {
+  activeIntent?: "chat" | "morph" | "voice" | "summary" | "quiz";
+  studyLanguage?: string;
+  studyScope?: {
+    type: "page" | "range" | "topic";
+    startPage: number;
+    endPage: number;
+    topicTitle?: string;
+    topicId?: string;
+  };
+  morphActiveTopic?: string | null;
+  chatMessages?: Array<{
+    sender: "user" | "ai";
+    text: string;
+    time?: string;
+    provider?: string;
+    model?: string;
+    toolsUsed?: string[];
+    citations?: string[];
+    imageUrl?: string;
+    topicLocation?: any;
+    authoritativeReferences?: any[];
+  }>;
+  activeQBankIdx?: number;
+  lastActiveSnippet?: string;
+}
+
+export interface UserStudyProgressData {
+  bookSlug: string;
+  bookId?: string;
+  lastStudiedPage: number;
+  totalPages: number;
+  progressPercent: number;
+  readingStatus: ReadingStatus;
+  lastStudiedAt: string;
+  studioState?: StudioSessionState;
+}
+
 export interface IBook extends Document {
   _id: string;
   clerkId: string;
@@ -30,6 +68,7 @@ export interface IBook extends Document {
   totalSegments: number;
   totalPages?: number;
   sourceCategory?: SourceCategoryType;
+  customSection?: string;
   domain?: string;
   subspecialty?: string;
   pedagogicalStyle?: string;
@@ -110,6 +149,7 @@ export interface CreateBook {
   totalSegments?: number;
   totalPages?: number;
   sourceCategory?: SourceCategoryType;
+  customSection?: string;
   domain?: string;
   subspecialty?: string;
   pedagogicalStyle?: string;

@@ -142,6 +142,7 @@ export interface ContextEnvelope {
   bookId: string;
   bookTitle: string;
   bookTopic?: string;
+  customTopic?: string;
   segmentIndex: number;
   pageNumber: number;
   focalText: string;

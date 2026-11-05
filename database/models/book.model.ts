@@ -39,6 +39,7 @@ const BookSchema = new Schema<IBook>(
       enum: ["lecture_notes", "textbook", "clinical_sheet", "guideline_paper", "exam_review"],
       default: "textbook",
     },
+    customSection: { type: String, default: null },
     domain: { type: String },
     subspecialty: { type: String },
     pedagogicalStyle: { type: String },
