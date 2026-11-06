@@ -72,9 +72,9 @@ export default function StudyScopeBar({
   };
 
   return (
-    <div className="w-full bg-[#fbf7f0] border-b border-[#0f0e10]/15 sm:border-b-2 sm:border-[#0f0e10] px-2 sm:px-3 py-1 sm:py-1.5 flex items-center justify-between gap-1.5 sm:gap-2 text-xs min-h-[36px] sm:min-h-[38px] shrink-0 overflow-x-auto touch-pan-x overscroll-x-contain no-scrollbar">
+    <div className="w-full max-w-full bg-[#fbf7f0] border-b border-[#0f0e10]/15 sm:border-b-2 sm:border-[#0f0e10] px-2 sm:px-3 py-1 sm:py-1.5 flex items-center justify-between gap-1.5 sm:gap-2 text-xs min-h-[34px] sm:min-h-[38px] shrink-0 overflow-x-auto touch-pan-x overscroll-x-contain no-scrollbar">
       {/* Scope Mode Pills */}
-      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 flex-nowrap">
         <span className="text-[10px] font-black uppercase tracking-wider text-[#0f0e10]/60 mr-0.5 hidden md:inline whitespace-nowrap">
           Study Scope:
         </span>
@@ -84,14 +84,17 @@ export default function StudyScopeBar({
           type="button"
           onClick={handleSelectSinglePage}
           className={cn(
-            "cursor-pointer px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full font-bold flex items-center gap-1 transition-all border text-[10.5px] sm:text-xs whitespace-nowrap shrink-0",
+            "cursor-pointer px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full font-bold flex items-center gap-1 transition-all border text-[10px] sm:text-xs whitespace-nowrap shrink-0",
             currentScope.type === "page"
               ? "bg-[#0f0e10] text-[#f6d7a1] border-[#0f0e10] shadow-xs"
               : "bg-white text-[#0f0e10] border-[#0f0e10]/20 hover:border-[#0f0e10]"
           )}
         >
           <BookOpen className="size-2.5 sm:size-3 text-[#ff4c00]" />
-          <span>Active Page ({currentPage})</span>
+          <span>
+            <span className="sm:hidden">P.{currentPage}</span>
+            <span className="hidden sm:inline">Active Page ({currentPage})</span>
+          </span>
         </button>
 
         {/* 2. Page Range Button */}
@@ -105,7 +108,7 @@ export default function StudyScopeBar({
             }
           }}
           className={cn(
-            "cursor-pointer px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full font-bold flex items-center gap-1 transition-all border text-[10.5px] sm:text-xs whitespace-nowrap shrink-0",
+            "cursor-pointer px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full font-bold flex items-center gap-1 transition-all border text-[10px] sm:text-xs whitespace-nowrap shrink-0",
             currentScope.type === "range"
               ? "bg-[#663820] text-white border-[#663820] shadow-xs"
               : "bg-white text-[#0f0e10] border-[#0f0e10]/20 hover:border-[#0f0e10]"
@@ -115,7 +118,12 @@ export default function StudyScopeBar({
           <span>
             {currentScope.type === "range"
               ? `Range: P.${currentScope.startPage}–${currentScope.endPage}`
-              : "Page Range..."}
+              : (
+                <>
+                  <span className="sm:hidden">Range</span>
+                  <span className="hidden sm:inline">Page Range...</span>
+                </>
+              )}
           </span>
         </button>
 
@@ -129,7 +137,7 @@ export default function StudyScopeBar({
               max={totalPages || 999}
               value={rangeStart}
               onChange={(e) => setRangeStart(parseInt(e.target.value) || 1)}
-              className="w-10 px-1 py-0.5 text-[11px] border border-gray-300 rounded font-bold"
+              className="w-8 sm:w-10 px-1 py-0.5 text-[10px] sm:text-[11px] border border-gray-300 rounded font-bold"
             />
             <span className="text-[9px] text-[#0f0e10]/70">to</span>
             <input
@@ -138,12 +146,12 @@ export default function StudyScopeBar({
               max={totalPages || 999}
               value={rangeEnd}
               onChange={(e) => setRangeEnd(parseInt(e.target.value) || rangeStart)}
-              className="w-10 px-1 py-0.5 text-[11px] border border-gray-300 rounded font-bold"
+              className="w-8 sm:w-10 px-1 py-0.5 text-[10px] sm:text-[11px] border border-gray-300 rounded font-bold"
             />
             <button
               type="button"
               onClick={handleApplyRange}
-              className="bg-[#ff4c00] text-[#0f0e10] font-black px-1.5 py-0.5 rounded text-[9.5px] cursor-pointer"
+              className="bg-[#ff4c00] text-[#0f0e10] font-black px-1.5 py-0.5 rounded text-[9px] sm:text-[9.5px] cursor-pointer"
             >
               Set
             </button>
@@ -162,14 +170,14 @@ export default function StudyScopeBar({
                 }
               }}
               className={cn(
-                "cursor-pointer px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full font-bold flex items-center gap-1 transition-all border outline-none text-[10.5px] sm:text-xs max-w-[150px] sm:max-w-[220px] truncate",
+                "cursor-pointer px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-full font-bold flex items-center gap-1 transition-all border outline-none text-[10px] sm:text-xs max-w-[130px] sm:max-w-[220px] truncate",
                 currentScope.type === "topic"
                   ? "bg-[#ff4c00] text-[#0f0e10] border-[#0f0e10] font-black"
                   : "bg-white text-[#0f0e10] border-[#0f0e10]/20 hover:border-[#0f0e10]"
               )}
             >
               <option value="" disabled>
-                ✦ Select Complete Topic ({topics.length} detected)
+                ✦ Topic ({topics.length})
               </option>
               {topics.map((t) => (
                 <option key={t.id} value={t.id}>

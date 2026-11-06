@@ -127,7 +127,7 @@ export default function LivingReader({
   const [fitMode, setFitMode] = useState<FitMode>("fit-width");
   const [paragraphInteractiveMode, setParagraphInteractiveMode] = useState(true);
   const [mobileActivePane, setMobileActivePane] = useState<"reader" | "studio">("reader");
-  const [isLgScreen, setIsLgScreen] = useState(true);
+  const [isLgScreen, setIsLgScreen] = useState(false);
 
   // Session Continuation & Progress State
   const [resumedSessionInfo, setResumedSessionInfo] = useState<UserStudyProgressData | null>(null);
@@ -1399,10 +1399,10 @@ export default function LivingReader({
       {/* ================================================================= */}
       <div
         ref={containerRef}
-        className="flex flex-1 overflow-hidden p-2 gap-2"
+        className="flex flex-1 overflow-hidden p-1 sm:p-2 gap-1 sm:gap-2"
         style={{ cursor: isDraggingSplit ? "col-resize" : "default" }}
       >
-        <div className="flex h-full w-full gap-2 overflow-hidden">
+        <div className="flex h-full w-full gap-1 sm:gap-2 overflow-hidden">
           {/* ============================================================== */}
           {/* LEFT PANEL: AUTHENTIC PDF READER (CLEAN, NO REDUNDANT TOOLBARS)*/}
           {/* ============================================================== */}
@@ -1527,6 +1527,14 @@ export default function LivingReader({
                   onSnipDiagram={handleSnipDiagram}
                   zoomLevel={zoomLevel}
                   fitMode={fitMode}
+                  onZoomIn={handleZoomIn}
+                  onZoomOut={handleZoomOut}
+                  onFitWidth={handleFitWidth}
+                  onFitPage={handleFitPage}
+                  onZoomReset={() => {
+                    setFitMode("normal");
+                    setZoomLevel(100);
+                  }}
                   theme={theme}
                   className="flex-1"
                 />
@@ -1781,7 +1789,7 @@ export default function LivingReader({
             )}
           >
             {/* TOP CONTROL BAR - Responsive & Aligned with Left Toolbar */}
-            <div className="flex h-11 shrink-0 items-center justify-between gap-1.5 sm:gap-2.5 border-b border-white/10 px-2.5 sm:px-3.5 bg-[#141318]">
+            <div className="flex h-11 shrink-0 items-center justify-between gap-1 sm:gap-2 border-b border-white/10 px-2 sm:px-3 bg-[#141318] overflow-x-auto no-scrollbar flex-nowrap">
               {/* Back to Source button on mobile */}
               <button
                 type="button"
@@ -1866,17 +1874,19 @@ export default function LivingReader({
               <StudyLanguageSwitch
                 currentLanguage={studyLanguage}
                 onLanguageChange={setStudyLanguage}
+                compact={!isLgScreen}
               />
 
               {/* Start New Session Trigger */}
               <button
                 type="button"
                 onClick={() => setShowStartNewModal(true)}
-                className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-white/20 bg-white/10 px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-bold text-[color:var(--cream)] shadow-xs transition-all hover:bg-white/20 whitespace-nowrap"
+                className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-white/20 bg-white/10 px-1.5 sm:px-2.5 py-1 text-[10px] sm:text-xs font-bold text-[color:var(--cream)] shadow-xs transition-all hover:bg-white/20 whitespace-nowrap"
                 title="Start a new session or restart book"
               >
                 <RotateCcw className="size-3 text-[color:var(--orange)]" />
-                <span className="hidden sm:inline">Start </span>New
+                <span className="hidden sm:inline">Start </span>
+                <span>New</span>
               </button>
 
               {/* Ascleon Live Voice Button */}
@@ -1886,7 +1896,7 @@ export default function LivingReader({
                   setActiveIntent("voice");
                 }}
                 className={cn(
-                  "flex shrink-0 cursor-pointer items-center gap-1 rounded-full border-2 border-[color:var(--ink)] px-2 sm:px-3 py-1 text-[11px] sm:text-xs font-bold transition-all whitespace-nowrap",
+                  "flex shrink-0 cursor-pointer items-center gap-1 rounded-full border-2 border-[color:var(--ink)] px-2 sm:px-3 py-1 text-[10px] sm:text-xs font-bold transition-all whitespace-nowrap",
                   activeIntent === "voice"
                     ? "bg-[#43a08f] text-[color:var(--ink)] shadow-chip"
                     : "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip hover:-translate-y-0.5",
@@ -1955,7 +1965,7 @@ export default function LivingReader({
             />
 
             {/* STUDIO SWITCHER TABS (4 CORE TABS: AI Chat, Morph, Voice, Q banks) */}
-            <div className="grid shrink-0 grid-cols-4 gap-1 border-b border-white/10 bg-black/40 p-1 sm:p-1.5 text-[10.5px] sm:text-[11px]">
+            <div className="grid shrink-0 grid-cols-4 gap-0.5 sm:gap-1 border-b border-white/10 bg-black/40 p-1 sm:p-1.5 text-[10px] sm:text-[11px]">
               <button
                 type="button"
                 onClick={() => setActiveIntent("chat")}

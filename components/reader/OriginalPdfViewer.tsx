@@ -23,6 +23,8 @@ import {
   Trash2,
   ArrowDownUp,
   ArrowLeftRight,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +43,11 @@ interface OriginalPdfViewerProps {
   onSnipDiagram?: (imageDataUrl: string, pageNumber: number, targetFeature?: "morph" | "chat" | "qbank") => void;
   zoomLevel?: number;
   fitMode?: "normal" | "fit-width" | "fit-page";
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onFitWidth?: () => void;
+  onFitPage?: () => void;
+  onZoomReset?: () => void;
   scrollOrientation?: "vertical" | "horizontal";
   theme?: "paper" | "ink";
   className?: string;
@@ -273,13 +280,15 @@ const PdfPageItem = React.memo(function PdfPageItem({
       className={cn(
         "pdf-page-wrapper relative overflow-visible rounded-md bg-white shadow-2xl select-text",
         scrollOrientation === "horizontal"
-          ? "mx-2.5 my-auto shrink-0 snap-center self-center"
-          : "mx-auto my-3",
+          ? "mx-2.5 my-auto shrink-0 snap-center self-center overflow-visible"
+          : "mx-auto my-2 sm:my-3 max-w-full",
+        fitMode === "fit-width" && "max-w-full overflow-hidden",
         isSnipActive && "cursor-crosshair"
       )}
       style={{
         width: `${estimatedWidth}px`,
         height: `${estimatedHeight}px`,
+        maxWidth: fitMode === "fit-width" ? "100%" : undefined,
       }}
       onMouseDown={(e) => onSnipMouseDown(e, pageNum)}
       onMouseMove={(e) => onSnipMouseMove(e, pageNum)}
@@ -304,7 +313,7 @@ const PdfPageItem = React.memo(function PdfPageItem({
       {renderSnipOverlay(pageNum)}
 
       {/* Canvas */}
-      <canvas ref={canvasRef} className="block" />
+      <canvas ref={canvasRef} className="block max-w-full h-auto" />
 
       {/* TextLayer */}
       <div
@@ -327,12 +336,60 @@ export default function OriginalPdfViewer({
   onClearSelection,
   onSnipDiagram,
   zoomLevel = 100,
-  fitMode = "normal",
+  fitMode = "fit-width",
+  onZoomIn,
+  onZoomOut,
+  onFitWidth,
+  onFitPage,
+  onZoomReset,
   scrollOrientation: initialScrollOrientation = "vertical",
   theme = "paper",
   className,
 }: OriginalPdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Local fallback state if parent does not provide callbacks
+  const [internalFitMode, setInternalFitMode] = useState<"normal" | "fit-width" | "fit-page">(fitMode || "fit-width");
+  const [internalZoomLevel, setInternalZoomLevel] = useState<number>(zoomLevel || 100);
+
+  useEffect(() => {
+    if (fitMode) setInternalFitMode(fitMode);
+  }, [fitMode]);
+
+  useEffect(() => {
+    if (zoomLevel) setInternalZoomLevel(zoomLevel);
+  }, [zoomLevel]);
+
+  const activeFitMode = fitMode || internalFitMode;
+  const activeZoomLevel = zoomLevel || internalZoomLevel;
+
+  const handleTriggerFitWidth = () => {
+    if (onFitWidth) onFitWidth();
+    else setInternalFitMode("fit-width");
+  };
+
+  const handleTriggerFitPage = () => {
+    if (onFitPage) onFitPage();
+    else setInternalFitMode("fit-page");
+  };
+
+  const handleTriggerZoomIn = () => {
+    if (onZoomIn) onZoomIn();
+    else setInternalZoomLevel((prev) => Math.min(250, prev + 15));
+  };
+
+  const handleTriggerZoomOut = () => {
+    if (onZoomOut) onZoomOut();
+    else setInternalZoomLevel((prev) => Math.max(50, prev - 15));
+  };
+
+  const handleTriggerZoomReset = () => {
+    if (onZoomReset) onZoomReset();
+    else {
+      setInternalFitMode("normal");
+      setInternalZoomLevel(100);
+    }
+  };
 
   // Scroll Orientation State (Vertical or Horizontal carousel/slide)
   const [scrollOrientation, setScrollOrientation] = useState<"vertical" | "horizontal">(
@@ -574,38 +631,47 @@ export default function OriginalPdfViewer({
     };
   }, [fileURL]);
 
-  // 3. Compute Scale with Width/Height Fitting
+  // 3. Compute Scale with Width/Height Fitting (Responsive on Mobile & Desktop)
   const computedScale = useMemo(() => {
-    const w = containerSize.width || containerRef.current?.clientWidth || 0;
-    const h = containerSize.height || containerRef.current?.clientHeight || 0;
+    const windowW = typeof window !== "undefined" ? window.innerWidth : 375;
+    const windowH = typeof window !== "undefined" ? window.innerHeight : 667;
+    const defaultW = Math.max(280, Math.min(windowW - 16, 760));
+    const defaultH = Math.max(300, windowH - 120);
 
-    // Responsive width fitting ratio to eliminate blank borders
-    const widthRatio = w && docPageSize.width ? Math.max(100, w - 24) / docPageSize.width : 1.35;
-    const baseZoom = (zoomLevel / 100) * widthRatio;
+    const w = containerSize.width || containerRef.current?.clientWidth || defaultW;
+    const h = containerSize.height || containerRef.current?.clientHeight || defaultH;
 
-    if (!w || !h) return baseZoom;
+    const pageWidth = docPageSize.width || 595;
+    const pageHeight = docPageSize.height || 842;
+
+    const padX = w < 480 ? 8 : 20;
+    const padY = h < 600 ? 16 : 30;
 
     if (scrollOrientation === "horizontal") {
-      const availableH = Math.max(100, h - 30);
-      const scaleH = availableH / docPageSize.height;
-      return Math.max(0.35, Math.min(2.8, scaleH * (zoomLevel / 100)));
+      const availableH = Math.max(100, h - padY);
+      const scaleH = availableH / pageHeight;
+      return Math.max(0.15, Math.min(3.2, scaleH * (activeZoomLevel / 100)));
     }
 
-    if (fitMode === "fit-width") {
-      const availableW = Math.max(100, w - 20);
-      return Math.max(0.35, Math.min(3.2, (availableW / docPageSize.width) * (zoomLevel / 100)));
+    if (activeFitMode === "fit-width") {
+      const availableW = Math.max(100, w - padX);
+      const scaleW = availableW / pageWidth;
+      return Math.max(0.15, Math.min(3.2, scaleW * (activeZoomLevel / 100)));
     }
 
-    if (fitMode === "fit-page") {
-      const availableW = Math.max(100, w - 20);
-      const availableH = Math.max(100, h - 30);
-      const scaleW = availableW / docPageSize.width;
-      const scaleH = availableH / docPageSize.height;
-      return Math.max(0.35, Math.min(3.2, Math.min(scaleW, scaleH) * (zoomLevel / 100)));
+    if (activeFitMode === "fit-page") {
+      const availableW = Math.max(100, w - padX);
+      const availableH = Math.max(100, h - padY);
+      const scaleW = availableW / pageWidth;
+      const scaleH = availableH / pageHeight;
+      return Math.max(0.15, Math.min(3.2, Math.min(scaleW, scaleH) * (activeZoomLevel / 100)));
     }
 
-    return baseZoom;
-  }, [zoomLevel, fitMode, containerSize, docPageSize, scrollOrientation]);
+    // Normal mode: proportional to container width ratio
+    const availableW = Math.max(100, w - padX);
+    const widthRatio = availableW / pageWidth;
+    return Math.max(0.15, Math.min(3.2, widthRatio * (activeZoomLevel / 100)));
+  }, [activeZoomLevel, activeFitMode, containerSize, docPageSize, scrollOrientation]);
 
   // 4. Register Canvas Callback for Page Items (stable reference)
   const handleRegisterCanvas = useCallback(
@@ -1098,7 +1164,7 @@ export default function OriginalPdfViewer({
       {/* ================================================================= */}
       {/* COMPACT TOOLBAR: PAGE SYNC & SNIP TOOL                             */}
       {/* ================================================================= */}
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-black/20 bg-[#16151a] px-3 text-xs text-[color:var(--cream)] z-30">
+      <div className="flex h-10 shrink-0 items-center justify-between border-b border-black/20 bg-[#16151a] px-2 sm:px-3 text-xs text-[color:var(--cream)] z-30 gap-1 sm:gap-2 overflow-x-auto no-scrollbar flex-nowrap">
         {/* Page Jumper */}
         <div className="flex items-center gap-1.5">
           <button
@@ -1175,6 +1241,69 @@ export default function OriginalPdfViewer({
           >
             <ChevronRight className="size-3.5" />
           </button>
+        </div>
+
+        {/* View Mode & Fit Options (Mobile & Desktop Responsive) */}
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Fit Width / Fit Page Controls */}
+          <div className="flex items-center rounded-full border border-white/20 bg-white/5 p-0.5 text-[10px]">
+            <button
+              type="button"
+              onClick={handleTriggerFitWidth}
+              className={cn(
+                "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 font-bold transition-all whitespace-nowrap",
+                activeFitMode === "fit-width"
+                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs"
+                  : "text-[color:var(--cream)]/70 hover:text-white"
+              )}
+              title="Fit to Screen Width (No Horizontal Overflow)"
+            >
+              <span className="sm:hidden">Width</span>
+              <span className="hidden sm:inline">Fit Width</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleTriggerFitPage}
+              className={cn(
+                "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 font-bold transition-all whitespace-nowrap",
+                activeFitMode === "fit-page"
+                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs"
+                  : "text-[color:var(--cream)]/70 hover:text-white"
+              )}
+              title="Fit Full Page to Screen"
+            >
+              <span className="sm:hidden">Page</span>
+              <span className="hidden sm:inline">Fit Page</span>
+            </button>
+          </div>
+
+          {/* Zoom In/Out Pill */}
+          <div className="flex items-center rounded-full border border-white/20 bg-white/5 p-0.5 text-[10px]">
+            <button
+              type="button"
+              onClick={handleTriggerZoomOut}
+              className="flex size-5 cursor-pointer items-center justify-center rounded-full text-[color:var(--cream)]/80 hover:bg-white/10 hover:text-white"
+              title="Zoom Out"
+            >
+              <ZoomOut className="size-2.5 sm:size-3" />
+            </button>
+            <button
+              type="button"
+              onClick={handleTriggerZoomReset}
+              className="px-1 text-[9.5px] sm:text-[10px] font-mono font-bold text-[color:var(--cream)] hover:text-[color:var(--orange)] cursor-pointer"
+              title="Click to reset zoom"
+            >
+              {activeFitMode === "normal" ? `${activeZoomLevel}%` : "Auto"}
+            </button>
+            <button
+              type="button"
+              onClick={handleTriggerZoomIn}
+              className="flex size-5 cursor-pointer items-center justify-center rounded-full text-[color:var(--cream)]/80 hover:bg-white/10 hover:text-white"
+              title="Zoom In"
+            >
+              <ZoomIn className="size-2.5 sm:size-3" />
+            </button>
+          </div>
         </div>
 
         {/* Tools: Scroll Orientation & Snip Diagram */}
@@ -1270,8 +1399,8 @@ export default function OriginalPdfViewer({
         className={cn(
           "custom-scrollbar relative flex-1 transition-colors select-text",
           scrollOrientation === "horizontal"
-            ? "overflow-x-auto overflow-y-hidden overscroll-x-contain p-2 sm:p-4 flex items-center snap-x snap-mandatory"
-            : "p-2 sm:p-5 overflow-y-auto overflow-x-auto overscroll-y-contain",
+            ? "overflow-x-auto overflow-y-hidden overscroll-x-contain p-1.5 sm:p-4 flex items-center snap-x snap-mandatory"
+            : "p-1 sm:p-4 overflow-y-auto overflow-x-auto overscroll-y-contain w-full max-w-full",
           theme === "paper" && "bg-[#2b2a31]",
           theme === "ink" && "bg-[#111014]",
           isSnipActive && "cursor-crosshair select-none"
