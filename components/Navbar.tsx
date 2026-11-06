@@ -20,7 +20,6 @@ const navItems = [
   { href: '/space/active', label: 'Study Space', match: '/space/active', extraMatch: '/books' },
   { href: '/library', label: 'Library', match: '/library' },
   { href: '/space/revision', label: 'Revision', match: '/space/revision' },
-
 ];
 
 const isActiveRoute = (pathname: string, match: string, extraMatch?: string) =>
@@ -38,11 +37,17 @@ const Navbar = () => {
   const clerk = useClerk();
   const [open, setOpen] = useState(false);
 
+  // Close mobile drawer on Escape key
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // Close mobile drawer whenever route changes
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
 
   // Collapse marketing navbar inside the dedicated Study Space to maximize vertical viewing canvas
   const isStudySpace = pathname?.startsWith('/books/') || pathname === '/space/active';
@@ -66,27 +71,27 @@ const Navbar = () => {
     'shadow-nav-deep border-2 border-[color:var(--ink)] bg-[color:var(--cream)]';
 
   return (
-    <header className="fixed inset-x-0 top-0 z-50 px-3.5 pt-3 sm:px-6 md:px-8 lg:px-10 xl:px-12 sm:pt-4">
-      <div className="relative mx-auto flex w-full max-w-[1840px] 2xl:max-w-[2160px] items-center justify-between gap-3">
+    <header className="fixed inset-x-0 top-0 z-50 px-3 pt-3 sm:px-6 md:px-8 lg:px-10 xl:px-12 sm:pt-4">
+      <div className="relative mx-auto flex w-full max-w-[1840px] 2xl:max-w-[2160px] items-center justify-between gap-2.5 sm:gap-3">
         {/* Left: Brand Identity */}
         <Link
           href="/"
           className={cn(
-            'group flex items-center gap-3 rounded-[1.35rem] px-4.5 py-2.5 sm:py-3 transition-transform active:scale-[0.98]',
+            'group flex shrink-0 items-center gap-2.5 sm:gap-3 rounded-[1.35rem] px-3.5 sm:px-4.5 py-2 sm:py-3 transition-transform active:scale-[0.98]',
             clusterClass
           )}
         >
-          <AscleonLogo size={34} className="transition-transform duration-200 group-hover:scale-105" />
-          <span className="font-serif text-xl sm:text-[21px] font-bold tracking-tight text-[color:var(--ink)]">
+          <AscleonLogo size={30} className="shrink-0 transition-transform duration-200 group-hover:scale-105 sm:size-[34px]" />
+          <span className="font-serif text-lg sm:text-[21px] font-bold tracking-tight text-[color:var(--ink)]">
             Ascleon
           </span>
         </Link>
 
-        {/* Center: Primary Navigation (Desktop) */}
+        {/* Center: Primary Navigation (Desktop: lg screens and up) */}
         <nav
           aria-label="Primary"
           className={cn(
-            'hidden items-center gap-1.5 rounded-full p-2 md:flex',
+            'hidden items-center gap-1.5 rounded-full p-2 lg:flex',
             'shadow-nav-deep border-2 border-[color:var(--ink)] bg-[color:var(--ink)]'
           )}
         >
@@ -115,8 +120,8 @@ const Navbar = () => {
           })}
         </nav>
 
-        {/* Right: Auth & CTAs (Desktop) */}
-        <div className="hidden items-center gap-2.5 md:flex">
+        {/* Right: Auth & CTAs (Desktop: lg screens and up) */}
+        <div className="hidden items-center gap-2.5 lg:flex">
           <SignedOut>
             <SignInButton mode="modal">
               <button
@@ -148,29 +153,45 @@ const Navbar = () => {
           </SignedIn>
         </div>
 
-        {/* Mobile menu toggle */}
-        <div className="flex items-center gap-2 md:hidden">
+        {/* Mobile menu toggle & quick auth (< lg screens) */}
+        <div className="flex shrink-0 items-center gap-2 lg:hidden">
+          <SignedIn>
+            <div
+              className={cn(
+                'flex items-center rounded-full p-1 sm:p-1.5',
+                clusterClass
+              )}
+            >
+              <UserButton
+                appearance={{
+                  elements: {
+                    userButtonAvatarBox: 'h-8 w-8 sm:h-9 sm:w-9',
+                  },
+                }}
+              />
+            </div>
+          </SignedIn>
           <button
             type="button"
             onClick={() => setOpen((prev) => !prev)}
             aria-expanded={open}
             aria-label="Toggle navigation menu"
             className={cn(
-              'flex h-12 w-12 items-center justify-center rounded-[1.15rem] text-[color:var(--ink)]',
+              'flex h-11 w-11 sm:h-12 sm:w-12 shrink-0 items-center justify-center rounded-[1.15rem] text-[color:var(--ink)] cursor-pointer transition-transform active:scale-95',
               clusterClass
             )}
           >
-            {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+            {open ? <X className="size-5.5 sm:size-6 stroke-[2.5]" /> : <Menu className="size-5.5 sm:size-6 stroke-[2.5]" />}
           </button>
         </div>
       </div>
 
-      {/* Mobile Drawer */}
+      {/* Mobile Drawer (< lg screens) */}
       {open && (
-        <div className="mt-2 md:hidden">
+        <div className="mt-2.5 w-full animate-in fade-in slide-in-from-top-2 duration-200 lg:hidden">
           <div
             className={cn(
-              'flex flex-col gap-2 rounded-2xl p-3 shadow-xl',
+              'flex flex-col gap-2 rounded-2xl p-3 shadow-2xl',
               clusterClass
             )}
           >
@@ -186,7 +207,7 @@ const Navbar = () => {
                       setOpen(false);
                     }}
                     className={cn(
-                      'rounded-xl px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors flex items-center justify-between',
+                      'rounded-xl px-3.5 py-2.5 text-sm font-semibold uppercase tracking-wider transition-colors flex items-center justify-between',
                       active
                         ? 'bg-[color:var(--ink)] text-[color:var(--cream)]'
                         : 'text-[color:var(--ink)] hover:bg-black/5'
@@ -208,7 +229,7 @@ const Navbar = () => {
                   <button
                     type="button"
                     onClick={() => setOpen(false)}
-                    className="w-full cursor-pointer rounded-xl bg-[color:var(--ink)] py-2 text-center font-serif text-sm font-bold uppercase tracking-wider text-[color:var(--cream)]"
+                    className="w-full cursor-pointer rounded-xl bg-[color:var(--ink)] py-2.5 text-center font-serif text-sm font-bold uppercase tracking-wider text-[color:var(--cream)] transition-transform active:scale-[0.98]"
                   >
                     Sign in
                   </button>
@@ -217,7 +238,7 @@ const Navbar = () => {
               <SignedIn>
                 <div className="flex items-center justify-between px-2 py-1">
                   <span className="text-xs font-semibold text-[color:var(--ink)]">
-                    Account
+                    Account Profile
                   </span>
                   <UserButton />
                 </div>
