@@ -45,8 +45,24 @@ export async function POST(req: NextRequest) {
       body.currentPageNumber ||
       (typeof segmentIndex === "number" ? segmentIndex + 1 : 1);
 
-    // If multi-page study scope or complete topic is requested, fetch full range
-    if (studyScope && studyScope.startPage && studyScope.endPage && bookId) {
+    // Ground via Universal Book RAG if bookId is available
+    if (bookId && bookId !== "default-book") {
+      try {
+        const { retrieveFromBookRAG } = await import("@/lib/ai/rag/book-rag-retriever");
+        const ragRes = await retrieveFromBookRAG({
+          bookId,
+          query: customTopic || (studyScope?.topicTitle) || selectedText || focalText.slice(0, 300),
+          scope: studyScope,
+          activePage: pageNumber,
+          topK: 5,
+        });
+        if (ragRes.combinedContext) {
+          focalText = ragRes.combinedContext;
+        }
+      } catch (ragErr) {
+        console.warn("[/api/morph] Book RAG retrieval fallback:", ragErr);
+      }
+    } else if (studyScope && studyScope.startPage && studyScope.endPage && bookId) {
       if (studyScope.startPage !== studyScope.endPage || studyScope.type === "topic" || studyScope.type === "range") {
         const segRes = await getBookSegmentsByRange(bookId, studyScope.startPage, studyScope.endPage);
         if (segRes.success && segRes.data && segRes.data.length > 0) {

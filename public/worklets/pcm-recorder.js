@@ -93,14 +93,37 @@ class PcmRecorderProcessor extends AudioWorkletProcessor {
       const chunk = this.buffer.splice(0, chunkSize);
       const pcm16 = new Int16Array(chunk.length);
       let chunkSquareSum = 0;
+      let zeroCrossings = 0;
+      let peakAmp = 0;
+      let prevSign = chunk[0] >= 0;
+
       for (let j = 0; j < chunk.length; j++) {
         const s = Math.max(-1, Math.min(1, chunk[j]));
+        const absVal = Math.abs(s);
+        if (absVal > peakAmp) peakAmp = absVal;
         chunkSquareSum += s * s;
+
+        const currentSign = s >= 0;
+        if (currentSign !== prevSign) {
+          zeroCrossings++;
+          prevSign = currentSign;
+        }
+
         pcm16[j] = s < 0 ? s * 0x8000 : s * 0x7fff;
       }
+
       const chunkRms = Math.sqrt(chunkSquareSum / chunk.length);
+      const zcr = zeroCrossings / chunk.length;
+      const crestFactor = chunkRms > 0.001 ? peakAmp / chunkRms : 1;
+
       this.port.postMessage(
-        { type: "audio", buffer: pcm16.buffer, chunkRms },
+        {
+          type: "audio",
+          buffer: pcm16.buffer,
+          chunkRms,
+          zcr,
+          crestFactor,
+        },
         [pcm16.buffer]
       );
     }

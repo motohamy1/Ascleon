@@ -48,6 +48,9 @@ const BookSchema = new Schema<IBook>(
       enum: ["pending", "processing", "completed", "failed"],
       default: "completed",
     },
+    ingestionProgress: { type: Number, default: 0 },
+    ingestionStage: { type: String, default: "completed" },
+    digestedPages: { type: Number, default: 0 },
   },
   { timestamps: true },
 );

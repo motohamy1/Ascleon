@@ -49,6 +49,38 @@ export async function retrieveEnrichedContext(
     bookReferences = textOrOptions.bookReferences || [];
   }
 
+  // If authoritative dynamic references were already supplied by book blueprint, prioritize them
+  const validExplicitRefs = Array.isArray(bookReferences) && bookReferences.length > 0 ? bookReferences : [];
+
+  if (validExplicitRefs.length > 0) {
+    const formattedRefs: ReferenceResource[] = validExplicitRefs.map((r: any, idx: number) => {
+      if (typeof r === "object" && r.source) return r;
+      const refTitle = typeof r === "string" ? r : r.title || r.source || "Canonical Reference";
+      return {
+        id: `ref-dynamic-${idx + 1}`,
+        source: refTitle,
+        type: "textbook" as const,
+        title: refTitle,
+        chapterOrSection: `Canonical Grounding for ${bookTitle}`,
+        excerpt: `Authoritative literature dynamically grounded for ${bookTopic || bookTitle}.`,
+        clinicalPearls: [`Grounded in verified source text for ${bookTitle}.`],
+        relevanceTag: (bookTopic || "academic_canon").toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+      };
+    });
+
+    const snippet = formattedRefs
+      .map((r) => `[Canonical Reference: ${r.source} - ${r.title}]\n"${r.excerpt}"`)
+      .join("\n\n");
+
+    return {
+      focalTopic: bookTopic || "Primary Source Study",
+      authoritativeReferences: formattedRefs,
+      qbankVignettes: [],
+      mnemonics: [],
+      groundingSnippet: snippet,
+    };
+  }
+
   const combined = `${bookTitle} ${bookTopic} ${text} ${query}`.toLowerCase();
   const bookScope = `${bookTitle} ${bookTopic}`.toLowerCase();
 
@@ -56,20 +88,32 @@ export async function retrieveEnrichedContext(
   // Priority order: specific medical subdomains (surgery / cardiology) > broad medicine > other technical domains > general
   let domain: "surgery" | "cardiology" | "medicine" | "cs_architecture" | "ai_ml" | "law" | "finance" | "general" = "general";
 
-  if (
-    bookScope.includes("surg") ||
-    combined.includes("surgery") ||
-    combined.includes("surgical") ||
-    combined.includes("swelling sheet") ||
-    combined.includes("hernia") ||
-    combined.includes("appendic") ||
-    combined.includes("cholecyst") ||
-    combined.includes("laparotom") ||
-    combined.includes("thyroidectom") ||
-    combined.includes("abscess") ||
-    combined.includes("lipoma")
-  ) {
+  const isInternalMedicine =
+    bookScope.includes("internal medicine") ||
+    bookScope.includes("kumar & clark") ||
+    bookScope.includes("harrison") ||
+    bookScope.includes("davidson") ||
+    bookScope.includes("endocrin") ||
+    bookScope.includes("nephrol") ||
+    bookScope.includes("gastroenterol") ||
+    bookScope.includes("rheumatol") ||
+    bookScope.includes("hematol") ||
+    bookScope.includes("pulmonol") ||
+    bookScope.includes("pediatric");
+
+  const isExplicitSurgery =
+    !isInternalMedicine &&
+    (bookScope.includes("surgery") ||
+      bookScope.includes("surgical") ||
+      bookScope.includes("operative") ||
+      bookScope.includes("bailey") ||
+      bookScope.includes("browse") ||
+      ((combined.includes("surgery") || combined.includes("surgical")) && !combined.includes("internal medicine")));
+
+  if (isExplicitSurgery) {
     domain = "surgery";
+  } else if (isInternalMedicine) {
+    domain = "medicine";
   } else if (
     combined.includes("heart") ||
     combined.includes("cardio") ||

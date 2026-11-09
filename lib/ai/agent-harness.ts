@@ -52,7 +52,7 @@ async function callGeminiAgent(
   enriched: EnrichedStudyContext
 ): Promise<AgentRunOutput> {
   const ai = new GoogleGenAI({ apiKey });
-  const modelName = "gemini-3-flash-preview";
+  const modelName = "gemini-2.5-flash";
 
   // Build grounding context from active page + background textbook knowledge
   const pageIntro = `Active Book: "${context.bookTitle}" (Section ${context.currentSegmentIndex + 1}${
@@ -61,9 +61,7 @@ async function callGeminiAgent(
     context.selectedText ? `\nUser Specifically Selected/Highlighted:\n"${context.selectedText}"\n` : ""
   }\n\n${enriched.groundingSnippet}`;
 
-  const isToolRequest = /morph|quiz|test me|vignette|flashcard|visualize|diagram/i.test(userQuery);
-
-  const toolsDeclaration = isToolRequest ? [
+  const toolsDeclaration = [
     {
       functionDeclarations: AGENT_TOOLS_DEFINITIONS.map((t) => ({
         name: t.name,
@@ -75,7 +73,7 @@ async function callGeminiAgent(
         },
       })),
     },
-  ] : undefined;
+  ];
 
   // Turn 1: Initial call with prompt injected as system instruction
   const userParts: any[] = [

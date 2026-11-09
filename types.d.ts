@@ -73,10 +73,19 @@ export interface IBook extends Document {
   subspecialty?: string;
   pedagogicalStyle?: string;
   ingestionStatus?: IngestionStatusType;
+  ingestionProgress?: number;
+  ingestionStage?: string;
+  digestedPages?: number;
   blueprint?: {
     domain?: string;
     subspecialty?: string;
-    authoritativeReferences?: string[];
+    primaryField?: string;
+    subField?: string;
+    fieldPedagogyStyle?: string;
+    domainBoundaries?: string[];
+    authoritativeReferences?: any[];
+    canonicalReferences?: any[];
+    dynamicCanonicalReferences?: any[];
     initialQBank?: any[];
     initialMnemonics?: any[];
     chapterMap?: any[];
@@ -102,6 +111,11 @@ export interface IBookSegment extends Document {
   segmentIndex: number;
   pageNumber?: number;
   wordCount: number;
+  headings?: string[];
+  keyTerms?: string[];
+  clinicalEntities?: string[];
+  goldStandards?: string[];
+  summary?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -114,6 +128,11 @@ export interface IBookSegmentData {
   segmentIndex: number;
   pageNumber?: number;
   wordCount: number;
+  headings?: string[];
+  keyTerms?: string[];
+  clinicalEntities?: string[];
+  goldStandards?: string[];
+  summary?: string;
   createdAt?: string | Date;
   updatedAt?: string | Date;
 }

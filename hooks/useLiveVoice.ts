@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { StudyLanguage, joinStreamingTranscript, isHallucinatedNoiseTranscript } from "@/lib/language";
 import { DEFAULT_LIVE_VOICE, VoiceBargeInMode } from "@/lib/voice-config";
+import { WhiteboardChoreographEvent, WhiteboardWidgetControlEvent } from "@/types/whiteboard";
 
 export interface LiveVoiceMessage {
   id: string;
@@ -27,7 +28,11 @@ export interface UseLiveVoiceOptions {
   language?: StudyLanguage;
   voiceName?: string;
   bargeInMode?: VoiceBargeInMode;
+  mode?: "viva" | "whiteboard";
   onVisualTrigger?: (event: VisualTriggerEvent) => void;
+  onWhiteboardChoreograph?: (event: WhiteboardChoreographEvent) => void;
+  onWhiteboardWidgetControl?: (event: WhiteboardWidgetControlEvent) => void;
+  onWhiteboardBranchTopic?: (focusQuestion: string, preferredWidgetType?: string) => void;
 }
 
 export type LiveVoiceStatus =
@@ -47,7 +52,11 @@ export function useLiveVoice({
   language = "en",
   voiceName = DEFAULT_LIVE_VOICE,
   bargeInMode: initialBargeInMode = "smart",
+  mode = "viva",
   onVisualTrigger,
+  onWhiteboardChoreograph,
+  onWhiteboardWidgetControl,
+  onWhiteboardBranchTopic,
 }: UseLiveVoiceOptions) {
   const [status, setStatus] = useState<LiveVoiceStatus>("disconnected");
   const [isMuted, setIsMuted] = useState(false);
@@ -59,6 +68,8 @@ export function useLiveVoice({
   const [outputLevel, setOutputLevel] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeVisualTrigger, setActiveVisualTrigger] = useState<VisualTriggerEvent | null>(null);
+  const [activeChoreography, setActiveChoreography] = useState<WhiteboardChoreographEvent | null>(null);
+  const [activeWidgetControl, setActiveWidgetControl] = useState<WhiteboardWidgetControlEvent | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const inputAudioCtxRef = useRef<AudioContext | null>(null);
@@ -88,6 +99,8 @@ export function useLiveVoice({
   const rawInputLevelRef = useRef<number>(0);
   // Adaptive Ambient Noise Floor Tracker (exponential moving average of resting room acoustics)
   const ambientNoiseFloorRef = useRef<number>(0.02);
+  const rawOutputLevelRef = useRef<number>(0);
+  const preRollAudioBufferRef = useRef<ArrayBuffer[]>([]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -223,7 +236,7 @@ export function useLiveVoice({
     }
   }, [cleanupAudio]);
 
-  const sendRealtimeAudio = useCallback((pcmBuffer: ArrayBuffer, chunkRms?: number) => {
+  const sendRealtimeAudio = useCallback((pcmBuffer: ArrayBuffer, chunkRms?: number, zcr?: number, crestFactor?: number) => {
     if (
       isMutedRef.current ||
       !isSetupCompleteRef.current ||
@@ -233,7 +246,13 @@ export function useLiveVoice({
       return;
     }
 
-    // Adaptive Vocal Focus & Studio Noise Suppressor Gate:
+    // Always maintain a rolling ~350ms pre-roll ring buffer (approx 10 chunks of 32ms)
+    const preRoll = preRollAudioBufferRef.current;
+    preRoll.push(pcmBuffer.slice(0));
+    if (preRoll.length > 11) {
+      preRoll.shift();
+    }
+
     let bufferToSend = pcmBuffer;
     const mode = bargeInModeRef.current;
     const currentEnergy = typeof chunkRms === "number" ? chunkRms : rawInputLevelRef.current;
@@ -242,30 +261,31 @@ export function useLiveVoice({
     // 1. While the mentor is actively speaking:
     if (statusRef.current === "mentor_speaking") {
       if (mode === "shield") {
-        // NOISE SHIELD MODE: Send 100% pure silence (zeros) to Gemini Live while mentor speaks.
-        // Server-side VAD receives 0 amplitude and will NEVER trigger sc.interrupted!
-        // The mentor speaks smoothly and completely without any unwanted cuts.
+        // NOISE SHIELD: 100% silence sent to Gemini Live
         bufferToSend = new ArrayBuffer(pcmBuffer.byteLength);
       } else if (mode === "smart") {
         // SMART VOCAL FOCUS:
-        // Only un-gate if the user has sustained loud, deliberate speech directly into the mic
-        // (speechStreak >= 12 frames ~240ms) AND energy beats both ambient noise and laptop speaker bleed.
-        const speakerDuck = outputLevelRef.current * 1.5;
-        const requiredThreshold = Math.max(0.18, noiseFloor * 2.8, speakerDuck + 0.12);
-        if (speechStreakRef.current < 12 || currentEnergy < requiredThreshold) {
+        // Use true raw output RMS (not inflated 4x visual meter)
+        const rawDuck = rawOutputLevelRef.current * 0.8;
+        const requiredThreshold = Math.max(0.045, noiseFloor * 2.2, rawDuck + 0.035);
+
+        // Require human voice characteristics (ZCR 0.04 to 0.45 and crest factor < 6 to reject clicks/bumps)
+        const isVoiceAcoustics = typeof zcr === "number" ? (zcr >= 0.04 && zcr <= 0.45 && (crestFactor || 1) < 6) : true;
+
+        if (speechStreakRef.current < 6 || currentEnergy < requiredThreshold || !isVoiceAcoustics) {
           bufferToSend = new ArrayBuffer(pcmBuffer.byteLength);
         }
       } else {
-        // SENSITIVE MODE (Quiet study room / Headset):
-        const sensitiveThreshold = Math.max(0.08, noiseFloor * 2.0);
-        if (speechStreakRef.current < 5 || currentEnergy < sensitiveThreshold) {
+        // SENSITIVE MODE (Headset / Quiet Space):
+        const sensitiveThreshold = Math.max(0.025, noiseFloor * 1.5);
+        if (speechStreakRef.current < 3 || currentEnergy < sensitiveThreshold) {
           bufferToSend = new ArrayBuffer(pcmBuffer.byteLength);
         }
       }
     } else if (statusRef.current === "listening") {
-      // 2. While waiting for the student to speak:
-      // Filter out low-level room noise, HVAC hum, and mic hiss when the user is silent.
-      const listeningGate = Math.max(0.035, noiseFloor * 1.6);
+      // 2. While waiting for the user to speak:
+      // Filter out low-level room noise, HVAC hum, and mic hiss
+      const listeningGate = Math.max(0.025, noiseFloor * 1.5);
       if (currentEnergy < listeningGate && speechStreakRef.current === 0) {
         bufferToSend = new ArrayBuffer(pcmBuffer.byteLength);
       }
@@ -337,6 +357,7 @@ export function useLiveVoice({
             authoritativeReferences,
             language,
             voiceName,
+            mode,
             resumptionHandle: resumptionHandleRef.current,
             isResuming,
           }),
@@ -388,7 +409,9 @@ export function useLiveVoice({
         playerNode.port.onmessage = (event) => {
           if (event.data?.type === "level") {
             const rms = event.data.rms || 0;
+            const rawRms = typeof event.data.rawRms === "number" ? event.data.rawRms : rms;
             outputLevelRef.current = rms;
+            rawOutputLevelRef.current = rawRms;
             setOutputLevel(rms);
           }
         };
@@ -447,29 +470,25 @@ export function useLiveVoice({
 
             if (statusRef.current === "mentor_speaking") {
               if (mode === "shield") {
-                // In Shield Mode: Auto voice barge-in is disabled to guarantee zero accidental interrupts
                 isVocalEnergy = false;
               } else if (mode === "smart") {
-                const speakerDuck = outputLevelRef.current * 1.5;
-                const requiredThreshold = Math.max(0.18, noiseFloor * 2.8, speakerDuck + 0.12);
+                const rawDuck = rawOutputLevelRef.current * 0.8;
+                const requiredThreshold = Math.max(0.045, noiseFloor * 2.2, rawDuck + 0.035);
                 isVocalEnergy = physicalRms > requiredThreshold;
-                streakThreshold = 12; // ~240ms of sustained loud human speech directly into mic
+                streakThreshold = 6; // ~190ms of sustained phonation
               } else {
-                // sensitive mode (Headset / Quiet room)
-                const sensitiveThreshold = Math.max(0.08, noiseFloor * 2.0);
+                const sensitiveThreshold = Math.max(0.025, noiseFloor * 1.5);
                 isVocalEnergy = physicalRms > sensitiveThreshold;
-                streakThreshold = 5; // ~100ms
+                streakThreshold = 3; // ~100ms
               }
             } else {
-              // Status is "listening" or others
-              const listeningThreshold = Math.max(0.045, noiseFloor * 1.6);
+              const listeningThreshold = Math.max(0.025, noiseFloor * 1.5);
               isVocalEnergy = physicalRms > listeningThreshold;
             }
 
             if (isVocalEnergy) {
               speechStreakRef.current = Math.min(25, speechStreakRef.current + 1);
             } else {
-              // Rapid decay when audio drops below vocal threshold
               speechStreakRef.current = Math.max(0, speechStreakRef.current - 2);
             }
 
@@ -480,9 +499,30 @@ export function useLiveVoice({
               speechStreakRef.current >= streakThreshold
             ) {
               interrupt();
+
+              // Instantly flush pre-roll buffer so Gemini Live receives user's initial words without latency
+              const preRoll = preRollAudioBufferRef.current;
+              if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && preRoll.length > 0) {
+                while (preRoll.length > 0) {
+                  const chunk = preRoll.shift();
+                  if (chunk) {
+                    const base64Chunk = arrayBufferToBase64(chunk);
+                    wsRef.current.send(
+                      JSON.stringify({
+                        realtimeInput: {
+                          audio: {
+                            mimeType: "audio/pcm;rate=16000",
+                            data: base64Chunk,
+                          },
+                        },
+                      })
+                    );
+                  }
+                }
+              }
             }
           } else if (event.data?.type === "audio") {
-            sendRealtimeAudio(event.data.buffer, event.data.chunkRms);
+            sendRealtimeAudio(event.data.buffer, event.data.chunkRms, event.data.zcr, event.data.crestFactor);
           } else if (event.data instanceof ArrayBuffer) {
             sendRealtimeAudio(event.data);
           }
@@ -510,10 +550,10 @@ export function useLiveVoice({
               },
               realtimeInputConfig: {
                 automaticActivityDetection: {
-                  startOfSpeechSensitivity: "START_SENSITIVITY_LOW",
-                  endOfSpeechSensitivity: "END_SENSITIVITY_LOW",
-                  prefixPaddingMs: 250,
-                  silenceDurationMs: 900,
+                  startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
+                  endOfSpeechSensitivity: "END_SENSITIVITY_HIGH",
+                  prefixPaddingMs: 200,
+                  silenceDurationMs: 450,
                 },
               },
               sessionResumption: resumptionHandleRef.current ? { handle: resumptionHandleRef.current } : {},
@@ -786,7 +826,7 @@ export function useLiveVoice({
               }
             }
 
-            // 5. Tool Call handling (Show concept on page / Morph background trigger)
+            // 5. Tool Call handling (Whiteboard choreography & Visual triggers)
             if (data.toolCall) {
               const calls = data.toolCall.functionCalls || [];
               const responses: any[] = [];
@@ -809,6 +849,66 @@ export function useLiveVoice({
                         status: "displayed_on_screen",
                         action: event.action,
                         concept: event.conceptName,
+                      },
+                    },
+                    id: call.id,
+                  });
+                } else if (call.name === "whiteboard_choreograph") {
+                  const choreoEvent: WhiteboardChoreographEvent = {
+                    sceneIndex: typeof call.args?.sceneIndex === "number" ? call.args.sceneIndex : undefined,
+                    revealStepIndex: typeof call.args?.revealStepIndex === "number" ? call.args.revealStepIndex : undefined,
+                    laserTargetId: call.args?.laserTargetId,
+                    chalkAnnotation: call.args?.chalkAnnotation,
+                  };
+                  setActiveChoreography(choreoEvent);
+                  if (onWhiteboardChoreograph) {
+                    onWhiteboardChoreograph(choreoEvent);
+                  }
+
+                  responses.push({
+                    response: {
+                      output: {
+                        status: "choreography_applied",
+                        appliedStep: choreoEvent.revealStepIndex,
+                        laserTarget: choreoEvent.laserTargetId,
+                      },
+                    },
+                    id: call.id,
+                  });
+                } else if (call.name === "whiteboard_control_widget") {
+                  const widgetEvent: WhiteboardWidgetControlEvent = {
+                    activeInterventionId: call.args?.activeInterventionId,
+                    toggleIntervention: call.args?.toggleIntervention,
+                    activeConditionId: call.args?.activeConditionId,
+                    activeStepId: call.args?.activeStepId,
+                  };
+                  setActiveWidgetControl(widgetEvent);
+                  if (onWhiteboardWidgetControl) {
+                    onWhiteboardWidgetControl(widgetEvent);
+                  }
+
+                  responses.push({
+                    response: {
+                      output: {
+                        status: "widget_control_applied",
+                        activeIntervention: widgetEvent.activeInterventionId,
+                        toggleState: widgetEvent.toggleIntervention,
+                      },
+                    },
+                    id: call.id,
+                  });
+                } else if (call.name === "whiteboard_branch_topic") {
+                  const focusQuestion = call.args?.focusQuestion || "Clinical Focus";
+                  const preferredWidgetType = call.args?.preferredWidgetType;
+                  if (onWhiteboardBranchTopic) {
+                    onWhiteboardBranchTopic(focusQuestion, preferredWidgetType);
+                  }
+
+                  responses.push({
+                    response: {
+                      output: {
+                        status: "branch_topic_scheduled",
+                        focusQuestion,
                       },
                     },
                     id: call.id,
@@ -966,6 +1066,30 @@ export function useLiveVoice({
     }
   }, [language]);
 
+  const sendWhiteboardContext = useCallback((deckSummary: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !isSetupCompleteRef.current) {
+      return;
+    }
+    const updateFrame = {
+      realtimeInput: {
+        text: `[WHITEBOARD CONTEXT UPDATE: The active whiteboard illustration deck is:\n"""${deckSummary}"""\nSynchronize your vocal explanation and use the 'whiteboard_choreograph' and 'whiteboard_control_widget' tools to highlight steps and widgets on the board.]`,
+      },
+    };
+    wsRef.current.send(JSON.stringify(updateFrame));
+  }, []);
+
+  const sendWhiteboardInteraction = useCallback((interactionText: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !isSetupCompleteRef.current) {
+      return;
+    }
+    const interactionFrame = {
+      realtimeInput: {
+        text: `[STUDENT WHITEBOARD INTERACTION: ${interactionText}. Address this immediately and concisely in your speech.]`,
+      },
+    };
+    wsRef.current.send(JSON.stringify(interactionFrame));
+  }, []);
+
   const resetSession = useCallback(() => {
     disconnect();
     resumptionHandleRef.current = null;
@@ -975,6 +1099,8 @@ export function useLiveVoice({
     outputTranscriptAccRef.current = "";
     setCurrentInputTranscript("");
     setCurrentOutputTranscript("");
+    setActiveChoreography(null);
+    setActiveWidgetControl(null);
     statusRef.current = "disconnected";
     setStatus("disconnected");
   }, [disconnect]);
@@ -999,6 +1125,8 @@ export function useLiveVoice({
     setBargeInMode,
     sendTextMessage,
     updatePageContext,
+    sendWhiteboardContext,
+    sendWhiteboardInteraction,
     messages,
     currentInputTranscript,
     currentOutputTranscript,
@@ -1006,6 +1134,10 @@ export function useLiveVoice({
     outputLevel,
     errorMessage,
     activeVisualTrigger,
+    activeChoreography,
+    activeWidgetControl,
     clearVisualTrigger: () => setActiveVisualTrigger(null),
+    clearChoreography: () => setActiveChoreography(null),
+    clearWidgetControl: () => setActiveWidgetControl(null),
   };
 }

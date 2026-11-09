@@ -46,8 +46,37 @@ export async function POST(request: Request) {
   let effectiveContent = String(currentSegmentContent || "");
   let effectiveTopicLocation: any = null;
 
-  // 1. If multi-page scope or topic is explicitly active, fetch full multi-page context
-  if (studyScope && studyScope.startPage && studyScope.endPage && bookId) {
+  // 1. UNIVERSAL BOOK RAG RETRIEVAL: Search across all book segments in MongoDB
+  let ragGoldStandards: string[] = [];
+  let ragCitedPages: number[] = [];
+
+  if (bookId) {
+    try {
+      const { retrieveFromBookRAG } = await import("@/lib/ai/rag/book-rag-retriever");
+      const ragRes = await retrieveFromBookRAG({
+        bookId,
+        query: cleanQuery,
+        scope: studyScope,
+        activePage: currentPageNumber ? Number(currentPageNumber) : currentSegmentIndex + 1,
+        topK: 4,
+      });
+
+      if (ragRes.combinedContext) {
+        effectiveContent = ragRes.combinedContext;
+        ragGoldStandards = ragRes.goldStandardsFound;
+        ragCitedPages = ragRes.citedPages;
+      }
+      if (ragRes.detectedTopic) {
+        effectiveTopicLocation = {
+          title: ragRes.detectedTopic,
+          startPage: ragRes.citedPages[0] || 1,
+          endPage: ragRes.citedPages[ragRes.citedPages.length - 1] || 1,
+        };
+      }
+    } catch (ragErr) {
+      console.warn("[reader-assistant] Book RAG retrieval fallback:", ragErr);
+    }
+  } else if (studyScope && studyScope.startPage && studyScope.endPage && bookId) {
     if (studyScope.startPage !== studyScope.endPage || studyScope.type === "topic" || studyScope.type === "range") {
       const segRes = await getBookSegmentsByRange(bookId, studyScope.startPage, studyScope.endPage);
       if (segRes.success && segRes.data && segRes.data.length > 0) {
@@ -120,12 +149,15 @@ export async function POST(request: Request) {
 
   try {
     const output = await runStudyAgent(cleanQuery, context);
+    const finalCitations = ragCitedPages.length > 0
+      ? Array.from(new Set([...(output.citations || []), ...ragCitedPages.map((p) => `Page ${p}`)]))
+      : output.citations;
 
     return NextResponse.json({
       success: true,
       answer: output.text,
       toolsUsed: output.toolsUsed,
-      citations: output.citations,
+      citations: finalCitations,
       generatedMorph: output.generatedMorph,
       generatedQuiz: output.generatedQuiz,
       authoritativeReferences: output.authoritativeReferences,

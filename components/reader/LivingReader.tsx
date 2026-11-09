@@ -16,6 +16,7 @@ import {
   SourceSelectionToolbar,
   ScannedPinItem,
 } from "@/components/reader/SourceSelectionToolbar";
+import { RagDigestionBadge } from "@/components/reader/RagDigestionBadge";
 import OriginalPdfViewer from "./OriginalPdfViewer";
 import RichStudyMessage from "./RichStudyMessage";
 import { AscleonLogo } from "@/components/ui/AscleonLogo";
@@ -291,9 +292,6 @@ export default function LivingReader({
     const dc = getBookDomainContext(book);
     setActiveReferences(dc.authoritativeReferences);
     setActiveMnemonics(dc.mnemonics);
-    if (dc.qbankVignettes.length > 0 && dynamicQBankList.length === 0) {
-      setDynamicQBankList(dc.qbankVignettes);
-    }
   }, [book]);
 
   const isMedicalBook = useMemo(() => {
@@ -801,6 +799,7 @@ export default function LivingReader({
     setQuizAnswer(null);
     try {
       const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
+      const existingTopics = dynamicQBankList.map((q) => q.topic).filter(Boolean);
 
       const res = await fetch("/api/qbank", {
         method: "POST",
@@ -814,6 +813,7 @@ export default function LivingReader({
           snippedDiagram: diagramUrl || snippedDiagram?.url || null,
           language: studyLanguage,
           studyScope,
+          excludeTopics: forceRefresh ? existingTopics : [],
         }),
       });
       if (res.ok) {
@@ -829,7 +829,7 @@ export default function LivingReader({
     } finally {
       setIsQBankLoading(false);
     }
-  }, [book._id, book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, snippedDiagram, qbankCache, studyLanguage, studyScope]);
+  }, [book._id, book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, snippedDiagram, qbankCache, dynamicQBankList, studyLanguage, studyScope]);
 
   // Dynamic Summary generator with per-page caching
   const loadDynamicSummary = useCallback(async (forceRefresh = false) => {
@@ -1020,7 +1020,7 @@ export default function LivingReader({
       if (data.authoritativeReferences?.length) {
         setActiveReferences(data.authoritativeReferences);
       }
-      if (data.qbankVignettes?.length) {
+      if (data.qbankVignettes?.length && dynamicQBankList.length === 0) {
         setDynamicQBankList(data.qbankVignettes);
       }
       if (data.mnemonics?.length) {
@@ -1090,8 +1090,11 @@ export default function LivingReader({
 
   // Resizable Splitter State
   const [splitRatio, setSplitRatio] = useState<number>(54);
+  const [isWhiteboardExpanded, setIsWhiteboardExpanded] = useState<boolean>(false);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const effectiveSplitRatio = isWhiteboardExpanded && activeIntent === "voice" ? 36 : splitRatio;
 
   const handleSplitPointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -1412,7 +1415,7 @@ export default function LivingReader({
               mobileActivePane === "reader" ? "flex w-full" : "hidden",
               "lg:flex"
             )}
-            style={isLgScreen ? { width: `${splitRatio}%` } : undefined}
+            style={isLgScreen ? { width: `${effectiveSplitRatio}%` } : undefined}
           >
             {/* FLOATING SOURCE PROGRESSION HUD (Animated Session Resume Toast) */}
             {showResumeSourceHud && resumedSessionInfo && (
@@ -1876,6 +1879,15 @@ export default function LivingReader({
                 onLanguageChange={setStudyLanguage}
                 compact={!isLgScreen}
               />
+
+              {/* Real-time RAG Digestion Progress Badge */}
+              {book._id && (
+                <RagDigestionBadge
+                  bookId={String(book._id)}
+                  initialStatus={book.ingestionStatus || "completed"}
+                  initialProgress={book.ingestionProgress ?? 100}
+                />
+              )}
 
               {/* Start New Session Trigger */}
               <button
@@ -2601,6 +2613,10 @@ export default function LivingReader({
                     authoritativeReferences={activeReferences}
                     studyLanguage={studyLanguage}
                     onStudyLanguageChange={setStudyLanguage}
+                    bookId={String(book._id || "")}
+                    studyScope={studyScope}
+                    snippedDiagram={snippedDiagram?.url || null}
+                    onWhiteboardExpandChange={setIsWhiteboardExpanded}
                     onTriggerMorph={() => {
                       setActiveIntent("morph");
                       handleRunMorph();
@@ -2709,7 +2725,7 @@ export default function LivingReader({
                     <button
                       type="button"
                       disabled={isQBankLoading}
-                      onClick={() => loadDynamicQBank()}
+                      onClick={() => loadDynamicQBank(undefined, true)}
                       className="inline-flex items-center gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-2.5 py-1 text-[10.5px] font-bold text-[color:var(--ink)] shadow-xs hover:-translate-y-0.5 cursor-pointer disabled:opacity-40"
                     >
                       <RefreshCw className={cn("size-3", isQBankLoading && "animate-spin text-[color:var(--ink)]")} />
@@ -2817,18 +2833,44 @@ export default function LivingReader({
                             <span className="font-medium">{dynamicQBankList[activeQBankIdx]?.highYieldTakeaway}</span>
                           </div>
 
-                          {/* Next Question Navigation */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setQuizSubmitted(false);
-                              setQuizAnswer(null);
-                              setActiveQBankIdx((prev) => (prev + 1) % dynamicQBankList.length);
-                            }}
-                            className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-2 text-xs font-bold text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5"
-                          >
-                            <span>Next Question →</span>
-                          </button>
+                          {/* Question Navigation Controls */}
+                          <div className="mt-1 flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              disabled={activeQBankIdx === 0}
+                              onClick={() => {
+                                setQuizSubmitted(false);
+                                setQuizAnswer(null);
+                                setActiveQBankIdx((prev) => Math.max(0, prev - 1));
+                              }}
+                              className="cursor-pointer rounded-full border border-[color:var(--ink)]/30 bg-white px-3 py-1.5 text-xs font-bold text-[color:var(--ink)] disabled:opacity-30"
+                            >
+                              ← Prev
+                            </button>
+
+                            {activeQBankIdx < dynamicQBankList.length - 1 ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setQuizSubmitted(false);
+                                  setQuizAnswer(null);
+                                  setActiveQBankIdx((prev) => prev + 1);
+                                }}
+                                className="flex-1 cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-2 text-xs font-bold text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 text-center"
+                              >
+                                Next Question ({activeQBankIdx + 2}/{dynamicQBankList.length}) →
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={isQBankLoading}
+                                onClick={() => loadDynamicQBank(undefined, true)}
+                                className="flex-1 cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-2 text-xs font-bold text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 text-center"
+                              >
+                                <span>{isQBankLoading ? "Generating New Questions..." : "Generate More Questions ✦"}</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
                       )}
                     </>

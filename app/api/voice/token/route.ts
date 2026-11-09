@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
       authoritativeReferences = [],
       language = "en",
       voiceName = DEFAULT_LIVE_VOICE,
+      mode = "viva", // "viva" or "whiteboard"
       resumptionHandle = null,
       isResuming = false,
     } = body;
@@ -44,26 +45,32 @@ export async function POST(req: NextRequest) {
 
     const langDirective = buildLanguageDirective(language as StudyLanguage, "voice");
 
-    const systemInstructionText = `You are Ascleon's elite 1-on-1 AI Live Oral Mentor. You are conducting an interactive, natural, humanoid clinical oral tutorial with a student who is actively reading Page ${pageNumber} of "${bookTitle}".
+    const systemInstructionText = `You are Ascleon's elite 1-on-1 AI Live Oral Mentor across all academic and scientific disciplines. You are conducting an interactive, natural, humanoid oral session with a student studying "${bookTitle}" (Page ${pageNumber}).
 
-ACTIVE PAGE PASSAGE:
+ACTIVE STUDY PASSAGE:
 """
 ${activeText}
 """${referencesContext}
 
 ${langDirective}
 
-PEDAGOGICAL & ORAL CONVERSATION RULES:
-1. Short, Dynamic Turns: Keep every spoken response concise (2-4 sentences max, ~15-25 seconds of speech). Never deliver a monologue or lecture wall of text.
-2. Socratic & Interactive: Always finish your turn with an engaging follow-up question or clinical check ("What do you think is the next step?", "Notice why that happens?").
-3. Grounding: Rely strictly on the active page facts and gold-standard surgical/medical principles. Never hallucinate fake clinical findings.
-4. Spoken delivery:
-   - Speak naturally like a brilliant senior clinician sitting next to the student.
-   - Use warm, engaging inflection.
-   - NO markdown asterisks (*), hashtags (#), brackets, or emojis in your speech — your output is directly streamed as native voice!
-5. Visual Grounding ("Show while explaining"):
-   - When introducing a pivotal mechanism, anatomical structure, or diagnostic pathway, you can invoke the 'show_concept_on_page' tool.
-   - This sends a visual signal to the student's screen in the background while you continue speaking seamlessly.`;
+PEDAGOGICAL & ORAL INTERACTION DIRECTIVES:
+1. USER INTENT & SCOPE SUPREMACY (CRITICAL):
+   - ALWAYS listen carefully and adapt your speaking style, depth, and duration to EXACTLY what the student asks.
+   - When the student asks you to explain, illustrate, or lecture on a topic (or section/page) as a mentor or editor:
+     • Deliver a complete, cohesive, well-structured explanation covering definitions, mechanisms, and core takeaways.
+     • DO NOT cut yourself off after 2 sentences!
+     • DO NOT force a quiz question at the end when the user asked for an explanation.
+   - When the student asks a quick, direct question: Give a crisp, direct, high-yield answer immediately.
+   - When the student explicitly asks to be quizzed, tested, or examined: Switch into Socratic oral-examiner mode and challenge them with targeted questions.
+2. DISCIPLINE & GROUNDING INTEGRITY:
+   - Ground your explanations strictly in the author's primary text and stated invariants/gold standards.
+   - Never inject distractor concepts from unrelated fields.
+3. Spoken Delivery:
+   - Speak with natural, warm, human inflection like a world-class scholar or mentor sitting next to the student.
+   - NO markdown formatting (no asterisks, hashtags, or emojis) — your output streams directly as real-time audio!
+4. Visual Grounding & Live Whiteboard Choreography:
+   - When introducing a pivotal mechanism, structure, or formula, invoke 'show_concept_on_page' or 'whiteboard_choreograph' in the background to highlight nodes on the screen while you speak.`;
 
     const liveConfig: any = {
       responseModalities: [Modality.AUDIO],
@@ -77,13 +84,13 @@ PEDAGOGICAL & ORAL CONVERSATION RULES:
       systemInstruction: {
         parts: [{ text: systemInstructionText }],
       },
-      // Real-time voice activity detection & barge-in tuning (tuned for clear voice isolation)
+      // Real-time voice activity detection tuned for clear voice isolation & instant barge-in
       realtimeInputConfig: {
         automaticActivityDetection: {
-          startOfSpeechSensitivity: "START_SENSITIVITY_LOW",
-          endOfSpeechSensitivity: "END_SENSITIVITY_LOW",
-          prefixPaddingMs: 250,
-          silenceDurationMs: 900,
+          startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
+          endOfSpeechSensitivity: "END_SENSITIVITY_HIGH",
+          prefixPaddingMs: 200,
+          silenceDurationMs: 450,
         },
       },
       // Enable seamless session resumption when pausing & resuming calls
@@ -117,6 +124,81 @@ PEDAGOGICAL & ORAL CONVERSATION RULES:
                   },
                 },
                 required: ["conceptName", "action"],
+              },
+            },
+            {
+              name: "whiteboard_choreograph",
+              description:
+                "Choreographs the interactive whiteboard in real-time as you speak: points the glowing laser pointer at a specific node/annotation, reveals progressive drawing steps, or displays a handwritten chalk callout.",
+              behavior: "NON_BLOCKING",
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  sceneIndex: {
+                    type: "INTEGER",
+                    description: "0-based index of the scene to show or advance to",
+                  },
+                  revealStepIndex: {
+                    type: "INTEGER",
+                    description: "0-based progressive step index to draw on the chalk canvas",
+                  },
+                  laserTargetId: {
+                    type: "STRING",
+                    description: "ID of the chalk node, pin, or widget element to point the laser at",
+                  },
+                  chalkAnnotation: {
+                    type: "STRING",
+                    description: "Short handwritten clinical pearl to stamp on the whiteboard",
+                  },
+                },
+              },
+            },
+            {
+              name: "whiteboard_control_widget",
+              description:
+                "Controls the live Generative Clinical UI widget on the whiteboard: toggles a pharmacological drug/intervention, highlights a differential diagnosis row, or selects a clinical algorithm branch.",
+              behavior: "NON_BLOCKING",
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  activeInterventionId: {
+                    type: "STRING",
+                    description: "ID of the simulator drug/intervention to toggle (e.g. 'rx-first-line')",
+                  },
+                  toggleIntervention: {
+                    type: "BOOLEAN",
+                    description: "Whether to turn the intervention ON (true) or OFF (false)",
+                  },
+                  activeConditionId: {
+                    type: "STRING",
+                    description: "ID of the differential diagnosis condition to highlight",
+                  },
+                  activeStepId: {
+                    type: "STRING",
+                    description: "ID of the clinical algorithm decision step to navigate to",
+                  },
+                },
+              },
+            },
+            {
+              name: "whiteboard_branch_topic",
+              description:
+                "Spawns a new visual whiteboard scene when the student asks an off-topic or deep-dive clinical question.",
+              behavior: "NON_BLOCKING",
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  focusQuestion: {
+                    type: "STRING",
+                    description: "The specific clinical mechanism or question to illustrate next",
+                  },
+                  preferredWidgetType: {
+                    type: "STRING",
+                    enum: ["physiology_simulator", "differential_matrix", "clinical_algorithm", "source_pinboard"],
+                    description: "The most appropriate clinical widget to generate",
+                  },
+                },
+                required: ["focusQuestion"],
               },
             },
           ],

@@ -14,6 +14,11 @@ const BookSegmentSchema = new Schema<IBookSegment>(
     segmentIndex: { type: Number, required: true, index: true },
     pageNumber: { type: Number, index: true },
     wordCount: { type: Number, required: true },
+    headings: { type: [String], default: [] },
+    keyTerms: { type: [String], default: [] },
+    clinicalEntities: { type: [String], default: [] },
+    goldStandards: { type: [String], default: [] },
+    summary: { type: String, default: "" },
   },
   { timestamps: true },
 );

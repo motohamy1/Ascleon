@@ -87,8 +87,12 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
 
     // Report playback level approximately every ~1000 samples (~40ms at 24kHz)
     if (this.rmsCount >= 1000) {
-      const rms = Math.sqrt(this.rmsSum / this.rmsCount);
-      this.port.postMessage({ type: "level", rms: Math.min(1, rms * 4.0) });
+      const rawRms = Math.sqrt(this.rmsSum / this.rmsCount);
+      this.port.postMessage({
+        type: "level",
+        rms: Math.min(1, rawRms * 2.5),
+        rawRms: rawRms,
+      });
       this.rmsSum = 0;
       this.rmsCount = 0;
     }
