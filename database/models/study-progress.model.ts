@@ -14,6 +14,11 @@ export interface IStudyProgressDocument extends Document {
   morphActiveTopic?: string | null;
   chatMessages?: any[];
   activeQBankIdx?: number;
+  scrollOrientation?: "vertical" | "horizontal";
+  readerViewMode?: "original_pdf" | "reflow";
+  fitMode?: string;
+  zoomLevel?: number;
+  studioState?: any;
   lastStudiedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -42,6 +47,19 @@ const StudyProgressSchema = new Schema(
     morphActiveTopic: { type: String, default: null },
     chatMessages: { type: Array, default: [] },
     activeQBankIdx: { type: Number, default: 0 },
+    scrollOrientation: {
+      type: String,
+      enum: ["vertical", "horizontal"],
+      default: "vertical",
+    },
+    readerViewMode: {
+      type: String,
+      enum: ["original_pdf", "reflow"],
+      default: "original_pdf",
+    },
+    fitMode: { type: String, default: "fit-width" },
+    zoomLevel: { type: Number, default: 100 },
+    studioState: { type: Schema.Types.Mixed },
     lastStudiedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }

@@ -122,20 +122,45 @@ export default function LivingReader({
   initialProgress = null,
 }: LivingReaderProps) {
   // Navigation & Viewport State
-  const [currentIdx, setCurrentIdx] = useState(0);
+  const [currentIdx, setCurrentIdx] = useState<number>(() => {
+    if (initialProgress?.lastStudiedPage && initialProgress.lastStudiedPage > 1) {
+      return Math.max(0, initialProgress.lastStudiedPage - 1);
+    }
+    return 0;
+  });
   const [theme, setTheme] = useState<ThemeMode>("paper");
-  const [zoomLevel, setZoomLevel] = useState<number>(100);
-  const [fitMode, setFitMode] = useState<FitMode>("fit-width");
+  const [zoomLevel, setZoomLevel] = useState<number>(() => {
+    return initialProgress?.studioState?.zoomLevel || 100;
+  });
+  const [fitMode, setFitMode] = useState<FitMode>(() => {
+    return (initialProgress?.studioState?.fitMode as FitMode) || "fit-width";
+  });
+  const [scrollOrientation, setScrollOrientation] = useState<"vertical" | "horizontal">(() => {
+    if (initialProgress?.studioState?.scrollOrientation) {
+      return initialProgress.studioState.scrollOrientation;
+    }
+    if (typeof window !== "undefined") {
+      try {
+        const savedOr =
+          localStorage.getItem(`ascleon_pdf_orientation_${book.slug}`) ||
+          localStorage.getItem(`ascleon_pdf_orientation_${book._id}`);
+        if (savedOr === "vertical" || savedOr === "horizontal") return savedOr;
+      } catch {}
+    }
+    return "vertical";
+  });
   const [paragraphInteractiveMode, setParagraphInteractiveMode] = useState(true);
   const [mobileActivePane, setMobileActivePane] = useState<"reader" | "studio">("reader");
   const [isLgScreen, setIsLgScreen] = useState(false);
 
   // Session Continuation & Progress State
-  const [resumedSessionInfo, setResumedSessionInfo] = useState<UserStudyProgressData | null>(null);
+  const [resumedSessionInfo, setResumedSessionInfo] = useState<UserStudyProgressData | null>(initialProgress || null);
   const [showResumeSourceHud, setShowResumeSourceHud] = useState<boolean>(false);
   const [showStudioResumeBanner, setShowStudioResumeBanner] = useState<boolean>(false);
   const [showStartNewModal, setShowStartNewModal] = useState<boolean>(false);
-  const isRestoringRef = useRef<boolean>(true);
+  const isRestoringRef = useRef<boolean>(Boolean(initialProgress && initialProgress.lastStudiedPage > 1));
+  const lastSavedPageRef = useRef<number>(initialProgress?.lastStudiedPage || 1);
+  const hasExplicitlyRestartedRef = useRef<boolean>(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -212,12 +237,33 @@ export default function LivingReader({
   }, []);
 
   // Dual-Track View Mode: Original Authentic PDF vs Structured Reflow
-  const [readerViewMode, setReaderViewMode] = useState<"original_pdf" | "reflow">(
-    book.fileURL ? "original_pdf" : "reflow"
-  );
-  const [activePdfPage, setActivePdfPage] = useState<number>(1);
+  const [readerViewMode, setReaderViewMode] = useState<"original_pdf" | "reflow">(() => {
+    if (initialProgress?.studioState?.readerViewMode) {
+      return initialProgress.studioState.readerViewMode;
+    }
+    return book.fileURL ? "original_pdf" : "reflow";
+  });
+  const [activePdfPage, setActivePdfPage] = useState<number>(() => {
+    if (initialProgress?.lastStudiedPage && initialProgress.lastStudiedPage > 1) {
+      return initialProgress.lastStudiedPage;
+    }
+    if (typeof window !== "undefined") {
+      try {
+        const localStr =
+          localStorage.getItem(`ascleon_progress_${book.slug}`) ||
+          localStorage.getItem(`ascleon_progress_${book._id}`);
+        if (localStr) {
+          const parsed = JSON.parse(localStr);
+          if (parsed?.lastStudiedPage && parsed.lastStudiedPage > 1) {
+            return parsed.lastStudiedPage;
+          }
+        }
+      } catch {}
+    }
+    return 1;
+  });
   const [totalPdfPages, setTotalPdfPages] = useState<number>(
-    book.totalPages || initialSegments.length || 1
+    initialProgress?.totalPages || book.totalPages || initialSegments.length || 1
   );
   const [activePageLiveText, setActivePageLiveText] = useState<string>("");
   const [isEditingTopPage, setIsEditingTopPage] = useState<boolean>(false);
@@ -228,14 +274,22 @@ export default function LivingReader({
   } | null>(null);
 
   // Universal Multi-Page / Topic Study Scope State
-  const [studyScope, setStudyScope] = useState<StudyScope>(() => ({
-    type: "page",
-    startPage: 1,
-    endPage: 1,
-  }));
+  const [studyScope, setStudyScope] = useState<StudyScope>(() => {
+    if (initialProgress?.studioState?.studyScope) {
+      return initialProgress.studioState.studyScope as StudyScope;
+    }
+    const initialPage = initialProgress?.lastStudiedPage || 1;
+    return {
+      type: "page",
+      startPage: initialPage,
+      endPage: initialPage,
+    };
+  });
 
   // Right Panel: All Controls & Study Studio (Default: AI Chat)
-  const [activeIntent, setActiveIntent] = useState<StudyIntent>("chat");
+  const [activeIntent, setActiveIntent] = useState<StudyIntent>(() => {
+    return (initialProgress?.studioState?.activeIntent as StudyIntent) || "chat";
+  });
   const [language, setLanguage] = useState<VoiceLanguage>(
     (book.language as VoiceLanguage) || DEFAULT_VOICE_LANGUAGE,
   );
@@ -412,6 +466,7 @@ export default function LivingReader({
 
         // Restore page
         if (saved.lastStudiedPage && saved.lastStudiedPage > 1) {
+          lastSavedPageRef.current = saved.lastStudiedPage;
           if (book.fileURL) {
             setActivePdfPage(saved.lastStudiedPage);
           } else {
@@ -421,8 +476,20 @@ export default function LivingReader({
           }
         }
 
-        // Restore studio state
+        // Restore studio state and reader settings
         if (saved.studioState) {
+          if (saved.studioState.scrollOrientation) {
+            setScrollOrientation(saved.studioState.scrollOrientation);
+          }
+          if (saved.studioState.readerViewMode) {
+            setReaderViewMode(saved.studioState.readerViewMode);
+          }
+          if (saved.studioState.fitMode) {
+            setFitMode(saved.studioState.fitMode as FitMode);
+          }
+          if (saved.studioState.zoomLevel) {
+            setZoomLevel(saved.studioState.zoomLevel);
+          }
           if (saved.studioState.activeIntent) {
             setActiveIntent(saved.studioState.activeIntent as StudyIntent);
           }
@@ -445,7 +512,7 @@ export default function LivingReader({
 
         setTimeout(() => {
           isRestoringRef.current = false;
-        }, 1000);
+        }, 1200);
 
         return () => clearTimeout(hudTimer);
       } else {
@@ -462,7 +529,19 @@ export default function LivingReader({
   // --------------------------------------------------------------------------
   const performSave = useCallback(
     (override?: Partial<UserStudyProgressData>) => {
-      const curPage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+      let curPage = override?.lastStudiedPage ?? (book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1));
+
+      // Strict guard against resetting saved progress to Page 1:
+      // If curPage is 1, but we have a known higher saved page and user did NOT explicitly click restart, retain lastSavedPage!
+      if (curPage === 1 && !hasExplicitlyRestartedRef.current && override?.lastStudiedPage !== 1) {
+        const candidate = lastSavedPageRef.current || initialProgress?.lastStudiedPage || resumedSessionInfo?.lastStudiedPage || 1;
+        if (candidate > 1) {
+          curPage = candidate;
+        }
+      }
+
+      lastSavedPageRef.current = curPage;
+
       const maxPages = book.fileURL ? totalPdfPages : (book.totalPages || segments.length || 1);
       const pct = Math.min(100, Math.max(1, Math.round((curPage / maxPages) * 100)));
       const status: ReadingStatus = pct >= 90 ? "read" : "in_progress";
@@ -490,6 +569,10 @@ export default function LivingReader({
           chatMessages: messages,
           activeQBankIdx,
           lastActiveSnippet: snippet,
+          scrollOrientation,
+          readerViewMode,
+          fitMode,
+          zoomLevel,
         },
         ...override,
       };
@@ -517,6 +600,12 @@ export default function LivingReader({
       studyScope,
       morphActiveTopic,
       activeQBankIdx,
+      scrollOrientation,
+      readerViewMode,
+      fitMode,
+      zoomLevel,
+      initialProgress?.lastStudiedPage,
+      resumedSessionInfo?.lastStudiedPage,
     ]
   );
 
@@ -594,6 +683,9 @@ export default function LivingReader({
     setShowStartNewModal(false);
     setShowResumeSourceHud(false);
     setShowStudioResumeBanner(false);
+
+    hasExplicitlyRestartedRef.current = true;
+    lastSavedPageRef.current = 1;
 
     if (book.fileURL) {
       setActivePdfPage(1);
@@ -1511,9 +1603,36 @@ export default function LivingReader({
                 <OriginalPdfViewer
                   fileURL={book.fileURL}
                   currentPage={activePdfPage}
+                  scrollOrientation={scrollOrientation}
+                  onScrollOrientationChange={(newOrientation) => {
+                    setScrollOrientation(newOrientation);
+                    try {
+                      localStorage.setItem(`ascleon_pdf_orientation_${book.slug}`, newOrientation);
+                      localStorage.setItem(`ascleon_pdf_orientation_${book._id}`, newOrientation);
+                    } catch {}
+                    performSave({
+                      studioState: {
+                        activeIntent,
+                        studyLanguage,
+                        studyScope,
+                        morphActiveTopic,
+                        chatMessages: messages,
+                        activeQBankIdx,
+                        scrollOrientation: newOrientation,
+                        readerViewMode,
+                        fitMode,
+                        zoomLevel,
+                      },
+                    });
+                  }}
                   onTotalPagesLoaded={(total) => setTotalPdfPages(total)}
                   onPageChange={(page, text) => {
+                    // Safety guard: during restoration, ignore transient Page 1 if a saved page > 1 exists
+                    if (isRestoringRef.current && page === 1 && (lastSavedPageRef.current || initialProgress?.lastStudiedPage || 1) > 1) {
+                      return;
+                    }
                     setActivePdfPage(page);
+                    lastSavedPageRef.current = page;
                     if (text) setActivePageLiveText(text);
                     const matchedIdx = segments.findIndex(
                       (s) => s.pageNumber === page

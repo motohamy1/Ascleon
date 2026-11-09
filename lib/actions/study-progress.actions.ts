@@ -53,6 +53,11 @@ export async function saveUserStudyProgress(data: UserStudyProgressData) {
         updatePayload.chatMessages = studioState.chatMessages.slice(-50);
       }
       if (studioState.activeQBankIdx !== undefined) updatePayload.activeQBankIdx = studioState.activeQBankIdx;
+      if (studioState.scrollOrientation) updatePayload.scrollOrientation = studioState.scrollOrientation;
+      if (studioState.readerViewMode) updatePayload.readerViewMode = studioState.readerViewMode;
+      if (studioState.fitMode) updatePayload.fitMode = studioState.fitMode;
+      if (studioState.zoomLevel) updatePayload.zoomLevel = studioState.zoomLevel;
+      updatePayload.studioState = studioState;
     }
 
     const savedDoc = await StudyProgress.findOneAndUpdate(
@@ -75,7 +80,7 @@ export async function saveUserStudyProgress(data: UserStudyProgressData) {
 
     return {
       success: true,
-      data: serializeData(savedDoc),
+      data: serializeData(formatStudyProgressDoc(savedDoc)),
     };
   } catch (error) {
     console.error("Error saving study progress:", error);
@@ -84,6 +89,35 @@ export async function saveUserStudyProgress(data: UserStudyProgressData) {
       error: error instanceof Error ? error.message : "Failed to save study progress",
     };
   }
+}
+
+/**
+ * Normalizes raw Mongoose document into a complete UserStudyProgressData with fully structured studioState.
+ */
+function formatStudyProgressDoc(doc: any): UserStudyProgressData {
+  const rawStudio = doc.studioState || {};
+  return {
+    bookSlug: doc.bookSlug,
+    bookId: doc.bookId ? String(doc.bookId) : undefined,
+    lastStudiedPage: Math.max(1, doc.lastStudiedPage || 1),
+    totalPages: Math.max(1, doc.totalPages || 1),
+    progressPercent: Math.min(100, Math.max(0, doc.progressPercent || 0)),
+    readingStatus: doc.readingStatus || "in_progress",
+    lastStudiedAt: doc.lastStudiedAt ? new Date(doc.lastStudiedAt).toISOString() : new Date().toISOString(),
+    studioState: {
+      activeIntent: doc.activeIntent || rawStudio.activeIntent || "chat",
+      studyLanguage: doc.studyLanguage || rawStudio.studyLanguage || "en",
+      studyScope: doc.studyScope || rawStudio.studyScope,
+      morphActiveTopic: doc.morphActiveTopic !== undefined ? doc.morphActiveTopic : rawStudio.morphActiveTopic ?? null,
+      chatMessages: doc.chatMessages || rawStudio.chatMessages || [],
+      activeQBankIdx: doc.activeQBankIdx !== undefined ? doc.activeQBankIdx : rawStudio.activeQBankIdx ?? 0,
+      lastActiveSnippet: rawStudio.lastActiveSnippet,
+      scrollOrientation: doc.scrollOrientation || rawStudio.scrollOrientation || "vertical",
+      readerViewMode: doc.readerViewMode || rawStudio.readerViewMode || "original_pdf",
+      fitMode: doc.fitMode || rawStudio.fitMode || "fit-width",
+      zoomLevel: doc.zoomLevel || rawStudio.zoomLevel || 100,
+    },
+  };
 }
 
 /**
@@ -110,7 +144,7 @@ export async function getUserStudyProgress(bookSlug: string) {
 
     return {
       success: true,
-      data: serializeData(progress) as UserStudyProgressData,
+      data: serializeData(formatStudyProgressDoc(progress)) as UserStudyProgressData,
     };
   } catch (error) {
     console.error("Error fetching study progress:", error);
@@ -145,7 +179,7 @@ export async function getLatestUserStudyProgress() {
 
     return {
       success: true,
-      data: serializeData(latest) as UserStudyProgressData,
+      data: serializeData(formatStudyProgressDoc(latest)) as UserStudyProgressData,
     };
   } catch (error) {
     console.error("Error fetching latest study progress:", error);

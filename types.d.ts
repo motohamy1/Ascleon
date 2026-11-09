@@ -40,6 +40,10 @@ export interface StudioSessionState {
   }>;
   activeQBankIdx?: number;
   lastActiveSnippet?: string;
+  scrollOrientation?: "vertical" | "horizontal";
+  readerViewMode?: "original_pdf" | "reflow";
+  fitMode?: "normal" | "fit-width" | "fit-page";
+  zoomLevel?: number;
 }
 
 export interface UserStudyProgressData {

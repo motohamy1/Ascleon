@@ -49,6 +49,7 @@ interface OriginalPdfViewerProps {
   onFitPage?: () => void;
   onZoomReset?: () => void;
   scrollOrientation?: "vertical" | "horizontal";
+  onScrollOrientationChange?: (orientation: "vertical" | "horizontal") => void;
   theme?: "paper" | "ink";
   className?: string;
 }
@@ -128,14 +129,17 @@ const PdfPageItem = React.memo(function PdfPageItem({
       },
       {
         root: null,
-        rootMargin: "1200px 0px 1200px 0px",
+        rootMargin:
+          scrollOrientation === "horizontal"
+            ? "0px 1200px 0px 1200px"
+            : "1200px 0px 1200px 0px",
         threshold: [0, 0.2, 0.4, 0.6, 0.8, 1.0],
       }
     );
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [pageNum, onVisibleChange]);
+  }, [pageNum, onVisibleChange, scrollOrientation]);
 
   // 2. Register canvas ref with parent for diagram snip tool
   useEffect(() => {
@@ -343,6 +347,7 @@ export default function OriginalPdfViewer({
   onFitPage,
   onZoomReset,
   scrollOrientation: initialScrollOrientation = "vertical",
+  onScrollOrientationChange,
   theme = "paper",
   className,
 }: OriginalPdfViewerProps) {
@@ -396,12 +401,6 @@ export default function OriginalPdfViewer({
     initialScrollOrientation
   );
 
-  useEffect(() => {
-    if (initialScrollOrientation) {
-      setScrollOrientation(initialScrollOrientation);
-    }
-  }, [initialScrollOrientation]);
-
   // Keep latest callbacks in ref to eliminate parent re-render dependencies
   const callbacksRef = useRef({
     onPageChange,
@@ -409,6 +408,7 @@ export default function OriginalPdfViewer({
     onTextSelection,
     onClearSelection,
     onSnipDiagram,
+    onScrollOrientationChange,
   });
 
   useEffect(() => {
@@ -418,6 +418,7 @@ export default function OriginalPdfViewer({
       onTextSelection,
       onClearSelection,
       onSnipDiagram,
+      onScrollOrientationChange,
     };
   });
 
@@ -447,13 +448,86 @@ export default function OriginalPdfViewer({
   const activeVisiblePageRef = useRef<number>(currentPage || 1);
   const lastReportedPageRef = useRef<number>(currentPage || 1);
   const visiblePageRatios = useRef<Map<number, number>>(new Map());
-  const isInternalScrollRef = useRef<boolean>(false);
+  const isInternalScrollRef = useRef<boolean>(Boolean(currentPage && currentPage > 1));
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // User manual scroll detection to completely prevent scroll fighting & rollbacks
   const isUserScrollingRef = useRef<boolean>(false);
   const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pageNotifyTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Stable toggle handler for orientation that freezes visibility detection during DOM reflow
+  const handleToggleScrollOrientation = useCallback(() => {
+    const next = scrollOrientation === "vertical" ? "horizontal" : "vertical";
+
+    // 1. Lock internal scroll immediately to suppress observer callbacks during reflow
+    isInternalScrollRef.current = true;
+    if (pageNotifyTimerRef.current) {
+      clearTimeout(pageNotifyTimerRef.current);
+      pageNotifyTimerRef.current = null;
+    }
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+      scrollTimeoutRef.current = null;
+    }
+
+    const targetPage = activeVisiblePageRef.current || currentPage || 1;
+    visiblePageRatios.current.clear();
+    visiblePageRatios.current.set(targetPage, 1.0);
+
+    setScrollOrientation(next);
+    callbacksRef.current.onScrollOrientationChange?.(next);
+
+    // 2. Wait two animation frames for DOM layout reflow to settle, then align to targetPage
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const pageEl = document.getElementById(`pdf-page-container-${targetPage}`);
+        if (pageEl && containerRef.current) {
+          pageEl.scrollIntoView({
+            behavior: "auto",
+            block: next === "horizontal" ? "nearest" : "start",
+            inline: next === "horizontal" ? "center" : "nearest",
+          });
+        }
+        scrollTimeoutRef.current = setTimeout(() => {
+          isInternalScrollRef.current = false;
+        }, 400);
+      });
+    });
+  }, [scrollOrientation, currentPage]);
+
+  // Sync external changes to initialScrollOrientation
+  const prevOrientationRef = useRef<"vertical" | "horizontal">(initialScrollOrientation);
+  useEffect(() => {
+    if (initialScrollOrientation && initialScrollOrientation !== prevOrientationRef.current) {
+      prevOrientationRef.current = initialScrollOrientation;
+      if (initialScrollOrientation !== scrollOrientation) {
+        const targetPage = activeVisiblePageRef.current || currentPage || 1;
+        isInternalScrollRef.current = true;
+        if (pageNotifyTimerRef.current) clearTimeout(pageNotifyTimerRef.current);
+        visiblePageRatios.current.clear();
+        visiblePageRatios.current.set(targetPage, 1.0);
+        setScrollOrientation(initialScrollOrientation);
+
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const pageEl = document.getElementById(`pdf-page-container-${targetPage}`);
+            if (pageEl && containerRef.current) {
+              pageEl.scrollIntoView({
+                behavior: "auto",
+                block: initialScrollOrientation === "horizontal" ? "nearest" : "start",
+                inline: initialScrollOrientation === "horizontal" ? "center" : "nearest",
+              });
+            }
+            if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+            scrollTimeoutRef.current = setTimeout(() => {
+              isInternalScrollRef.current = false;
+            }, 400);
+          });
+        });
+      }
+    }
+  }, [initialScrollOrientation, scrollOrientation, currentPage]);
 
   // Jump Input State
   const [isEditingPage, setIsEditingPage] = useState<boolean>(false);
@@ -723,6 +797,7 @@ export default function OriginalPdfViewer({
         // Debounce text extraction and parent notification so rapid scrollbar dragging doesn't flood React
         if (pageNotifyTimerRef.current) clearTimeout(pageNotifyTimerRef.current);
         pageNotifyTimerRef.current = setTimeout(() => {
+          if (isInternalScrollRef.current) return;
           const doc = pdfDocRef.current;
           if (doc) {
             doc.getPage(mostVisible).then(async (pageObj: any) => {
@@ -752,23 +827,33 @@ export default function OriginalPdfViewer({
   useEffect(() => {
     if (!loading && pdfDoc && currentPage > 1 && !initialScrollDoneRef.current) {
       initialScrollDoneRef.current = true;
-      const timer = setTimeout(() => {
-        const pageEl = document.getElementById(`pdf-page-container-${currentPage}`);
-        if (pageEl && containerRef.current) {
-          isInternalScrollRef.current = true;
-          pageEl.scrollIntoView({
-            behavior: "smooth",
-            block: scrollOrientation === "horizontal" ? "nearest" : "start",
-            inline: scrollOrientation === "horizontal" ? "center" : "nearest",
-          });
-          pageEl.classList.add("ring-4", "ring-[color:var(--orange)]", "shadow-xl", "transition-all", "duration-1000");
-          setTimeout(() => {
-            pageEl.classList.remove("ring-4", "ring-[color:var(--orange)]", "shadow-xl");
+      isInternalScrollRef.current = true;
+      visiblePageRatios.current.clear();
+      visiblePageRatios.current.set(currentPage, 1.0);
+      activeVisiblePageRef.current = currentPage;
+      lastReportedPageRef.current = currentPage;
+      setActiveVisiblePage(currentPage);
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const pageEl = document.getElementById(`pdf-page-container-${currentPage}`);
+          if (pageEl && containerRef.current) {
+            pageEl.scrollIntoView({
+              behavior: "auto",
+              block: scrollOrientation === "horizontal" ? "nearest" : "start",
+              inline: scrollOrientation === "horizontal" ? "center" : "nearest",
+            });
+            pageEl.classList.add("ring-4", "ring-[color:var(--orange)]", "shadow-xl", "transition-all", "duration-1000");
+            setTimeout(() => {
+              pageEl.classList.remove("ring-4", "ring-[color:var(--orange)]", "shadow-xl");
+            }, 2000);
+          }
+          if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+          scrollTimeoutRef.current = setTimeout(() => {
             isInternalScrollRef.current = false;
-          }, 2500);
-        }
-      }, 350);
-      return () => clearTimeout(timer);
+          }, 800);
+        });
+      });
     }
   }, [loading, pdfDoc, currentPage, scrollOrientation]);
 
@@ -1048,6 +1133,9 @@ export default function OriginalPdfViewer({
 
   const handleJumpToPage = (newPage: number) => {
     const clamped = Math.max(1, Math.min(newPage, totalPages));
+    isInternalScrollRef.current = true;
+    visiblePageRatios.current.clear();
+    visiblePageRatios.current.set(clamped, 1.0);
     activeVisiblePageRef.current = clamped;
     lastReportedPageRef.current = clamped;
     isUserScrollingRef.current = false;
@@ -1074,7 +1162,6 @@ export default function OriginalPdfViewer({
 
     const pageEl = document.getElementById(`pdf-page-container-${clamped}`);
     if (pageEl) {
-      isInternalScrollRef.current = true;
       if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
 
       pageEl.scrollIntoView({
@@ -1086,6 +1173,8 @@ export default function OriginalPdfViewer({
       scrollTimeoutRef.current = setTimeout(() => {
         isInternalScrollRef.current = false;
       }, 700);
+    } else {
+      isInternalScrollRef.current = false;
     }
   };
 
@@ -1311,11 +1400,7 @@ export default function OriginalPdfViewer({
           {/* Scroll Orientation Toggle: Vertical vs Horizontal */}
           <button
             type="button"
-            onClick={() =>
-              setScrollOrientation((prev) =>
-                prev === "vertical" ? "horizontal" : "vertical"
-              )
-            }
+            onClick={handleToggleScrollOrientation}
             className={cn(
               "flex cursor-pointer items-center gap-1 rounded-full border px-2 py-1 text-[10.5px] font-bold transition-all shadow-sm",
               scrollOrientation === "horizontal"
