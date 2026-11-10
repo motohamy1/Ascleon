@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { ArrowUpRight } from 'lucide-react';
-import { SignInButton } from '@clerk/nextjs';
+import { SignInButton, SignedIn, SignedOut } from '@clerk/nextjs';
 import { AscleonLogo } from '@/components/ui/AscleonLogo';
 
 const features = [
@@ -85,12 +85,23 @@ const Welcome = () => {
               so the hard parts finally open up.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-4">
-              <SignInButton mode="modal">
-                <button className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 active:translate-y-0">
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 active:translate-y-0">
+                    Start reading
+                    <ArrowUpRight className="size-4.5" />
+                  </button>
+                </SignInButton>
+              </SignedOut>
+              <SignedIn>
+                <Link
+                  href="/space/active"
+                  className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 active:translate-y-0"
+                >
                   Start reading
                   <ArrowUpRight className="size-4.5" />
-                </button>
-              </SignInButton>
+                </Link>
+              </SignedIn>
               <Link
                 href="/library"
                 className="group flex items-center gap-1.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] hover:underline underline-offset-4"
@@ -111,22 +122,42 @@ const Welcome = () => {
 
         {/* Right stack */}
         <div className="flex flex-col gap-3 lg:col-span-4">
-          <SignInButton mode="modal">
-            <div className="group relative flex min-h-[250px] sm:min-h-[280px] lg:min-h-[310px] flex-1 cursor-pointer flex-col justify-between overflow-hidden rounded-[24px] bg-[color:var(--orange)] p-6 sm:p-7 shadow-chip transition-transform duration-200 hover:-translate-y-1">
-              <p className="meta-label text-[color:var(--ink)]/80">
-                First time here
-              </p>
-              <h2 className="display mt-4 text-[42px] sm:text-[48px] leading-[1.02] text-[color:var(--ink)]">
-                One PDF,
-                <br />
-                one conversation.
-              </h2>
-              <p className="mt-3 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85">
-                Live voice sessions with your book, up to 60 minutes.
-              </p>
-              <ArrowUpRight className="absolute right-6 bottom-5 size-12 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
-            </div>
-          </SignInButton>
+          <SignedOut>
+            <SignInButton mode="modal">
+              <div className="group relative flex min-h-[250px] sm:min-h-[280px] lg:min-h-[310px] flex-1 cursor-pointer flex-col justify-between overflow-hidden rounded-[24px] bg-[color:var(--orange)] p-6 sm:p-7 shadow-chip transition-transform duration-200 hover:-translate-y-1">
+                <p className="meta-label text-[color:var(--ink)]/80">
+                  First time here
+                </p>
+                <h2 className="display mt-4 text-[42px] sm:text-[48px] leading-[1.02] text-[color:var(--ink)]">
+                  One PDF,
+                  <br />
+                  one conversation.
+                </h2>
+                <p className="mt-3 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85">
+                  Live voice sessions with your book, up to 60 minutes.
+                </p>
+                <ArrowUpRight className="absolute right-6 bottom-5 size-12 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
+              </div>
+            </SignInButton>
+          </SignedOut>
+          <SignedIn>
+            <Link href="/space/active" className="flex flex-1">
+              <div className="group relative flex min-h-[250px] sm:min-h-[280px] lg:min-h-[310px] w-full cursor-pointer flex-col justify-between overflow-hidden rounded-[24px] bg-[color:var(--orange)] p-6 sm:p-7 shadow-chip transition-transform duration-200 hover:-translate-y-1">
+                <p className="meta-label text-[color:var(--ink)]/80">
+                  First time here
+                </p>
+                <h2 className="display mt-4 text-[42px] sm:text-[48px] leading-[1.02] text-[color:var(--ink)]">
+                  One PDF,
+                  <br />
+                  one conversation.
+                </h2>
+                <p className="mt-3 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85">
+                  Live voice sessions with your book, up to 60 minutes.
+                </p>
+                <ArrowUpRight className="absolute right-6 bottom-5 size-12 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
+              </div>
+            </Link>
+          </SignedIn>
 
           <div className="flex min-h-[160px] sm:min-h-[185px] flex-col justify-between rounded-[24px] bg-[color:var(--panel)] p-5 sm:p-6 shadow-chip">
             <div className="flex items-center justify-between gap-4">

@@ -9,7 +9,6 @@ import {
 } from "@/types/whiteboard";
 import { WhiteboardScribeCanvas } from "./WhiteboardScribeCanvas";
 import { ChalkIllustrationCanvas } from "./ChalkIllustrationCanvas";
-import { GenerativeWidgetRenderer } from "./GenerativeWidgetRenderer";
 import { cn } from "@/lib/utils";
 import {
   Sparkles,
@@ -27,8 +26,8 @@ import {
   MicOff,
   PhoneOff,
   Radio,
-  SlidersHorizontal,
   Tv,
+  Layers,
 } from "lucide-react";
 
 interface WhiteboardMentorStageProps {
@@ -48,6 +47,7 @@ interface WhiteboardMentorStageProps {
   isDeckLoading?: boolean;
   isCinema?: boolean;
   onToggleCinema?: () => void;
+  onChangeScopeOrTopic?: () => void;
   className?: string;
 }
 
@@ -68,6 +68,7 @@ export function WhiteboardMentorStage({
   isDeckLoading,
   isCinema,
   onToggleCinema,
+  onChangeScopeOrTopic,
   className,
 }: WhiteboardMentorStageProps) {
   const [currentSceneIndex, setCurrentSceneIndex] = useState(0);
@@ -78,7 +79,6 @@ export function WhiteboardMentorStage({
   // VideoScribe Player States
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
-  const [showWidgetDrawer, setShowWidgetDrawer] = useState<boolean>(true);
   const [canvasMode, setCanvasMode] = useState<"scribe" | "chalk">("scribe");
 
   // Sync with live voice choreography tool calls from Gemini Live
@@ -238,14 +238,25 @@ export function WhiteboardMentorStage({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-[color:var(--ink)] bg-[color:var(--panel)] px-3 py-2">
         {/* Left: Title & Scene Chapter Indicator */}
         <div className="flex items-center gap-2">
-          <div className="flex size-7 items-center justify-center rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] shadow-chip">
+          <div className="flex size-7 items-center justify-center rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] shadow-chip shrink-0">
             <Tv className="size-3.5 stroke-[2.5]" />
           </div>
           <div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span className="font-mono text-[9px] font-black uppercase tracking-wider text-[color:var(--ink)]/70">
                 SCENE {currentSceneIndex + 1} OF {deck.scenes.length}
               </span>
+              {onChangeScopeOrTopic && (
+                <button
+                  type="button"
+                  onClick={onChangeScopeOrTopic}
+                  className="cursor-pointer flex items-center gap-1 rounded-full border border-[color:var(--ink)] bg-[color:var(--cream)] px-2 py-0.2 font-mono text-[8.5px] font-black uppercase text-[color:var(--ink)] hover:bg-[color:var(--orange)] shadow-xs transition-all"
+                  title="Change Topic or Study Scope"
+                >
+                  <Layers className="size-2.5 text-[color:var(--ink)]" />
+                  <span>Scope: {deck.topicTitle ? deck.topicTitle.slice(0, 24) + (deck.topicTitle.length > 24 ? "…" : "") : "Topic"}</span>
+                </button>
+              )}
               {isVoiceConnected && (
                 <span className="flex items-center gap-1 rounded-full border border-[color:var(--ink)] bg-[color:var(--mint)] px-1.5 py-0.2 font-mono text-[8.5px] font-black uppercase text-[color:var(--ink)] animate-pulse">
                   <Volume2 className="size-2.5" /> Live AI Mentor Synced
@@ -432,21 +443,6 @@ export function WhiteboardMentorStage({
             </button>
           )}
 
-          {/* Toggle Interactive Lab Drawer */}
-          <button
-            type="button"
-            onClick={() => setShowWidgetDrawer(!showWidgetDrawer)}
-            className={cn(
-              "cursor-pointer rounded-full border-2 border-[color:var(--ink)] px-2 py-1 font-mono text-[10px] font-black uppercase shadow-chip transition-all flex items-center gap-1",
-              showWidgetDrawer
-                ? "bg-[color:var(--orange)] text-[color:var(--ink)]"
-                : "bg-[color:var(--cream)] text-[color:var(--ink)]/80 hover:bg-[color:var(--orange)]"
-            )}
-            title="Toggle Interactive Clinical Simulator & Decision Widget"
-          >
-            <SlidersHorizontal className="size-3 stroke-[2.5]" />
-            <span className="hidden sm:inline">Clinical Lab</span>
-          </button>
 
           {/* Regenerate Whiteboard */}
           {onRefreshDeck && (
@@ -504,15 +500,9 @@ export function WhiteboardMentorStage({
         </div>
       )}
 
-      {/* 3. MAIN VIDEOSCRIBE CANVAS STAGE + GENERATIVE CLINICAL LAB WIDGET */}
-      <div className="flex-1 overflow-y-auto p-2.5 sm:p-3 flex flex-col lg:flex-row gap-3">
-        {/* The Hand-Drawn Whiteboard Stage */}
-        <div
-          className={cn(
-            "flex flex-col h-full min-h-[360px] transition-all duration-300",
-            showWidgetDrawer ? "lg:w-7/12" : "w-full"
-          )}
-        >
+      {/* 3. MAIN VIDEOSCRIBE CANVAS STAGE */}
+      <div className="flex-1 overflow-y-auto p-2.5 sm:p-3 flex flex-col">
+        <div className="w-full flex-1 flex flex-col min-h-[380px] transition-all duration-300">
           {canvasMode === "scribe" ? (
             <WhiteboardScribeCanvas
               illustration={activeScene.illustration}
@@ -532,18 +522,6 @@ export function WhiteboardMentorStage({
             />
           )}
         </div>
-
-        {/* Side-by-Side Generative Clinical Lab Widget (Physiology Simulator / Differential Matrix / Algorithm) */}
-        {showWidgetDrawer && (
-          <div className="lg:w-5/12 flex flex-col h-full min-h-[320px] animate-in slide-in-from-right-4 duration-300">
-            <GenerativeWidgetRenderer
-              widget={activeScene.widget}
-              widgetControlEvent={activeWidgetControl}
-              onInteraction={onStudentInteraction}
-              className="flex-1"
-            />
-          </div>
-        )}
       </div>
 
       {/* 4. BOTTOM LIVE MENTOR SUBTITLE RIBBON */}

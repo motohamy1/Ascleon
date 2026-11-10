@@ -58,7 +58,7 @@ async function callGeminiAgent(
   enriched: EnrichedStudyContext
 ): Promise<AgentRunOutput> {
   const ai = new GoogleGenAI({ apiKey });
-  const modelName = "gemini-2.5-flash";
+  const modelName = "gemini-3.5-flash-lite";
 
   // Build grounding context from active page + background textbook knowledge
   const pageIntro = `Active Book: "${context.bookTitle}" (Section ${context.currentSegmentIndex + 1}${

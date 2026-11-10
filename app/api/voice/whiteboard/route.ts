@@ -518,7 +518,7 @@ Generate 3 to 4 scenes telling a complete clinical story:
           candidateTasks.push(
             (async () => {
               const resp: any = await ai.models.generateContent({
-                model: "gemini-2.5-flash",
+                model: "gemini-3.5-flash-lite",
                 contents: [{ role: "user", parts: userParts }],
                 config: {
                   responseMimeType: "application/json",

@@ -10,6 +10,7 @@ import {
 } from "@/lib/ai/knowledge/sample-book-data";
 import { MorphCanvas } from "@/components/reader/MorphCanvas";
 import { AscleonVoiceStudio } from "@/components/reader/AscleonVoiceStudio";
+import { WhiteboardStudio } from "@/components/reader/whiteboard/WhiteboardStudio";
 import { StudyLanguageSwitch } from "@/components/reader/StudyLanguageSwitch";
 import { StudyLanguage, DEFAULT_STUDY_LANGUAGE } from "@/lib/language";
 import {
@@ -2738,27 +2739,25 @@ export default function LivingReader({
               {/* TAB 3: ASCLEON LIVE WHITEBOARD MENTOR */}
               {activeIntent === "whiteboard" && (
                 <div className="flex animate-in fade-in flex-col h-full duration-150">
-                  <AscleonVoiceStudio
-                    bookTitle={book.title}
+                  <WhiteboardStudio
+                    book={book as any}
                     currentPageNumber={book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
-                    currentSectionText={
+                    activePageLiveText={
                       (book.fileURL && activePageLiveText)
                         ? activePageLiveText
                         : (currentSegment?.content || "")
                     }
                     selectedText={selectedText || undefined}
-                    authoritativeReferences={activeReferences}
                     studyLanguage={studyLanguage}
                     onStudyLanguageChange={setStudyLanguage}
-                    bookId={String(book._id || "")}
                     studyScope={studyScope}
-                    snippedDiagram={snippedDiagram?.url || null}
-                    onWhiteboardExpandChange={setIsWhiteboardExpanded}
-                    forcedMode="whiteboard"
-                    onTriggerMorph={() => {
-                      setActiveIntent("morph");
-                      handleRunMorph();
+                    onStudyScopeChange={setStudyScope}
+                    onNavigateToPage={(page) => {
+                      if (book.fileURL) setActivePdfPage(page);
+                      else setCurrentIdx(Math.max(0, page - 1));
                     }}
+                    onWhiteboardExpandChange={setIsWhiteboardExpanded}
+                    authoritativeReferences={activeReferences}
                   />
                 </div>
               )}

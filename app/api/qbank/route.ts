@@ -20,8 +20,8 @@ function shuffleQuestionOptions(q: any) {
       originalRationales[String(idx)] ||
       originalRationales[idx] ||
       (idx === originalCorrectIdx
-        ? "Correct: Directly verified by the primary source mechanisms."
-        : "Incorrect distractor based on the provided material."),
+        ? "Correct: Directly verified by the primary pathophysiological mechanisms."
+        : "Incorrect distractor based on standard clinical evidence."),
   }));
 
   // Fisher-Yates shuffle
@@ -81,12 +81,164 @@ function parseQuestionsJSON(text: string): any[] | null {
   return null;
 }
 
+/**
+ * Clean extracted OCR / PDF text:
+ * Strips running headers (e.g. "175 pre-eCLamPsia overvieW"), raw page numbers,
+ * file names, volume markers, figure stamps, and OCR artifacts.
+ */
+function sanitizeStudyText(rawText: string, bookTitle: string): string {
+  if (!rawText) return "";
+  let text = rawText;
+
+  // 1. Remove running headers like "175 pre-eCLamPsia overvieW" or "Page 175 Chapter 4"
+  text = text.replace(/^[0-9]+\s+[A-Za-z\s-]{2,50}(overview|summary|chapter|section)?/gim, "");
+
+  // 2. Strip book title / file name remnants if they leak into the body
+  if (bookTitle && bookTitle.length > 5) {
+    const cleanTitle = bookTitle.slice(0, 35).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    text = text.replace(new RegExp(cleanTitle, "gi"), "");
+  }
+
+  // 3. Filter line-by-line noise
+  const cleanedLines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((line) => {
+      if (!line) return false;
+      if (/^\d+$/.test(line)) return false; // standalone page numbers
+      if (/^(figure|fig\.|table)\s*\d+:?\s*$/i.test(line)) return false;
+      if (/^(page|pg\.)\s*\d+$/i.test(line)) return false;
+      if (/^(\.\.\.|\*\*\*|---|___)$/.test(line)) return false;
+      return true;
+    });
+
+  return cleanedLines.join("\n").trim();
+}
+
+/**
+ * Resilient, clean standalone fallback (used ONLY if every AI API is completely offline):
+ * Never mentions book titles, page numbers, or robotic placeholder words.
+ */
+function buildCleanFallback(text: string, pageNumber: number, language: string) {
+  const isAr = language === "ar";
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^[•⇒➔■*-]\s*/, "").trim())
+    .filter((l) => l.length > 25);
+
+  const concept1 = lines[0] || "Primary clinical and pathophysiological mechanism outlined in the study text";
+  const concept2 = lines[1] || "Core diagnostic criteria and defining clinical parameters";
+  const concept3 = lines[2] || "First-line management protocol and targeted therapeutic intervention";
+
+  return [
+    {
+      id: `qbank-p${pageNumber}-${Date.now()}-1`,
+      examType: isAr ? "امتحان البورد الإكلينيكي" : "Clinical Board Examination",
+      topic: isAr ? "الفسيولوجيا المرضية والآلية الأساسية" : "Pathophysiology & Core Mechanism",
+      difficulty: "medium",
+      vignette: isAr
+        ? "مريضة تراجع العيادة بأعراض سريرية متوافقة مع هذه الحالة. ما هي الآلية الفسيولوجية المرضية الأولية المفسرة لهذه التغيرات؟"
+        : "A patient presents with characteristic clinical findings consistent with this presentation. Which of the following best accounts for the primary pathophysiological mechanism underlying this condition?",
+      options: [
+        concept1.slice(0, 95),
+        isAr ? "تكيف فسيولوجي حميد وعابر دون تأثير على الأعضاء الحيوية" : "Benign physiological adaptation with negligible end-organ consequences",
+        isAr ? "فرط نشاط عصبي ذاتي موضعي دون اضطراب في الدورة الدموية الدقيقة" : "Isolated peripheral autonomic hyperactivity without microvascular endothelial involvement",
+        isAr ? "تأخر غير نوعي في تصريف المعقدات المناعية الدائرة" : "Non-specific delayed clearance of circulating immune complexes",
+      ],
+      correctIndex: 0,
+      distractorRationales: {
+        0: isAr
+          ? `صحيح: تؤكد الأدلة الإكلينيكية أن ${concept1.slice(0, 100)} تمثل الآلية الأولية المؤدية للمظاهر السريرية.`
+          : `Correct: Clinical evidence establishes that ${concept1.slice(0, 100)} is the primary driver of this presentation.`,
+        1: isAr
+          ? "غير صحيح: تمثل هذه الحالة اعتلالاً وظيفياً خطيراً يتطلب المتابعة وليس مجرد تكيف حميد."
+          : "Incorrect: This represents significant pathology requiring intervention rather than a benign variation.",
+        2: isAr
+          ? "غير صحيح: العملية المرضية تتضمن تغيرات بنيوية بطانية مباشرة وليست استجابة عصبية ذاتية معزولة."
+          : "Incorrect: The process involves direct structural or endothelial alterations rather than isolated autonomic reflexes.",
+        3: isAr
+          ? "غير صحيح: لا يعتمد المسار المرضي الرئيسي على ترسب المعقدات المناعية هنا."
+          : "Incorrect: Immune complex clearance is not the primary pathophysiological mechanism for this condition.",
+      },
+      highYieldTakeaway: isAr
+        ? `اللؤلؤة الامتحانية: العامل الحاسم الموجه لهذا التشخيص يتركز حول: ${concept1.slice(0, 90)}.`
+        : `High-Yield Pearl: The hallmark mechanism of this presentation is centered around: ${concept1.slice(0, 90)}.`,
+    },
+    {
+      id: `qbank-p${pageNumber}-${Date.now()}-2`,
+      examType: isAr ? "الاستدلال التشخيصي" : "Diagnostic Reasoning",
+      topic: isAr ? "المعايير التشخيصية النوعية" : "Diagnostic Criteria & Recognition",
+      difficulty: "hard",
+      vignette: isAr
+        ? "عند تقييم حالة مشتبه بإصابتها بهذا الاضطراب، أي من الموجودات التالية يقدم التأكيد التشخيصي الأقوى وفقاً للإرشادات المعتمدة؟"
+        : "When evaluating an individual suspected of this condition, which of the following findings provides definitive diagnostic confirmation according to authoritative clinical guidelines?",
+      options: [
+        concept2.slice(0, 95),
+        isAr ? "أعراض إجهاد غير نوعية دون وجود علامات موضوعية في الفحص السريري أو المختبري" : "Subjective generalized fatigue unaccompanied by objective physical or laboratory markers",
+        isAr ? "تحسن مؤقت للأعراض بعد استخدام مسكنات الألم الروتينية" : "Transient symptomatic improvement following non-specific supportive measures alone",
+        isAr ? "استجابة فسيولوجية عابرة للإجهاد تزول تلقائياً دون الحاجة لمراقبة" : "Transient physiological stress response that resolves spontaneously without monitoring",
+      ],
+      correctIndex: 0,
+      distractorRationales: {
+        0: isAr
+          ? `صحيح: المعيار التشخيصي الحاسم يتطلب إثبات: ${concept2.slice(0, 100)}.`
+          : `Correct: Definitive diagnostic criteria require demonstrating: ${concept2.slice(0, 100)}.`,
+        1: isAr
+          ? "غير صحيح: الأعراض العامة غير كافية للتشخيص بدون مؤشرات موضوعية ومحددة."
+          : "Incorrect: Subjective non-specific symptoms are insufficient without meeting objective diagnostic benchmarks.",
+        2: isAr
+          ? "غير صحيح: التحسن السريري العابر لا يغني عن التوثيق المعياري للعلامات التشخيصية."
+          : "Incorrect: Treatment response alone does not substitute for objective criteria-based confirmation.",
+        3: isAr
+          ? "غير صحيح: تتطلب الحالة استقصاءات دقيقة ومتابعة مستمرة لتقييم المخاطر."
+          : "Incorrect: Active monitoring and objective verification are mandatory.",
+      },
+      highYieldTakeaway: isAr
+        ? `اللؤلؤة الامتحانية: يرتكز التشخيص الدقيق على استيفاء: ${concept2.slice(0, 90)}.`
+        : `High-Yield Pearl: Diagnostic confirmation relies on establishing objective evidence of: ${concept2.slice(0, 90)}.`,
+    },
+    {
+      id: `qbank-p${pageNumber}-${Date.now()}-3`,
+      examType: isAr ? "البروتوكول العلاجي" : "Clinical Management & Protocol",
+      topic: isAr ? "الخط العلاجي الأول" : "First-Line Therapeutic Intervention",
+      difficulty: "hard",
+      vignette: isAr
+        ? "في وضع الخطة العلاجية المبنية على الدليل لهذه الحالة، ما هي الخطوة الأكثر أهمية وإلحاحاً لضمان سلامة المريض؟"
+        : "In formulating an evidence-based management plan for this presentation, which of the following represents the most appropriate initial priority?",
+      options: [
+        concept3.slice(0, 95),
+        isAr ? "الانتظار والمراقبة السلبية مع تأجيل التدخل لحين حدوث مضاعفات متقدمة" : "Expectant observation with withholding of intervention until severe decompensation occurs",
+        isAr ? "إعطاء جرعات تجريبية عشوائية دون مراعاة المسببات المحددة" : "Empirical high-dose monotherapy disregardful of the underlying etiology",
+        isAr ? "تخريج المريض دون إجراء تصنيف دقيق لدرجة الخطورة السريرية" : "Discharge with routine outpatient follow-up without baseline risk stratification",
+      ],
+      correctIndex: 0,
+      distractorRationales: {
+        0: isAr
+          ? `صحيح: توصي الإرشادات الحديثة بالبدء الفوري بـ: ${concept3.slice(0, 100)}.`
+          : `Correct: Best clinical practice mandates targeted priority intervention: ${concept3.slice(0, 100)}.`,
+        1: isAr
+          ? "غير صحيح: تأخير التدخل العلاجي المناسب يعرض المريض لمخاطر التدهور الحاد."
+          : "Incorrect: Delaying protocolized care risks irreversible organ impairment or acute decompensation.",
+        2: isAr
+          ? "غير صحيح: يجب توجيه العلاج نحو السبب المباشر وليس بصورة تجريبية غير مدروسة."
+          : "Incorrect: Interventions must be etiology-specific rather than blind empirical monotherapy.",
+        3: isAr
+          ? "غير صحيح: تصنيف الخطورة وتحديد مكان الرعاية المناسب خطوة أساسية لا يمكن تجاوزها."
+          : "Incorrect: Risk stratification and appropriate disposition are essential prior to discharge.",
+      },
+      highYieldTakeaway: isAr
+        ? `اللؤلؤة الامتحانية: الإدارة العلاجية الناجحة تستوجب: ${concept3.slice(0, 90)}.`
+        : `High-Yield Pearl: First-line clinical management requires immediate adherence to: ${concept3.slice(0, 90)}.`,
+    },
+  ];
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
       bookId,
-      bookTitle = "Study Material",
+      bookTitle = "Medical Study Material",
       pageNumber = 1,
       pageText = "",
       selectedText = "",
@@ -97,10 +249,9 @@ export async function POST(req: NextRequest) {
     } = body;
 
     let focalText = (selectedText || pageText || "").trim();
-    let scopeLabel = `Page ${pageNumber}`;
     let citedPages: number[] = [pageNumber];
 
-    // Ground via Universal Book RAG only for multi-page topics or when local page text is absent
+    // 1. RAG Digestion: Retrieve multi-page topic context if requested or if page text is empty
     const isMultiPageScope =
       studyScope && (studyScope.type === "topic" || studyScope.type === "range");
 
@@ -108,7 +259,7 @@ export async function POST(req: NextRequest) {
       try {
         const ragRes = await retrieveFromBookRAG({
           bookId,
-          query: studyScope?.topicTitle || selectedText || "high yield concepts and principles",
+          query: studyScope?.topicTitle || selectedText || "high yield pathophysiology and clinical diagnosis",
           scope: studyScope,
           activePage: pageNumber,
           topK: 4,
@@ -117,13 +268,6 @@ export async function POST(req: NextRequest) {
         if (ragRes.combinedContext) {
           focalText = ragRes.combinedContext;
           citedPages = ragRes.citedPages;
-          scopeLabel = ragRes.detectedTopic
-            ? `Topic "${ragRes.detectedTopic}" (Pages ${citedPages.join(", ")})`
-            : studyScope?.type === "topic" && studyScope.topicTitle
-            ? `Topic "${studyScope.topicTitle}" (Pages ${studyScope.startPage}–${studyScope.endPage})`
-            : studyScope?.type === "range"
-            ? `Pages ${studyScope.startPage}–${studyScope.endPage}`
-            : `Page ${pageNumber}`;
         }
       } catch (ragErr) {
         console.warn("[QBank API] RAG retrieval fallback:", ragErr);
@@ -134,274 +278,250 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing text or diagram to generate questions" }, { status: 400 });
     }
 
+    // 2. Sanitize extracted text: Strip OCR noise, page numbers, running headers, and raw file names
+    const sanitizedText = sanitizeStudyText(focalText, bookTitle);
+
     const excludeDirective =
       Array.isArray(excludeTopics) && excludeTopics.length > 0
         ? `\nAvoid repeating these previously tested concepts: ${excludeTopics.join(", ")}.`
         : "";
 
-    const prompt = `You are Ascleon's elite Question Bank (QBank) Examiner across all academic and scientific disciplines.
-Generate 4-5 high-yield, exam-grade multiple-choice practice questions grounded strictly in ${scopeLabel} of "${bookTitle}".
+    // 3. High-Standard Academic Board Examination Prompt (USMLE / MRCP / AMBOSS / UWorld)
+    const prompt = `You are Ascleon's elite Question Bank (QBank) Examiner matching the gold standards of USMLE Step 1 & 2 CK, MRCP Part 1 / Part 2, and authoritative academic board examinations.
+
+Clinical/Academic Source Material:
+"""
+${sanitizedText.slice(0, 5200)}
+"""
 ${excludeDirective}
 
-Passage Context:
-"""
-${focalText.slice(0, 5500)}
-"""
+STRICT INVARIANTS:
+1. FORBIDDEN META-LANGUAGE:
+   - NEVER mention or cite book titles, file names, page numbers, or chapter headings.
+   - NEVER use meta-phrases such as "According to the passage", "In this chapter", "On page X", or "During an evaluation of...".
+   - The questions MUST be 100% standalone, immersive, and realistic.
+2. CLINICAL CASE VIGNETTES:
+   - For clinical, medical, or pathological topics, frame each question as a high-fidelity board-exam clinical vignette:
+     • Patient demographics (e.g., "A 28-year-old primigravida at 34 weeks of gestation...")
+     • Clinical presentation, vital signs (BP, HR, RR, temp), physical examination, or laboratory findings (e.g. urinalysis, platelets, LFTs).
+     • Clear interrogative lead-in (e.g., "Which of the following is the most likely diagnosis?", "Which of the following is the primary pathophysiological mechanism underlying this condition?", "Which of the following is the most appropriate next step in management?").
+   - For engineering/science/law topics, present concrete practical scenarios or design/troubleshooting constraints.
+3. HIGH-CLASS CHOICES:
+   - Provide exactly 4 plausible, distinct choices (A, B, C, D).
+   - Every distractor must be a realistic, meaningful medical entity, differential diagnosis, or therapeutic agent.
+   - NEVER use generic placeholder words or sentence fragments (e.g., NEVER use "Secondary transient artifact", "Direct dependency", or "Inversion of mechanisms").
+4. FIRST-PRINCIPLE RATIONALES:
+   - Provide clear, high-yield explanations for why the correct answer is right and why each specific distractor is incorrect.
+5. HIGH-YIELD TAKEAWAY:
+   - 1-2 sentence core exam pearl.
 
-Task:
-Produce a JSON array of 4-5 distinct multiple-choice questions with this exact structure:
+Produce a JSON array of 3 distinct multiple-choice questions matching this structure:
 [
   {
     "id": "qbank-1",
-    "examType": "Clinical Board / Comprehensive Exam",
-    "topic": "Concise concept name from the text",
-    "difficulty": "hard",
-    "vignette": "Realistic multi-sentence scenario requiring application of the concepts in this section, concluding with a clear question.",
+    "examType": "Clinical Board Examination (USMLE / MRCP)",
+    "topic": "Concise concept name",
+    "difficulty": "medium",
+    "vignette": "A 28-year-old patient presents with...",
     "options": [
-      "Plausible Option A",
-      "Plausible Option B",
-      "Plausible Option C",
-      "Plausible Option D"
+      "Option A",
+      "Option B",
+      "Option C",
+      "Option D"
     ],
     "correctIndex": 0,
     "distractorRationales": {
-      "0": "Detailed explanation of why this option is correct based on the mechanisms and principles.",
-      "1": "Explanation of why Option B is an incorrect distractor.",
-      "2": "Explanation of why Option C is an incorrect distractor.",
-      "3": "Explanation of why Option D is an incorrect distractor."
+      "0": "Explanation why Option A is correct...",
+      "1": "Explanation why Option B is incorrect...",
+      "2": "Explanation why Option C is incorrect...",
+      "3": "Explanation why Option D is incorrect..."
     },
-    "highYieldTakeaway": "1-2 sentence core high-yield takeaway grounded in the source study."
+    "highYieldTakeaway": "Key takeaway pearl..."
   }
 ]
 
-Requirements:
-1. Cover diverse angles: Mechanism, Diagnostic/Analytical Rule, Edge Case, and Gold-Standard/First-Line Protocol.
-2. Ground options and rationales directly in the source text. Do NOT use generic placeholder words.
-3. Return ONLY valid JSON array.
-
+Return ONLY the raw JSON array.
 ${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
-    // 1. Try Google Gemini
+    // 4. FAST MULTI-PROVIDER CONCURRENT EXECUTION
+    // Race Groq (ultra-fast ~1.5-3.5s) and Gemini (strong multimodal) concurrently!
+    const groqKey = process.env.GROQ_API_KEY;
     const geminiKey = process.env.GEMINI_API_KEY;
-    if (geminiKey && geminiKey !== "your_gemini_api_key_here") {
-      try {
-        const ai = new GoogleGenAI({ apiKey: geminiKey });
-        const userParts: any[] = [{ text: prompt }];
+    const openRouterKey = process.env.OPENROUTER_API_KEY;
 
-        if (snippedDiagram && typeof snippedDiagram === "string" && snippedDiagram.startsWith("data:image")) {
-          const cleanBase64 = snippedDiagram.replace(/^data:image\/\w+;base64,/, "");
-          userParts.push({
-            inlineData: {
-              mimeType: "image/png",
-              data: cleanBase64,
+    const candidateTasks: Promise<{ questions: any[]; source: string }>[] = [];
+
+    // Candidate A: Groq (openai/gpt-oss-120b - verified working in ~3.5s)
+    if (groqKey && groqKey !== "your_groq_api_key_here") {
+      candidateTasks.push(
+        (async () => {
+          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${groqKey}`,
             },
+            signal: AbortSignal.timeout(6000),
+            body: JSON.stringify({
+              model: "openai/gpt-oss-120b",
+              messages: [
+                { role: "system", content: "You are an elite academic board exam question generator. Always return valid JSON." },
+                { role: "user", content: prompt },
+              ],
+              response_format: { type: "json_object" },
+              temperature: 0.35,
+            }),
           });
-        }
+          if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
+          const data = await res.json();
+          const content = data.choices?.[0]?.message?.content || "";
+          const parsed = parseQuestionsJSON(content);
+          if (parsed && parsed.length > 0) {
+            return { questions: parsed.map(shuffleQuestionOptions), source: "groq:openai/gpt-oss-120b" };
+          }
+          throw new Error("Invalid Groq QBank JSON");
+        })()
+      );
+    }
 
-        const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash"];
-        for (const modelCandidate of modelsToTry) {
-          try {
-            const resp: any = await ai.models.generateContent({
-              model: modelCandidate,
+    // Candidate B: Google Gemini (models/gemini-3.5-flash - high-capacity official model)
+    if (geminiKey && geminiKey !== "your_gemini_api_key_here") {
+      candidateTasks.push(
+        (async () => {
+          const ai = new GoogleGenAI({ apiKey: geminiKey });
+          const userParts: any[] = [{ text: prompt }];
+
+          if (snippedDiagram && typeof snippedDiagram === "string" && snippedDiagram.startsWith("data:image")) {
+            const cleanBase64 = snippedDiagram.replace(/^data:image\/\w+;base64,/, "");
+            userParts.push({
+              inlineData: {
+                mimeType: "image/png",
+                data: cleanBase64,
+              },
+            });
+          }
+
+          const resp: any = await Promise.race([
+            ai.models.generateContent({
+              model: "models/gemini-3.5-flash",
               contents: [{ role: "user", parts: userParts }],
               config: {
                 responseMimeType: "application/json",
                 temperature: 0.35,
               },
-            });
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Gemini timeout 6s")), 6000)),
+          ]);
 
-            const text = resp.text?.trim() || "";
-            const questionsList = parseQuestionsJSON(text);
-
-            if (questionsList && questionsList.length > 0) {
-              const shuffledQuestions = questionsList.map(shuffleQuestionOptions);
-              return NextResponse.json({
-                success: true,
-                questions: shuffledQuestions,
-                citedPages,
-                source: modelCandidate,
-              });
-            }
-          } catch (modelErr) {
-            console.warn(`[QBank API] ${modelCandidate} failed, trying next:`, modelErr);
+          const text = resp.text?.trim() || "";
+          const parsed = parseQuestionsJSON(text);
+          if (parsed && parsed.length > 0) {
+            return { questions: parsed.map(shuffleQuestionOptions), source: "gemini:gemini-3.5-flash" };
           }
-        }
-      } catch (aiErr) {
-        console.warn("[QBank API] Gemini generation warning, trying fallback providers:", aiErr);
-      }
+          throw new Error("Invalid Gemini QBank JSON");
+        })()
+      );
     }
 
-    // 2. Try Groq (openai/gpt-oss-120b or llama-3.3-70b-versatile)
-    const groqKey = process.env.GROQ_API_KEY;
+    // Candidate C: Groq Fast Backup (openai/gpt-oss-20b)
     if (groqKey && groqKey !== "your_groq_api_key_here") {
-      try {
-        const groqModels = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
-        for (const gModel of groqModels) {
-          try {
-            const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${groqKey}`,
-              },
-              signal: AbortSignal.timeout(12000),
-              body: JSON.stringify({
-                model: gModel,
-                messages: [
-                  { role: "system", content: "You are an elite academic board exam question generator. Always return valid JSON." },
-                  { role: "user", content: prompt },
-                ],
-                response_format: { type: "json_object" },
-                temperature: 0.35,
-              }),
-            });
-
-            if (res.ok) {
-              const data = await res.json();
-              const content = data.choices?.[0]?.message?.content || "";
-              const questionsList = parseQuestionsJSON(content);
-              if (questionsList && questionsList.length > 0) {
-                const shuffledQuestions = questionsList.map(shuffleQuestionOptions);
-                return NextResponse.json({
-                  success: true,
-                  questions: shuffledQuestions,
-                  citedPages,
-                  source: `groq:${gModel}`,
-                });
-              }
-            }
-          } catch (gErr) {
-            console.warn(`[QBank API] Groq ${gModel} failed:`, gErr);
-          }
-        }
-      } catch (groqErr) {
-        console.warn("[QBank API] Groq provider failed, trying next:", groqErr);
-      }
-    }
-
-    // 3. Try OpenRouter
-    const openRouterKey = process.env.OPENROUTER_API_KEY;
-    if (openRouterKey && openRouterKey !== "your_openrouter_api_key_here") {
-      try {
-        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${openRouterKey}`,
-          },
-          signal: AbortSignal.timeout(12000),
-          body: JSON.stringify({
-            model: "meta-llama/llama-3.3-70b-instruct:free",
-            messages: [
-              { role: "system", content: "You are an elite exam question bank generator. Always return valid JSON." },
-              { role: "user", content: prompt },
-            ],
-            temperature: 0.35,
-          }),
-        });
-
-        if (res.ok) {
+      candidateTasks.push(
+        (async () => {
+          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${groqKey}`,
+            },
+            signal: AbortSignal.timeout(6000),
+            body: JSON.stringify({
+              model: "openai/gpt-oss-20b",
+              messages: [
+                { role: "system", content: "You are an elite academic board exam question generator. Return valid JSON only." },
+                { role: "user", content: prompt },
+              ],
+              response_format: { type: "json_object" },
+              temperature: 0.35,
+            }),
+          });
+          if (!res.ok) throw new Error(`Groq 20b HTTP ${res.status}`);
           const data = await res.json();
           const content = data.choices?.[0]?.message?.content || "";
-          const questionsList = parseQuestionsJSON(content);
-          if (questionsList && questionsList.length > 0) {
-            const shuffledQuestions = questionsList.map(shuffleQuestionOptions);
-            return NextResponse.json({
-              success: true,
-              questions: shuffledQuestions,
-              citedPages,
-              source: "openrouter",
-            });
+          const parsed = parseQuestionsJSON(content);
+          if (parsed && parsed.length > 0) {
+            return { questions: parsed.map(shuffleQuestionOptions), source: "groq:openai/gpt-oss-20b" };
           }
+          throw new Error("Invalid Groq 20b JSON");
+        })()
+      );
+    }
+
+    // Execute fastest working candidate
+    if (candidateTasks.length > 0) {
+      try {
+        const fastestResult = await Promise.any(candidateTasks);
+        if (fastestResult && fastestResult.questions.length > 0) {
+          return NextResponse.json({
+            success: true,
+            questions: fastestResult.questions,
+            citedPages,
+            source: fastestResult.source,
+          });
         }
-      } catch (orErr) {
-        console.warn("[QBank API] OpenRouter provider failed:", orErr);
+      } catch (raceErr) {
+        console.warn("[QBank API] Primary fast race failed, trying OpenRouter fallback:", raceErr);
       }
     }
 
-    // 4. Dynamic Resilient Fallback Synthesized from the Exact Active Text Sentences
-    const rawSentences = focalText
-      .split(/(?<=[.!?])\s+/)
-      .map((s: string) => s.trim())
-      .filter((s: string) => s.length > 25);
+    // 5. OpenRouter Fallback
+    if (openRouterKey && openRouterKey !== "your_openrouter_api_key_here") {
+      const openRouterModels = ["google/gemma-4-31b-it:free", "nvidia/nemotron-3.5-lightning:free"];
+      for (const orModel of openRouterModels) {
+        try {
+          const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${openRouterKey}`,
+            },
+            signal: AbortSignal.timeout(5000),
+            body: JSON.stringify({
+              model: orModel,
+              messages: [
+                { role: "system", content: "You are an elite academic board exam question bank generator. Return ONLY valid JSON." },
+                { role: "user", content: prompt },
+              ],
+              temperature: 0.35,
+            }),
+          });
 
-    const s1 = rawSentences[0] || `Core mechanism of ${bookTitle}`;
-    const s2 = rawSentences[1] || `Key diagnostic standard on ${scopeLabel}`;
-    const s3 = rawSentences[2] || `Clinical implication outlined in this section`;
-    const s4 = rawSentences[3] || `Protocol requirement for optimal management`;
+          if (res.ok) {
+            const data = await res.json();
+            const content = data.choices?.[0]?.message?.content || "";
+            const parsed = parseQuestionsJSON(content);
+            if (parsed && parsed.length > 0) {
+              return NextResponse.json({
+                success: true,
+                questions: parsed.map(shuffleQuestionOptions),
+                citedPages,
+                source: `openrouter:${orModel}`,
+              });
+            }
+          }
+        } catch (orErr) {
+          console.warn(`[QBank API] OpenRouter ${orModel} warning:`, orErr);
+        }
+      }
+    }
 
-    const rawFallbackQuestions = [
-      {
-        id: `qbank-p${pageNumber}-${Date.now()}-1`,
-        examType: "Board Examination",
-        topic: `Primary Mechanism (${scopeLabel})`,
-        difficulty: "medium",
-        vignette: `During an evaluation of ${scopeLabel} in "${bookTitle}", the following principle is analyzed: "${s1.slice(0, 150)}...". What is the foundational mechanism governing this outcome?`,
-        options: [
-          `Direct dependency on: ${s1.slice(0, 80)}`,
-          `Unregulated fluctuation independent of ${bookTitle} baseline rules`,
-          `Secondary transient artifact with negligible functional significance`,
-          `Inversion of observed causal mechanisms described in the source passage`,
-        ],
-        correctIndex: 0,
-        distractorRationales: {
-          0: `Correct: The text explicitly states that "${s1.slice(0, 100)}..." represents the primary mechanism.`,
-          1: "Incorrect: The system strictly adheres to the baseline constraints outlined in the chapter.",
-          2: "Incorrect: This observation is a primary functional invariant, not a negligible artifact.",
-          3: "Incorrect: Reversing the causal order contradicts the documented pathway.",
-        },
-        highYieldTakeaway: `Key Takeaway: Always trace downstream manifestations to "${s1.slice(0, 90)}...".`,
-      },
-      {
-        id: `qbank-p${pageNumber}-${Date.now()}-2`,
-        examType: "Applied Decision Analysis",
-        topic: `Diagnostic Standard (${scopeLabel})`,
-        difficulty: "hard",
-        vignette: `In applying the recommendations of "${bookTitle}" to a student scenario, which statement best characterizes the core standard: "${s2.slice(0, 150)}..."?`,
-        options: [
-          `Gold standard alignment with: ${s2.slice(0, 80)}`,
-          "Empirical observation that should be superseded by anecdotal intuition",
-          "Non-specific finding that cannot guide clinical or analytical reasoning",
-          "Outdated assumption explicitly contradicted by current guidelines",
-        ],
-        correctIndex: 0,
-        distractorRationales: {
-          0: `Correct: The passage establishes that "${s2.slice(0, 90)}..." is the verified standard.`,
-          1: "Incorrect: Rigorous evidence-based standards must take precedence over subjective intuition.",
-          2: "Incorrect: The documented criteria provide specific discriminatory value.",
-          3: "Incorrect: Current reference literature confirms this invariant.",
-        },
-        highYieldTakeaway: `Key Takeaway: Rigorous grounding requires verification against "${s2.slice(0, 90)}...".`,
-      },
-      {
-        id: `qbank-p${pageNumber}-${Date.now()}-3`,
-        examType: "Clinical Protocol & Management",
-        topic: `Actionable Management (${scopeLabel})`,
-        difficulty: "hard",
-        vignette: `When managing a case governed by the parameters on ${scopeLabel}, how should the student reconcile: "${s3.slice(0, 150)}..."?`,
-        options: [
-          `Prioritize direct targeted intervention addressing: ${s3.slice(0, 80)}`,
-          "Withhold protocolized steps until secondary unverified complications manifest",
-          "Apply generalized non-specific measures that disregard this finding",
-          "Assume spontaneous resolution without monitoring baseline parameters",
-        ],
-        correctIndex: 0,
-        distractorRationales: {
-          0: `Correct: Management protocol directly targets the findings outlined in the primary text.`,
-          1: "Incorrect: Delaying intervention introduces compounding risks.",
-          2: "Incorrect: Targeted management based on source criteria yields superior outcomes.",
-          3: "Incorrect: Active monitoring of boundary parameters is mandatory.",
-        },
-        highYieldTakeaway: `Key Takeaway: Immediate targeted management must address "${s3.slice(0, 90)}...".`,
-      },
-    ];
-
-    const fallbackQuestions = rawFallbackQuestions.map(shuffleQuestionOptions);
-
+    // 6. Resilient Standalone Clean Fallback
+    // Guarantees clean, immersive clinical questions even during complete offline network outages
+    const cleanFallback = buildCleanFallback(sanitizedText, pageNumber, language);
     return NextResponse.json({
       success: true,
-      questions: fallbackQuestions,
-      source: "fallback",
+      questions: cleanFallback.map(shuffleQuestionOptions),
+      citedPages,
+      source: "clean-offline-fallback",
     });
   } catch (error) {
     console.error("QBank API fatal error:", error);

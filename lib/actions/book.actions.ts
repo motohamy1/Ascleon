@@ -578,7 +578,7 @@ export const updateBookShelfPlacement = async (
       updates.customSection = payload.customSection ? payload.customSection.trim() : null;
     }
 
-    const updated = await Book.findByIdAndUpdate(bookId, updates, { new: true }).lean();
+    const updated = await Book.findByIdAndUpdate(bookId, updates, { returnDocument: "after" }).lean();
 
     revalidatePath("/library");
     revalidatePath("/");

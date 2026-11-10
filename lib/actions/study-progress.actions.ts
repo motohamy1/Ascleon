@@ -63,7 +63,7 @@ export async function saveUserStudyProgress(data: UserStudyProgressData) {
     const savedDoc = await StudyProgress.findOneAndUpdate(
       { clerkId: userId, bookSlug },
       { $set: updatePayload },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
     ).lean();
 
     // Also synchronize the Book document reading status if owned by this user

@@ -117,7 +117,7 @@ Return ONLY a JSON object:
     let profileResult: any = null;
     try {
       const profileResp: any = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.5-flash-lite",
         contents: [{ role: "user", parts: [{ text: profilePrompt }] }],
         config: {
           responseMimeType: "application/json",
@@ -216,7 +216,7 @@ Return ONLY JSON:
     let topicMapResult: any = null;
     try {
       const topicResp: any = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.5-flash-lite",
         contents: [{ role: "user", parts: [{ text: topicPrompt }] }],
         config: {
           responseMimeType: "application/json",
@@ -297,7 +297,7 @@ Return ONLY JSON:
 
           try {
             const extResp: any = await ai.models.generateContent({
-              model: "gemini-2.5-flash",
+              model: "gemini-3.5-flash-lite",
               contents: [{ role: "user", parts: [{ text: extractPrompt }] }],
               config: {
                 responseMimeType: "application/json",
