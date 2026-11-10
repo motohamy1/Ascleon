@@ -368,9 +368,12 @@ export function useLiveVoice({
           throw new Error(errJson.error || `Server returned ${tokenRes.status}`);
         }
 
-        const { token, systemInstruction } = await tokenRes.json();
-        if (!token) {
-          throw new Error("No live ephemeral token returned from server.");
+        const tokenData = await tokenRes.json();
+        const token = tokenData.token;
+        const directApiKey = tokenData.directApiKey;
+        const systemInstruction = tokenData.systemInstruction || "";
+        if (!token && !directApiKey) {
+          throw new Error("No live token or session key returned from server.");
         }
 
         lastReportedPageRef.current = pageNumber;
@@ -529,7 +532,9 @@ export function useLiveVoice({
         };
 
         // 6. Connect to Gemini Live WebSocket
-        const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${token}`;
+        const wsUrl = token
+          ? `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${token}`
+          : `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${directApiKey}`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
@@ -537,7 +542,7 @@ export function useLiveVoice({
           // Send setup frame with high-fidelity VAD tuning and resumption support
           const setupFrame = {
             setup: {
-              model: "models/gemini-3.8-live",
+              model: tokenData.model || "models/gemini-3.8-live",
               generationConfig: {
                 responseModalities: ["AUDIO"],
                 speechConfig: {
@@ -578,6 +583,53 @@ export function useLiveVoice({
                           explanation: { type: "STRING" },
                         },
                         required: ["conceptName", "action"],
+                      },
+                    },
+                    {
+                      name: "whiteboard_choreograph",
+                      description:
+                        "Choreographs the interactive whiteboard in real-time as you speak: points the glowing laser pointer at a specific node/annotation, reveals progressive drawing steps, or displays a handwritten chalk callout.",
+                      behavior: "NON_BLOCKING",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          sceneIndex: { type: "INTEGER" },
+                          revealStepIndex: { type: "INTEGER" },
+                          laserTargetId: { type: "STRING" },
+                          chalkAnnotation: { type: "STRING" },
+                        },
+                      },
+                    },
+                    {
+                      name: "whiteboard_control_widget",
+                      description:
+                        "Controls the live Generative Clinical UI widget on the whiteboard: toggles a pharmacological drug/intervention, highlights a differential diagnosis row, or selects a clinical algorithm branch.",
+                      behavior: "NON_BLOCKING",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          activeInterventionId: { type: "STRING" },
+                          toggleIntervention: { type: "BOOLEAN" },
+                          activeConditionId: { type: "STRING" },
+                          activeStepId: { type: "STRING" },
+                        },
+                      },
+                    },
+                    {
+                      name: "whiteboard_branch_topic",
+                      description:
+                        "Spawns a new visual whiteboard scene when the student asks an off-topic or deep-dive clinical question.",
+                      behavior: "NON_BLOCKING",
+                      parameters: {
+                        type: "OBJECT",
+                        properties: {
+                          focusQuestion: { type: "STRING" },
+                          preferredWidgetType: {
+                            type: "STRING",
+                            enum: ["physiology_simulator", "differential_matrix", "clinical_algorithm", "source_pinboard"],
+                          },
+                        },
+                        required: ["focusQuestion"],
                       },
                     },
                   ],
@@ -940,9 +992,19 @@ export function useLiveVoice({
           }
         };
 
-        ws.onclose = () => {
+        ws.onclose = (closeEvent) => {
           cleanupAudio();
-          setStatus("disconnected");
+          if (closeEvent && closeEvent.code && closeEvent.code !== 1000 && closeEvent.code !== 1005) {
+            console.warn("[useLiveVoice] WebSocket closed abnormally:", closeEvent.code, closeEvent.reason);
+            setErrorMessage(
+              closeEvent.reason
+                ? `Voice session closed (${closeEvent.code}): ${closeEvent.reason}`
+                : `Voice connection closed (${closeEvent.code}). Tap Retry to reconnect.`
+            );
+            setStatus("error");
+          } else {
+            setStatus("disconnected");
+          }
           if (setupPromiseResolversRef.current) {
             setupPromiseResolversRef.current.resolve(false);
             setupPromiseResolversRef.current = null;
@@ -968,10 +1030,14 @@ export function useLiveVoice({
     authoritativeReferences,
     language,
     voiceName,
+    mode,
     cleanupAudio,
     sendRealtimeAudio,
     flushPendingMessages,
     onVisualTrigger,
+    onWhiteboardChoreograph,
+    onWhiteboardWidgetControl,
+    onWhiteboardBranchTopic,
   ]);
 
   const sendTextMessage = useCallback((text: string) => {
@@ -1021,11 +1087,21 @@ export function useLiveVoice({
     lastReportedPageRef.current = newPageNumber;
 
     const updateFrame = {
-      realtimeInput: {
-        text: `[SYSTEM CONTEXT UPDATE: The student is now on Page ${newPageNumber}. Active text:\n"""${newPageText.slice(
-          0,
-          1500
-        )}"""\nAdapt smoothly to this section if the student asks about it.]`,
+      clientContent: {
+        turns: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: `[SYSTEM CONTEXT UPDATE: The student is now on Page ${newPageNumber}. Active text:\n"""${newPageText.slice(
+                  0,
+                  1500
+                )}"""\nAdapt smoothly to this section if the student asks about it.]`,
+              },
+            ],
+          },
+        ],
+        turnComplete: false,
       },
     };
     wsRef.current.send(JSON.stringify(updateFrame));
@@ -1066,25 +1142,46 @@ export function useLiveVoice({
     }
   }, [language]);
 
-  const sendWhiteboardContext = useCallback((deckSummary: string) => {
+  const sendWhiteboardContext = useCallback((deckSummary: string, autoStartNarration = false) => {
+    const directive = autoStartNarration
+      ? `[WHITEBOARD DIRECTOR START: The student just pressed Play on the interactive whiteboard! Here is the active whiteboard deck with exact scene indices, step indices, and node IDs:\n"""${deckSummary}"""\nBegin explaining Scene 0 immediately in your natural voice! As you introduce each node and step, invoke 'whiteboard_choreograph' with { sceneIndex, revealStepIndex, laserTargetId, chalkAnnotation } so the marker hand draws and points at each anatomical sketch in real-time sync with your words.]`
+      : `[WHITEBOARD CONTEXT UPDATE: The active whiteboard illustration deck is:\n"""${deckSummary}"""\nSynchronize your vocal explanation and use the 'whiteboard_choreograph' and 'whiteboard_control_widget' tools to highlight steps and widgets on the board.]`;
+
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !isSetupCompleteRef.current) {
+      if (autoStartNarration) {
+        pendingTextQueueRef.current.push(directive);
+      }
       return;
     }
     const updateFrame = {
-      realtimeInput: {
-        text: `[WHITEBOARD CONTEXT UPDATE: The active whiteboard illustration deck is:\n"""${deckSummary}"""\nSynchronize your vocal explanation and use the 'whiteboard_choreograph' and 'whiteboard_control_widget' tools to highlight steps and widgets on the board.]`,
+      clientContent: {
+        turns: [
+          {
+            role: "user",
+            parts: [{ text: directive }],
+          },
+        ],
+        turnComplete: autoStartNarration,
       },
     };
     wsRef.current.send(JSON.stringify(updateFrame));
   }, []);
 
   const sendWhiteboardInteraction = useCallback((interactionText: string) => {
+    const promptText = `[STUDENT WHITEBOARD INTERACTION: ${interactionText}. Address this immediately and concisely in your speech while calling 'whiteboard_choreograph' to point at the relevant node.]`;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !isSetupCompleteRef.current) {
+      pendingTextQueueRef.current.push(promptText);
       return;
     }
     const interactionFrame = {
-      realtimeInput: {
-        text: `[STUDENT WHITEBOARD INTERACTION: ${interactionText}. Address this immediately and concisely in your speech.]`,
+      clientContent: {
+        turns: [
+          {
+            role: "user",
+            parts: [{ text: promptText }],
+          },
+        ],
+        turnComplete: true,
       },
     };
     wsRef.current.send(JSON.stringify(interactionFrame));

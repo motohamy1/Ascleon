@@ -23,6 +23,7 @@ import { useLiveVoice, VisualTriggerEvent } from "@/hooks/useLiveVoice";
 import { StudyLanguageSwitch } from "@/components/reader/StudyLanguageSwitch";
 import { WhiteboardDeck } from "@/types/whiteboard";
 import { WhiteboardMentorStage } from "./whiteboard/WhiteboardMentorStage";
+import { compilePageToWhiteboardDeck } from "./whiteboard/page-sketch-compiler";
 
 interface AscleonVoiceStudioProps {
   bookTitle: string;
@@ -37,6 +38,7 @@ interface AscleonVoiceStudioProps {
   studyScope?: unknown;
   snippedDiagram?: string | null;
   onWhiteboardExpandChange?: (isExpanded: boolean) => void;
+  forcedMode?: "viva" | "whiteboard";
   // Backwards compatibility props
   language?: { code?: string };
   onLanguageChange?: (lang: unknown) => void;
@@ -57,6 +59,7 @@ export function AscleonVoiceStudio({
   studyScope,
   snippedDiagram,
   onWhiteboardExpandChange,
+  forcedMode,
   language,
   onClose,
   isFloating = false,
@@ -66,7 +69,13 @@ export function AscleonVoiceStudio({
   const activeLang: StudyLanguage =
     studyLanguage || (language?.code === "ar" ? "ar" : language?.code === "mixed" ? "mixed" : "en");
 
-  const [subTab, setSubTab] = useState<"viva" | "whiteboard">("viva");
+  const [subTab, setSubTab] = useState<"viva" | "whiteboard">(forcedMode || "viva");
+
+  useEffect(() => {
+    if (forcedMode) {
+      setSubTab(forcedMode);
+    }
+  }, [forcedMode]);
   const [isCinema, setIsCinema] = useState(false);
   const [whiteboardDeck, setWhiteboardDeck] = useState<WhiteboardDeck | null>(null);
   const [isDeckLoading, setIsDeckLoading] = useState(false);
@@ -101,6 +110,16 @@ export function AscleonVoiceStudio({
 
   // Whiteboard synthesis loader
   const loadWhiteboardDeck = React.useCallback(async (forceRefresh = false) => {
+    // 1. Instant Client-Side Compilation (<50ms) so canvas starts drawing immediately
+    const instantDeck = compilePageToWhiteboardDeck({
+      bookTitle,
+      pageNumber: currentPageNumber,
+      pageText: currentSectionText,
+      selectedText,
+      language: activeLang,
+    });
+    setWhiteboardDeck((prev) => (prev && !forceRefresh ? prev : instantDeck));
+
     setIsDeckLoading(true);
     try {
       const res = await fetch("/api/voice/whiteboard", {
@@ -211,15 +230,38 @@ export function AscleonVoiceStudio({
     },
   });
 
-  // Keep live voice updated with whiteboard context
+  const buildWhiteboardSummary = React.useCallback((deckToSummarize: WhiteboardDeck) => {
+    const detailedScenes = deckToSummarize.scenes
+      .map((s, sIdx) => {
+        const nodesList = (s.illustration?.nodes || [])
+          .map(
+            (n) =>
+              `{id:"${n.id}", label:"${n.label}", step:${n.revealedInStep ?? 0}, sketch:"${n.sketchType || "node"}"}`
+          )
+          .join(", ");
+        return `SceneIndex ${sIdx} ("${s.title}"): totalSteps=${s.illustration?.totalSteps || 3}, widget=${s.widget?.type}, nodes=[${nodesList}], script="${s.spokenScriptHint}"`;
+      })
+      .join("\n");
+    return `Topic: "${deckToSummarize.topicTitle}"\n${detailedScenes}`;
+  }, []);
+
+  // Keep live voice updated with detailed whiteboard choreography map
   useEffect(() => {
     if (whiteboardDeck && isConnected && subTab === "whiteboard") {
-      const summary = `Topic: "${whiteboardDeck.topicTitle}". Scenes: ${whiteboardDeck.scenes
-        .map((s) => `[Scene ${s.sceneNumber}: "${s.title}" (${s.widget.type})]`)
-        .join(", ")}`;
-      sendWhiteboardContext(summary);
+      sendWhiteboardContext(buildWhiteboardSummary(whiteboardDeck), false);
     }
-  }, [whiteboardDeck, isConnected, subTab, sendWhiteboardContext]);
+  }, [whiteboardDeck, isConnected, subTab, sendWhiteboardContext, buildWhiteboardSummary]);
+
+  const handleStartLiveWhiteboardLecture = React.useCallback(async () => {
+    if (!whiteboardDeck) return;
+    const summary = buildWhiteboardSummary(whiteboardDeck);
+    if (!isConnected) {
+      sendWhiteboardContext(summary, true);
+      await connect();
+    } else {
+      sendWhiteboardContext(summary, true);
+    }
+  }, [whiteboardDeck, isConnected, buildWhiteboardSummary, sendWhiteboardContext, connect]);
 
   const handleModeChange = (mode: VoiceBargeInMode) => {
     setBargeInModeState(mode);
@@ -309,18 +351,24 @@ export function AscleonVoiceStudio({
                 "flex size-7 items-center justify-center rounded-full border-2 border-[color:var(--ink)] shadow-chip transition-all",
                 isConnected
                   ? "bg-[color:var(--orange)] text-[color:var(--ink)]"
+                  : subTab === "whiteboard"
+                  ? "bg-[color:var(--orange)] text-[color:var(--ink)]"
                   : "bg-[color:var(--cream)] text-[color:var(--ink)]"
               )}
             >
-              <Radio className="size-3.5 stroke-[2.5]" />
+              {subTab === "whiteboard" ? (
+                <Tv className="size-3.5 stroke-[2.5]" />
+              ) : (
+                <Radio className="size-3.5 stroke-[2.5]" />
+              )}
             </div>
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-mono text-xs font-black tracking-tight text-[color:var(--cream)] uppercase">
-                  ASCLEON VOICE AGENT
+                  {subTab === "whiteboard" ? "ASCLEON WHITEBOARD" : "ASCLEON VOICE AGENT"}
                 </span>
                 <span className="rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-2 py-0.5 text-[9px] font-black uppercase text-[color:var(--ink)] shadow-[1px_1px_0px_#0f0e10]">
-                  LIVE CLINICAL MENTOR
+                  {subTab === "whiteboard" ? "VIDEO SCRIBE MENTOR" : "LIVE CLINICAL MENTOR"}
                 </span>
               </div>
             </div>
@@ -387,36 +435,38 @@ export function AscleonVoiceStudio({
           </div>
         </div>
 
-        {/* SUB-TAB MODE SWITCHER: ORAL VIVA vs LIVE WHITEBOARD MENTOR */}
-        <div className="flex items-center gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] p-1 shadow-chip">
-          <button
-            type="button"
-            onClick={() => setSubTab("viva")}
-            className={cn(
-              "cursor-pointer rounded-full px-3 py-1 font-mono text-xs font-black uppercase transition-all flex items-center gap-1.5",
-              subTab === "viva"
-                ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
-                : "text-[color:var(--ink)]/70 hover:text-[color:var(--ink)]"
-            )}
-          >
-            <Radio className="size-3.5 stroke-[2.5]" />
-            <span>Oral Viva & Voice</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubTab("whiteboard")}
-            className={cn(
-              "cursor-pointer rounded-full px-3 py-1 font-mono text-xs font-black uppercase transition-all flex items-center gap-1.5",
-              subTab === "whiteboard"
-                ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
-                : "text-[color:var(--ink)]/70 hover:text-[color:var(--ink)]"
-            )}
-          >
-            <Tv className="size-3.5 stroke-[2.5]" />
-            <span>Live Whiteboard Mentor</span>
-            <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-          </button>
-        </div>
+        {/* SUB-TAB MODE SWITCHER: ORAL VIVA vs LIVE WHITEBOARD MENTOR (Shown only when not in forcedMode) */}
+        {!forcedMode && (
+          <div className="flex items-center gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] p-1 shadow-chip">
+            <button
+              type="button"
+              onClick={() => setSubTab("viva")}
+              className={cn(
+                "cursor-pointer rounded-full px-3 py-1 font-mono text-xs font-black uppercase transition-all flex items-center gap-1.5",
+                subTab === "viva"
+                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
+                  : "text-[color:var(--ink)]/70 hover:text-[color:var(--ink)]"
+              )}
+            >
+              <Radio className="size-3.5 stroke-[2.5]" />
+              <span>Oral Viva & Voice</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSubTab("whiteboard")}
+              className={cn(
+                "cursor-pointer rounded-full px-3 py-1 font-mono text-xs font-black uppercase transition-all flex items-center gap-1.5",
+                subTab === "whiteboard"
+                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
+                  : "text-[color:var(--ink)]/70 hover:text-[color:var(--ink)]"
+              )}
+            >
+              <Tv className="size-3.5 stroke-[2.5]" />
+              <span>Live Whiteboard Mentor</span>
+              <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+            </button>
+          </div>
+        )}
 
         {/* Study Language Switch (Unified across Reader) */}
         {onStudyLanguageChange && (
@@ -513,8 +563,17 @@ export function AscleonVoiceStudio({
               activeWidgetControl={activeWidgetControl}
               currentMentorSubtitle={currentOutputTranscript}
               isVoiceConnected={isConnected}
+              voiceStatus={status}
+              onConnectVoice={connect}
+              onDisconnectVoice={disconnect}
+              onStartLiveLecture={handleStartLiveWhiteboardLecture}
+              isMuted={isMuted}
+              onToggleMute={toggleMute}
               onStudentInteraction={(interactionText) => {
                 sendWhiteboardInteraction(interactionText);
+                if (!isConnected) {
+                  connect();
+                }
               }}
               onRefreshDeck={() => loadWhiteboardDeck(true)}
               isDeckLoading={isDeckLoading}

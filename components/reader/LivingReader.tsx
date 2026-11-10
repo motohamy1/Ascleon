@@ -52,6 +52,7 @@ import {
   X,
   Crop,
   Workflow,
+  Tv,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VoiceLanguage, DEFAULT_VOICE_LANGUAGE } from "@/lib/constants";
@@ -87,7 +88,7 @@ function formatTimeAgo(dateInput: string | Date | undefined) {
 
 type ThemeMode = "paper" | "ink";
 type FitMode = "normal" | "fit-width" | "fit-page";
-type StudyIntent = "morph" | "chat" | "voice" | "summary" | "quiz";
+type StudyIntent = "morph" | "chat" | "whiteboard" | "voice" | "summary" | "quiz";
 
 interface ChatMessage {
   sender: "user" | "ai";
@@ -1112,9 +1113,6 @@ export default function LivingReader({
       if (data.authoritativeReferences?.length) {
         setActiveReferences(data.authoritativeReferences);
       }
-      if (data.qbankVignettes?.length && dynamicQBankList.length === 0) {
-        setDynamicQBankList(data.qbankVignettes);
-      }
       if (data.mnemonics?.length) {
         setActiveMnemonics(data.mnemonics);
       }
@@ -1186,7 +1184,10 @@ export default function LivingReader({
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const effectiveSplitRatio = isWhiteboardExpanded && activeIntent === "voice" ? 36 : splitRatio;
+  const effectiveSplitRatio =
+    isWhiteboardExpanded && (activeIntent === "voice" || activeIntent === "whiteboard")
+      ? 36
+      : splitRatio;
 
   const handleSplitPointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -2095,8 +2096,8 @@ export default function LivingReader({
               }}
             />
 
-            {/* STUDIO SWITCHER TABS (4 CORE TABS: AI Chat, Morph, Voice, Q banks) */}
-            <div className="grid shrink-0 grid-cols-4 gap-0.5 sm:gap-1 border-b border-white/10 bg-black/40 p-1 sm:p-1.5 text-[10px] sm:text-[11px]">
+            {/* STUDIO SWITCHER TABS (5 CORE TABS: AI Chat, Morph, Whiteboard, Voice, Q banks) */}
+            <div className="grid shrink-0 grid-cols-5 gap-0.5 sm:gap-1 border-b border-white/10 bg-black/40 p-1 sm:p-1.5 text-[10px] sm:text-[11px]">
               <button
                 type="button"
                 onClick={() => setActiveIntent("chat")}
@@ -2126,6 +2127,23 @@ export default function LivingReader({
               >
                 <Sparkles className="size-3" />
                 <span className="truncate">Morph</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveIntent("whiteboard");
+                  setIsWhiteboardExpanded(true);
+                }}
+                className={cn(
+                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1 sm:py-1.5 font-bold transition-all whitespace-nowrap",
+                  activeIntent === "whiteboard"
+                    ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
+                    : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
+                )}
+              >
+                <Tv className="size-3" />
+                <span className="truncate">Whiteboard</span>
               </button>
 
               <button
@@ -2717,7 +2735,35 @@ export default function LivingReader({
                 </div>
               )}
 
-              {/* TAB 3: ASCLEON LIVE ORAL MENTOR */}
+              {/* TAB 3: ASCLEON LIVE WHITEBOARD MENTOR */}
+              {activeIntent === "whiteboard" && (
+                <div className="flex animate-in fade-in flex-col h-full duration-150">
+                  <AscleonVoiceStudio
+                    bookTitle={book.title}
+                    currentPageNumber={book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
+                    currentSectionText={
+                      (book.fileURL && activePageLiveText)
+                        ? activePageLiveText
+                        : (currentSegment?.content || "")
+                    }
+                    selectedText={selectedText || undefined}
+                    authoritativeReferences={activeReferences}
+                    studyLanguage={studyLanguage}
+                    onStudyLanguageChange={setStudyLanguage}
+                    bookId={String(book._id || "")}
+                    studyScope={studyScope}
+                    snippedDiagram={snippedDiagram?.url || null}
+                    onWhiteboardExpandChange={setIsWhiteboardExpanded}
+                    forcedMode="whiteboard"
+                    onTriggerMorph={() => {
+                      setActiveIntent("morph");
+                      handleRunMorph();
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* TAB 4: ASCLEON LIVE ORAL VIVA MENTOR */}
               {activeIntent === "voice" && (
                 <div className="flex animate-in fade-in flex-col h-full duration-150">
                   <AscleonVoiceStudio
@@ -2736,6 +2782,7 @@ export default function LivingReader({
                     studyScope={studyScope}
                     snippedDiagram={snippedDiagram?.url || null}
                     onWhiteboardExpandChange={setIsWhiteboardExpanded}
+                    forcedMode="viva"
                     onTriggerMorph={() => {
                       setActiveIntent("morph");
                       handleRunMorph();

@@ -16,7 +16,7 @@ export type SourceCategoryType = "lecture_notes" | "textbook" | "clinical_sheet"
 export type IngestionStatusType = "pending" | "processing" | "completed" | "failed";
 
 export interface StudioSessionState {
-  activeIntent?: "chat" | "morph" | "voice" | "summary" | "quiz";
+  activeIntent?: "chat" | "morph" | "whiteboard" | "voice" | "summary" | "quiz";
   studyLanguage?: string;
   studyScope?: {
     type: "page" | "range" | "topic";

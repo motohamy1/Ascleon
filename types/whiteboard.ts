@@ -4,6 +4,26 @@ export type GenerativeWidgetType =
   | "clinical_algorithm"
   | "source_pinboard";
 
+export type MedicalPrimitiveType =
+  | "brain_territories"
+  | "vessel_normal"
+  | "vessel_plaque"
+  | "vessel_occlusion"
+  | "vessel_rupture"
+  | "heart_coronary"
+  | "lungs_alveoli"
+  | "kidney_nephron"
+  | "cell_receptor"
+  | "action_potential"
+  | "ecg_waveform"
+  | "patient_droop"
+  | "syringe_tpa"
+  | "ct_scan"
+  | "warning_stamp"
+  | "curved_arrow"
+  | "rx_pill"
+  | "custom_svg";
+
 export interface ChalkNode {
   id: string;
   x: number; // percentage 0-100
@@ -13,6 +33,9 @@ export interface ChalkNode {
   type?: "trigger" | "mediator" | "outcome" | "organ" | "drug" | "trap";
   accentColor?: string; // hex or CSS variable
   revealedInStep?: number; // step index when this node appears (0-indexed)
+  sketchType?: MedicalPrimitiveType;
+  customPath?: string;
+  colorVariant?: "red" | "blue" | "dark" | "green" | "amber";
 }
 
 export interface ChalkEdge {
@@ -30,6 +53,7 @@ export interface ChalkIllustrationSpec {
   edges: ChalkEdge[];
   chalkNotes?: string[];
   totalSteps: number;
+  illustrationStyle?: "videoscribe" | "chalk";
 }
 
 // 1. Physiology / Pharmacology Simulator Widget

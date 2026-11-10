@@ -85,8 +85,11 @@ export async function retrieveFromBookRAG(params: {
     .sort({ pageNumber: 1 })
     .lean();
 
-  // If scoped fetch returned nothing or was limited to 1 page but query is broad, fetch wider
-  if (candidateSegments.length <= 1 && query.trim().length > 3) {
+  // If scoped to single page, strictly honor the active page
+  const isStrictSinglePage = scope?.type === "page" || (!scope && !targetTopicTitle);
+
+  // If scoped fetch returned nothing or was limited to 1 page but query explicitly requests whole-book search
+  if (!isStrictSinglePage && candidateSegments.length <= 1 && query.trim().length > 3) {
     const broadSearch = await BookSegment.find({ bookId })
       .sort({ pageNumber: 1 })
       .lean();

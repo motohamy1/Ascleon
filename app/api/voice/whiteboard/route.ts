@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import crypto from "crypto";
+import dns from "node:dns";
 import { connectToDatabase } from "@/database/mongoose";
 import WhiteboardArtifact from "@/database/models/whiteboard-artifact.model";
 import { auth } from "@clerk/nextjs/server";
@@ -8,6 +9,11 @@ import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
 import { WhiteboardDeck, WhiteboardScene } from "@/types/whiteboard";
+import { compilePageToWhiteboardDeck } from "@/components/reader/whiteboard/page-sketch-compiler";
+
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {}
 
 function buildDeterministicFallbackDeck(
   topicTitle: string,
@@ -424,103 +430,74 @@ export async function POST(req: NextRequest) {
     const isMongoId = mongoose.Types.ObjectId.isValid(String(bookId));
     if (isMongoId && !forceRefresh) {
       try {
-        await connectToDatabase();
-        const cachedDoc = await WhiteboardArtifact.findOne({
-          bookId,
-          pageNumber,
-          selectionHash,
-          language,
-        }).lean();
+        const cacheLookup = async () => {
+          await connectToDatabase();
+          return await WhiteboardArtifact.findOne({
+            bookId,
+            pageNumber,
+            selectionHash,
+            language,
+          }).lean();
+        };
+
+        const cachedDoc = await Promise.race([
+          cacheLookup(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+        ]);
 
         if (cachedDoc) {
           return NextResponse.json({
             success: true,
             deck: {
               ...cachedDoc,
-              id: cachedDoc._id?.toString() || `deck-${pageNumber}`,
+              id: (cachedDoc as any)._id?.toString() || `deck-${pageNumber}`,
             },
             cached: true,
           });
         }
       } catch (cacheErr) {
-        console.warn("[voice/whiteboard] Cache read warning:", cacheErr);
+        console.warn("[voice/whiteboard] Fast cache read warning:", cacheErr);
       }
     }
 
-    // 3. Fallback deck if no API key
+    // 3. Grounded VideoScribe Deck compiled from the exact active page
     const langKey = language === "ar" ? "ar" : language === "mixed" ? "mixed" : "en";
-    let deck: WhiteboardDeck = buildDeterministicFallbackDeck(topicTitle, pageNumber, bookTitle, langKey);
+    let deck: WhiteboardDeck = compilePageToWhiteboardDeck({
+      bookTitle,
+      pageNumber,
+      pageText: focalText,
+      selectedText,
+      customFocus,
+      language: langKey,
+    });
 
     const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey && (focalText || snippedDiagram || customFocus)) {
-      try {
-        const ai = new GoogleGenAI({ apiKey });
-        const langDirective = buildLanguageDirective(langKey as StudyLanguage, "json");
+    const groqKey = process.env.GROQ_API_KEY;
 
-        const prompt = `You are Ascleon's elite Visual Chalkboard & Clinical Whiteboard Mentor Generator.
-Your task is to transform this medical reading material into a rich, synchronized 3-to-4 scene "Whiteboard Video Illustration Deck".
+    // Fast Parallel AI Enrichment Race (max 6 seconds timeout so UI never hangs)
+    if ((apiKey || groqKey) && (focalText || snippedDiagram || customFocus)) {
+      try {
+        const langDirective = buildLanguageDirective(langKey as StudyLanguage, "json");
+        const prompt = `You are Ascleon's elite Visual Chalkboard & VideoScribe Whiteboard Mentor Generator.
+Transform this medical reading material into a rich, synchronized 3-to-4 scene "Whiteboard Video Illustration Deck".
 
 BOOK: "${bookTitle}"
 PAGE: ${pageNumber}
 FOCUS TOPIC: "${topicTitle}"
 ACTIVE PASSAGE:
 """
-${focalText.slice(0, 4000)}
+${focalText.slice(0, 3500)}
 """
 
 ${langDirective}
 
-REQUIREMENTS FOR THE GENERATED WHITEBOARD DECK:
-Generate exactly 3 or 4 sequentially progressive scenes that tell a complete clinical story:
-1. Scene 1: Pathophysiological / Etiological Cascade (Chalk nodes with triggers, mediators, outcomes + Algorithm or Pinboard widget).
-2. Scene 2: Physiological / Pharmacological Homeostasis Simulator (Chalk nodes + "physiology_simulator" widget with 2-3 clinical parameters and 2 interactive interventions).
-3. Scene 3: Differential Diagnosis Battle Board (Chalk comparison + "differential_matrix" widget contrasting 2-3 conditions with hallmark features and red flags).
-4. (Optional) Scene 4: Golden Exam Pearls & Clinical Traps.
-
-FOR CHALK ILLUSTRATIONS (in each scene):
-- Total steps: 2 to 4 progressive reveals (revealedInStep 0 to totalSteps-1).
-- Nodes: 2 to 5 nodes positioned using clean percentage coordinates (x: 10-90, y: 20-80). Keep x spaced nicely.
-- Edges: connect nodes logically with styles ("arrow", "inhibition", "curved").
-- SpokenScriptHint: 1-2 sentences of what the AI Live Voice mentor will say while choreographing this exact scene.
-
-JSON STRUCTURE TO RETURN (Return ONLY valid raw JSON with this exact shape):
-{
-  "topicTitle": "Crisp title",
-  "scenes": [
-    {
-      "id": "scene-1",
-      "sceneNumber": 1,
-      "title": "Scene Title",
-      "durationSecondsEstimate": 25,
-      "spokenScriptHint": "What the mentor says...",
-      "illustration": {
-        "title": "Illustration Title",
-        "totalSteps": 3,
-        "nodes": [
-          { "id": "n1", "x": 20, "y": 45, "label": "Label", "subtext": "Details", "type": "trigger", "revealedInStep": 0 }
-        ],
-        "edges": [
-          { "id": "e1", "from": "n1", "to": "n2", "label": "Relation", "style": "arrow", "revealedInStep": 1 }
-        ],
-        "chalkNotes": ["High yield pearl"]
-      },
-      "widget": {
-        "type": "physiology_simulator", // or "differential_matrix" or "clinical_algorithm" or "source_pinboard"
-        "physiologySimulator": {
-          "title": "Hemodynamics",
-          "organSystem": "Cardiovascular",
-          "clinicalTakeaway": "Key message",
-          "parameters": [
-            { "id": "p1", "name": "MAP", "unit": "mmHg", "baseValue": 70, "currentValue": 70, "min": 40, "max": 120, "normalRange": [65, 95] }
-          ],
-          "interventions": [
-            { "id": "i1", "label": "Vasopressor", "active": false, "effectDescription": "Raises MAP", "parameterImpacts": { "p1": 15 } }
-          ]
-        }
-      }
-    }
-  ]
-}`;
+REQUIREMENTS:
+Generate 3 to 4 scenes telling a complete clinical story:
+1. Scene 1: Etiology & Vascular/Cellular Trigger (nodes with sketchType e.g. "vessel_occlusion", "brain_territories", "heart_coronary", "lungs_alveoli", "kidney_nephron", "cell_receptor").
+2. Scene 2: Pathophysiological Cascade & Homeostasis (nodes + "physiology_simulator" widget with MAP/Perfusion parameters).
+3. Scene 3: Clinical Presentation, FAST Signs & Decision Protocol (nodes + "differential_matrix" or "clinical_algorithm" widget).
+4. For nodes, pick appropriate sketchType from: "brain_territories", "vessel_occlusion", "vessel_rupture", "heart_coronary", "lungs_alveoli", "kidney_nephron", "cell_receptor", "patient_droop", "syringe_tpa", "warning_stamp".
+5. Return ONLY valid raw JSON with { "topicTitle": "...", "scenes": [...] }.`;
 
         const userParts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [{ text: prompt }];
         if (snippedDiagram && typeof snippedDiagram === "string" && snippedDiagram.startsWith("data:image")) {
@@ -533,90 +510,132 @@ JSON STRUCTURE TO RETURN (Return ONLY valid raw JSON with this exact shape):
           });
         }
 
-        let response: { text?: string } | null = null;
-        try {
-          const generatePromise = ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: [{ role: "user", parts: userParts }],
-            config: {
-              responseMimeType: "application/json",
-              temperature: 0.25,
-            },
-          });
+        const candidateTasks: Promise<any>[] = [];
 
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("Whiteboard synthesis timed out after 25s")), 25000)
+        // Candidate A: Gemini 2.5 Flash
+        if (apiKey && apiKey !== "your_gemini_api_key_here") {
+          const ai = new GoogleGenAI({ apiKey });
+          candidateTasks.push(
+            (async () => {
+              const resp: any = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: [{ role: "user", parts: userParts }],
+                config: {
+                  responseMimeType: "application/json",
+                  temperature: 0.25,
+                },
+              });
+              const text = resp.text?.trim() || "";
+              let clean = text;
+              if (clean.startsWith("```json")) clean = clean.slice(7);
+              else if (clean.startsWith("```")) clean = clean.slice(3);
+              if (clean.endsWith("```")) clean = clean.slice(0, -3);
+              const parsed = JSON.parse(clean.trim());
+              if (parsed && Array.isArray(parsed.scenes) && parsed.scenes.length > 0) return parsed;
+              throw new Error("Invalid Gemini deck JSON");
+            })()
           );
-
-          response = (await Promise.race([generatePromise, timeoutPromise])) as { text?: string };
-        } catch (flashErr) {
-          console.warn("[voice/whiteboard] Primary Gemini 3 Flash generation failed, attempting fallback:", flashErr);
-          response = (await ai.models.generateContent({
-            model: "gemini-3.8-flash",
-            contents: [{ role: "user", parts: userParts }],
-            config: {
-              responseMimeType: "application/json",
-              temperature: 0.25,
-            },
-          })) as { text?: string };
         }
 
-        const text = response.text?.trim() || "";
-        if (text) {
-          const parsed = JSON.parse(text);
-          if (parsed && Array.isArray(parsed.scenes) && parsed.scenes.length > 0) {
+        // Candidate B: Groq Fast
+        if (groqKey && groqKey !== "your_groq_api_key_here") {
+          candidateTasks.push(
+            (async () => {
+              const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${groqKey}`,
+                },
+                signal: AbortSignal.timeout(5500),
+                body: JSON.stringify({
+                  model: "openai/gpt-oss-120b",
+                  messages: [
+                    { role: "system", content: "You are an elite clinical whiteboard synthesizer. Return only valid JSON." },
+                    { role: "user", content: prompt },
+                  ],
+                  response_format: { type: "json_object" },
+                  temperature: 0.25,
+                }),
+              });
+              if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
+              const data = await res.json();
+              const content = data.choices?.[0]?.message?.content || "";
+              let clean = content.trim();
+              if (clean.startsWith("```json")) clean = clean.slice(7);
+              else if (clean.startsWith("```")) clean = clean.slice(3);
+              if (clean.endsWith("```")) clean = clean.slice(0, -3);
+              const parsed = JSON.parse(clean.trim());
+              if (parsed && Array.isArray(parsed.scenes) && parsed.scenes.length > 0) return parsed;
+              throw new Error("Invalid Groq deck JSON");
+            })()
+          );
+        }
+
+        if (candidateTasks.length > 0) {
+          const timeoutRace = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("AI enrichment 6s cap reached")), 6000)
+          );
+
+          const fastestEnriched: any = await Promise.race([
+            Promise.any(candidateTasks),
+            timeoutRace,
+          ]);
+
+          if (fastestEnriched && Array.isArray(fastestEnriched.scenes) && fastestEnriched.scenes.length > 0) {
             deck = {
               id: `deck-${pageNumber}-${Date.now()}`,
               bookTitle,
               pageNumber,
-              topicTitle: parsed.topicTitle || topicTitle,
+              topicTitle: fastestEnriched.topicTitle || topicTitle,
               language: langKey,
-              scenes: parsed.scenes.map((s: Partial<WhiteboardScene>, idx: number) => ({
-                id: s.id || `scene-${idx + 1}`,
-                sceneNumber: s.sceneNumber || idx + 1,
-                title: s.title || `Scene ${idx + 1}`,
-                durationSecondsEstimate: s.durationSecondsEstimate || 20,
-                spokenScriptHint: s.spokenScriptHint || "",
-                illustration: s.illustration || {
-                  title: s.title || "Illustration",
-                  totalSteps: 1,
-                  nodes: [],
-                  edges: [],
-                },
-                widget: s.widget || {
-                  type: "clinical_algorithm",
-                },
-              })),
+              scenes: fastestEnriched.scenes.map((s: Partial<WhiteboardScene>, idx: number) => {
+                const fallbackScene = deck.scenes[idx] || deck.scenes[0];
+                const hasValidNodes = s.illustration && Array.isArray(s.illustration.nodes) && s.illustration.nodes.length > 0;
+                return {
+                  id: s.id || `scene-${idx + 1}`,
+                  sceneNumber: s.sceneNumber || idx + 1,
+                  title: s.title || fallbackScene?.title || `Scene ${idx + 1}`,
+                  durationSecondsEstimate: s.durationSecondsEstimate || 20,
+                  spokenScriptHint: s.spokenScriptHint || fallbackScene?.spokenScriptHint || "",
+                  illustration: hasValidNodes ? s.illustration! : fallbackScene?.illustration,
+                  widget: s.widget || fallbackScene?.widget || {
+                    type: "clinical_algorithm",
+                  },
+                };
+              }),
               createdAt: new Date().toISOString(),
             };
           }
         }
-      } catch (aiErr) {
-        console.error("[voice/whiteboard] AI synthesis error, using resilient clinical fallback:", aiErr);
+      } catch (raceErr) {
+        console.warn("[voice/whiteboard] Fast AI race note (using page-grounded compiled deck):", raceErr);
       }
     }
 
-    // 4. Cache in Database if valid mongo ID
+    // 4. Non-blocking Cache Save in Background
     if (isMongoId) {
-      try {
-        const { userId } = await auth();
-        await connectToDatabase();
-        await WhiteboardArtifact.findOneAndUpdate(
-          { bookId, pageNumber, selectionHash, language: langKey },
-          {
-            clerkId: userId || undefined,
-            bookId,
-            pageNumber,
-            selectionHash,
-            topicTitle: deck.topicTitle,
-            language: langKey,
-            scenes: deck.scenes,
-          },
-          { upsert: true, new: true }
-        );
-      } catch (cacheSaveErr) {
-        console.warn("[voice/whiteboard] Cache save warning:", cacheSaveErr);
-      }
+      (async () => {
+        try {
+          const { userId } = await auth();
+          await connectToDatabase();
+          await WhiteboardArtifact.findOneAndUpdate(
+            { bookId, pageNumber, selectionHash, language: langKey },
+            {
+              clerkId: userId || undefined,
+              bookId,
+              pageNumber,
+              selectionHash,
+              topicTitle: deck.topicTitle,
+              language: langKey,
+              scenes: deck.scenes,
+            },
+            { upsert: true, returnDocument: "after" }
+          );
+        } catch (cacheSaveErr) {
+          console.warn("[voice/whiteboard] Background cache save warning:", cacheSaveErr);
+        }
+      })().catch(() => {});
     }
 
     return NextResponse.json({

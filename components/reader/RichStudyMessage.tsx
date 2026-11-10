@@ -34,57 +34,57 @@ export default function RichStudyMessage({ content, className }: RichStudyMessag
         remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children }) => (
-            <h1 className="mt-3.5 mb-2 font-black text-base text-[#1a191b] tracking-tight border-b-2 border-[#1a191b]/15 pb-1">
+            <h1 dir="auto" className="mt-3.5 mb-2 font-black text-base text-[#1a191b] tracking-tight border-b-2 border-[#1a191b]/15 pb-1">
               {children}
             </h1>
           ),
           h2: ({ children }) => (
-            <h2 className="mt-3 mb-1.5 font-extrabold text-[14px] text-[#1a191b] tracking-tight flex items-center gap-1.5">
-              <span className="size-2 rounded-full bg-[#ff4c00] inline-block" />
+            <h2 dir="auto" className="mt-3 mb-1.5 font-extrabold text-[14px] text-[#1a191b] tracking-tight flex items-center gap-1.5">
+              <span className="size-2 rounded-full bg-[#ff4c00] inline-block shrink-0" />
               <span>{children}</span>
             </h2>
           ),
           h3: ({ children }) => (
-            <h3 className="mt-2.5 mb-1 font-bold text-[13px] text-[#ff4c00] tracking-tight uppercase">
+            <h3 dir="auto" className="mt-2.5 mb-1 font-bold text-[13px] text-[#ff4c00] tracking-tight uppercase">
               {children}
             </h3>
           ),
           h4: ({ children }) => (
-            <h4 className="mt-2 mb-1 font-bold text-[12.5px] text-[#1a191b]/90 underline decoration-[#ff4c00]/40 underline-offset-2">
+            <h4 dir="auto" className="mt-2 mb-1 font-bold text-[12.5px] text-[#1a191b]/90 underline decoration-[#ff4c00]/40 underline-offset-2">
               {children}
             </h4>
           ),
           p: ({ children }) => (
-            <p className="my-1.5 leading-[1.65] text-[#1a191b]/95 last:mb-0">
+            <p dir="auto" className="my-1.5 leading-[1.65] text-[#1a191b]/95 last:mb-0">
               {children}
             </p>
           ),
           strong: ({ children }) => (
-            <strong className="font-extrabold text-[#1a191b] bg-[#ff4c00]/10 px-1 py-0.5 rounded text-[12px]">
+            <strong className="font-extrabold text-[#1a191b] bg-[#ff4c00]/10 px-1 py-0.5 rounded text-[12px] inline-block [unicode-bidi:isolate]">
               {children}
             </strong>
           ),
           em: ({ children }) => (
-            <em className="italic text-[#1a191b]/85">{children}</em>
+            <em className="italic text-[#1a191b]/85 [unicode-bidi:isolate]">{children}</em>
           ),
           ul: ({ children }) => (
-            <ul className="my-2 space-y-1 pl-4 list-disc marker:text-[#ff4c00]">
+            <ul dir="auto" className="my-2 space-y-1 ps-5 list-disc marker:text-[#ff4c00]">
               {children}
             </ul>
           ),
           ol: ({ children }) => (
-            <ol className="my-2 space-y-1 pl-4 list-decimal marker:font-bold marker:text-[#ff4c00]">
+            <ol dir="auto" className="my-2 space-y-1 ps-5 list-decimal marker:font-bold marker:text-[#ff4c00]">
               {children}
             </ol>
           ),
           li: ({ children }) => (
-            <li className="leading-relaxed pl-0.5 text-[#1a191b]/95">
+            <li dir="auto" className="leading-relaxed text-[#1a191b]/95">
               {children}
             </li>
           ),
           table: ({ children }) => (
-            <div className="my-3 overflow-x-auto rounded-xl border-2 border-[#1a191b] bg-white/95 shadow-sm">
-              <table className="w-full text-left text-xs border-collapse">
+            <div dir="auto" className="my-3 overflow-x-auto rounded-xl border-2 border-[#1a191b] bg-white/95 shadow-sm">
+              <table className="w-full text-start text-xs border-collapse">
                 {children}
               </table>
             </div>
@@ -105,17 +105,17 @@ export default function RichStudyMessage({ content, className }: RichStudyMessag
             </tr>
           ),
           th: ({ children }) => (
-            <th className="px-3.5 py-2.5 font-black border-r border-white/20 last:border-r-0 text-white text-[11px] tracking-wide [&_*]:text-white [&_strong]:text-[#f6d7a1] [&_strong]:bg-transparent [&_strong]:p-0 [&_strong]:font-black">
+            <th dir="auto" className="px-3.5 py-2.5 font-black border-e border-white/20 last:border-e-0 text-white text-[11px] tracking-wide text-start [&_*]:text-white [&_strong]:text-[#f6d7a1] [&_strong]:bg-transparent [&_strong]:p-0 [&_strong]:font-black">
               {children}
             </th>
           ),
           td: ({ children }) => (
-            <td className="px-3.5 py-2.5 text-[#1a191b] border-r border-[#1a191b]/10 last:border-r-0 align-top leading-relaxed text-xs">
+            <td dir="auto" className="px-3.5 py-2.5 text-[#1a191b] border-e border-[#1a191b]/10 last:border-e-0 align-top leading-relaxed text-xs text-start">
               {children}
             </td>
           ),
           blockquote: ({ children }) => (
-            <blockquote className="my-2.5 rounded-xl border-l-4 border-[#ff4c00] bg-[#ff4c00]/10 px-3.5 py-2 font-medium text-[#1a191b] italic">
+            <blockquote dir="auto" className="my-2.5 rounded-xl border-s-4 border-[#ff4c00] bg-[#ff4c00]/10 ps-3.5 pe-2 py-2 font-medium text-[#1a191b] italic">
               {children}
             </blockquote>
           ),
@@ -123,13 +123,13 @@ export default function RichStudyMessage({ content, className }: RichStudyMessag
             const isInline = !codeClassName;
             if (isInline) {
               return (
-                <code className="rounded bg-[#1a191b]/10 px-1.5 py-0.5 font-mono text-[11px] font-bold text-[#1a191b]">
+                <code dir="ltr" className="rounded bg-[#1a191b]/10 px-1.5 py-0.5 font-mono text-[11px] font-bold text-[#1a191b] inline-block [unicode-bidi:isolate]">
                   {children}
                 </code>
               );
             }
             return (
-              <pre className="my-2 overflow-x-auto rounded-xl bg-[#1a191b] p-3 text-[11px] font-mono text-[#f6d7a1]">
+              <pre dir="ltr" className="my-2 overflow-x-auto rounded-xl bg-[#1a191b] p-3 text-[11px] font-mono text-[#f6d7a1] text-left">
                 <code>{children}</code>
               </pre>
             );

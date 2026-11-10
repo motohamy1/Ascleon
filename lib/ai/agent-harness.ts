@@ -28,7 +28,13 @@ Core Guidelines:
    - NEVER start responses with robotic boilerplate like "To master [Topic] within the context of the provided material...". Jump directly into answering with engaging, high-yield clarity!
    - STRICT TOPIC RELEVANCE: NEVER introduce unrelated diseases, unrelated question bank scenarios, or irrelevant distractor concepts.
 
-2. ADAPTIVE QUERY-INTENT HANDLING:
+2. ADAPTIVE QUERY-INTENT & CONVERSATIONAL MEMORY:
+   - CONVERSATIONAL FEEDBACK / ACKNOWLEDGMENTS: If the student simply says "good", "great", "ok", "thanks", "understood", "تمام", "شكرا", or similar:
+     • DO NOT dump the full page explanation again!
+     • Acknowledge their understanding warmly in 1-2 brief sentences.
+     • Socratic follow-up: Ask if they would like a quick 1-question oral check, want to move to the next key mechanism, or have a specific doubt.
+   - SESSION RECAP / META QUERIES: If the student asks "what have we studied now?", "summarize what we covered", "احنا درسنا ايه لحد دلوقتي":
+     • Review the conversation history and active study text to deliver a crisp, structured bulleted summary of the concepts you and the student have explored together in this session.
    - For DIRECT / BRIEF QUESTIONS: Answer IMMEDIATELY, DIRECTLY, and CONCISELY.
    - For TOPIC EXPLANATIONS & DEEP DIVES: Deliver an exhaustive, structured masterclass:
      • Pathophysiological & cellular mechanisms step-by-step.
@@ -75,7 +81,21 @@ async function callGeminiAgent(
     },
   ];
 
-  // Turn 1: Initial call with prompt injected as system instruction
+  const contents: any[] = [];
+
+  // Inject prior conversation turns if provided
+  if (Array.isArray(context.history) && context.history.length > 0) {
+    for (const h of context.history.slice(-8)) {
+      if (!h.text || typeof h.text !== "string") continue;
+      const role = h.sender === "user" ? "user" : "model";
+      contents.push({
+        role,
+        parts: [{ text: h.text }],
+      });
+    }
+  }
+
+  // Turn: Active page grounding context + user query
   const userParts: any[] = [
     { text: `${pageIntro}\n\nStudent Question / Query:\n${userQuery}` },
   ];
@@ -90,12 +110,10 @@ async function callGeminiAgent(
     });
   }
 
-  const contents: any[] = [
-    {
-      role: "user",
-      parts: userParts,
-    },
-  ];
+  contents.push({
+    role: "user",
+    parts: userParts,
+  });
 
   const toolsUsed: string[] = [];
   let generatedMorph: any = null;
@@ -290,13 +308,25 @@ async function callOpenAICompatibleAgent(
   const langDirective = buildLanguageDirective(context.language || "en", "text");
   const messages: any[] = [
     { role: "system", content: `${SOCRATIC_SYSTEM_PROMPT}\n\n${langDirective}\n\n${enriched.groundingSnippet}` },
-    {
-      role: "user",
-      content: `Book: "${context.bookTitle}" (${context.currentPageNumber ? `Page ${context.currentPageNumber}` : `Section ${context.currentSegmentIndex + 1}`})\nActive Text:\n${
-        context.currentSegmentContent
-      }\n${context.selectedText ? `Highlighted Passage:\n"${context.selectedText}"\n` : ""}\nQuery: ${userQuery}`,
-    },
   ];
+
+  // Inject prior conversation turns
+  if (Array.isArray(context.history) && context.history.length > 0) {
+    for (const h of context.history.slice(-8)) {
+      if (!h.text || typeof h.text !== "string") continue;
+      messages.push({
+        role: h.sender === "user" ? "user" : "assistant",
+        content: h.text,
+      });
+    }
+  }
+
+  messages.push({
+    role: "user",
+    content: `Book: "${context.bookTitle}" (${context.currentPageNumber ? `Page ${context.currentPageNumber}` : `Section ${context.currentSegmentIndex + 1}`})\nActive Text:\n${
+      context.currentSegmentContent
+    }\n${context.selectedText ? `Highlighted Passage:\n"${context.selectedText}"\n` : ""}\nQuery: ${userQuery}`,
+  });
 
   const toolsUsed: string[] = [];
   let generatedMorph: any = null;

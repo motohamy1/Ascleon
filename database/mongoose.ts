@@ -4,6 +4,7 @@ import dns from "node:dns";
 // Configure public DNS resolvers to prevent Windows / ISP querySrv ECONNREFUSED on MongoDB Atlas
 const configureDns = () => {
   try {
+    dns.setDefaultResultOrder("ipv4first");
     dns.setServers(["8.8.8.8", "1.1.1.1"]);
   } catch {
     // Ignore in restricted environments
