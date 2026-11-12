@@ -10,31 +10,74 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Missing url parameter" }, { status: 400 });
     }
 
-    // If it's a private Vercel Blob URL, stream it securely using the server token
+    // If it's a Vercel Blob URL, stream it securely using the server token (private with public fallback)
     if (targetUrl.includes(".blob.vercel-storage.com")) {
       const token =
         process.env.BLOB_READ_WRITE_TOKEN ||
         process.env.BLOB_ASCLEON_READ_WRITE_TOKEN;
 
-      const blobRes = await get(targetUrl, {
-        access: "private",
-        token,
-      });
+      let blobRes = null;
+      try {
+        blobRes = await get(targetUrl, {
+          access: "private",
+          token,
+        });
+      } catch {
+        blobRes = await get(targetUrl, {
+          access: "public",
+          token,
+        });
+      }
 
       if (!blobRes || !blobRes.stream) {
         return NextResponse.json({ error: "File not found in store" }, { status: 404 });
       }
 
-      // Return streaming response with appropriate media headers
+      // Return streaming or HTTP 206 Partial Content response so Chromium/Safari <audio> plays cleanly
+      const contentType =
+        blobRes.headers.get("content-type") ||
+        blobRes.blob?.contentType ||
+        "application/octet-stream";
+      const rangeHeader = req.headers.get("range");
+
+      if (rangeHeader) {
+        const match = /bytes=(\d+)-(\d*)/.exec(rangeHeader);
+        const ab = await new Response(blobRes.stream as BodyInit).arrayBuffer();
+        const total = ab.byteLength;
+        const start = match ? Number(match[1]) : 0;
+        const end =
+          match && match[2] ? Math.min(Number(match[2]), total - 1) : total - 1;
+
+        if (!Number.isFinite(start) || start < 0 || start >= total || end < start) {
+          return new Response(null, {
+            status: 416,
+            headers: { "Content-Range": `bytes */${total}` },
+          });
+        }
+
+        const slice = ab.slice(start, end + 1);
+        const headers = new Headers();
+        headers.set("Content-Type", contentType);
+        headers.set("Accept-Ranges", "bytes");
+        headers.set("Content-Range", `bytes ${start}-${end}/${total}`);
+        headers.set("Content-Length", String(slice.byteLength));
+        headers.set("Cache-Control", "public, max-age=31536000, immutable");
+
+        return new Response(slice, {
+          status: 206,
+          headers,
+        });
+      }
+
       const headers = new Headers();
-      headers.set("Content-Type", blobRes.headers.get("content-type") || "application/pdf");
+      headers.set("Content-Type", contentType);
       headers.set("Accept-Ranges", "bytes");
       if (blobRes.headers.get("content-length")) {
         headers.set("Content-Length", blobRes.headers.get("content-length")!);
       }
       headers.set("Cache-Control", "public, max-age=31536000, immutable");
 
-      return new Response(blobRes.stream as any, {
+      return new Response(blobRes.stream as BodyInit, {
         status: 200,
         headers,
       });

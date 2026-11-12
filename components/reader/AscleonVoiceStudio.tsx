@@ -14,16 +14,12 @@ import {
   ChevronDown,
   RefreshCw,
   Hand,
-  Tv,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StudyLanguage } from "@/lib/language";
 import { AVAILABLE_LIVE_VOICES, DEFAULT_LIVE_VOICE, VOICE_BARGE_IN_MODES, VoiceBargeInMode } from "@/lib/voice-config";
 import { useLiveVoice, VisualTriggerEvent } from "@/hooks/useLiveVoice";
 import { StudyLanguageSwitch } from "@/components/reader/StudyLanguageSwitch";
-import { WhiteboardDeck } from "@/types/whiteboard";
-import { WhiteboardMentorStage } from "./whiteboard/WhiteboardMentorStage";
-import { compilePageToWhiteboardDeck } from "./whiteboard/page-sketch-compiler";
 
 interface AscleonVoiceStudioProps {
   bookTitle: string;
@@ -33,12 +29,6 @@ interface AscleonVoiceStudioProps {
   authoritativeReferences?: unknown[];
   studyLanguage?: StudyLanguage;
   onStudyLanguageChange?: (lang: StudyLanguage) => void;
-  // Whiteboard & reader props
-  bookId?: string;
-  studyScope?: unknown;
-  snippedDiagram?: string | null;
-  onWhiteboardExpandChange?: (isExpanded: boolean) => void;
-  forcedMode?: "viva" | "whiteboard";
   // Backwards compatibility props
   language?: { code?: string };
   onLanguageChange?: (lang: unknown) => void;
@@ -55,12 +45,8 @@ export function AscleonVoiceStudio({
   authoritativeReferences = [],
   studyLanguage = "en",
   onStudyLanguageChange,
-  bookId,
-  studyScope,
-  snippedDiagram,
-  onWhiteboardExpandChange,
-  forcedMode,
   language,
+  onLanguageChange,
   onClose,
   isFloating = false,
   onTriggerMorph,
@@ -69,28 +55,10 @@ export function AscleonVoiceStudio({
   const activeLang: StudyLanguage =
     studyLanguage || (language?.code === "ar" ? "ar" : language?.code === "mixed" ? "mixed" : "en");
 
-  const [subTab, setSubTab] = useState<"viva" | "whiteboard">(forcedMode || "viva");
-
-  useEffect(() => {
-    if (forcedMode) {
-      setSubTab(forcedMode);
-    }
-  }, [forcedMode]);
-  const [isCinema, setIsCinema] = useState(false);
-  const [whiteboardDeck, setWhiteboardDeck] = useState<WhiteboardDeck | null>(null);
-  const [isDeckLoading, setIsDeckLoading] = useState(false);
-
   const [selectedVoice, setSelectedVoice] = useState<string>(DEFAULT_LIVE_VOICE);
   const [bargeInMode, setBargeInModeState] = useState<VoiceBargeInMode>("smart");
   const [typedInput, setTypedInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Notify parent reader of expand/widen state
-  useEffect(() => {
-    if (onWhiteboardExpandChange) {
-      onWhiteboardExpandChange(subTab === "whiteboard");
-    }
-  }, [subTab, onWhiteboardExpandChange]);
 
   // Restore saved noise filter preference
   useEffect(() => {
@@ -108,62 +76,6 @@ export function AscleonVoiceStudio({
     }
   };
 
-  // Whiteboard synthesis loader
-  const loadWhiteboardDeck = React.useCallback(async (forceRefresh = false) => {
-    // 1. Instant Client-Side Compilation (<50ms) so canvas starts drawing immediately
-    const instantDeck = compilePageToWhiteboardDeck({
-      bookTitle,
-      pageNumber: currentPageNumber,
-      pageText: currentSectionText,
-      selectedText,
-      language: activeLang,
-    });
-    setWhiteboardDeck((prev) => (prev && !forceRefresh ? prev : instantDeck));
-
-    setIsDeckLoading(true);
-    try {
-      const res = await fetch("/api/voice/whiteboard", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bookId,
-          bookTitle,
-          pageNumber: currentPageNumber,
-          pageText: currentSectionText,
-          selectedText,
-          snippedDiagram,
-          language: activeLang,
-          studyScope,
-          forceRefresh,
-        }),
-      });
-      const data = await res.json();
-      if (data.deck) {
-        setWhiteboardDeck(data.deck);
-      }
-    } catch (err) {
-      console.error("Failed to load whiteboard deck:", err);
-    } finally {
-      setIsDeckLoading(false);
-    }
-  }, [
-    bookId,
-    bookTitle,
-    currentPageNumber,
-    currentSectionText,
-    selectedText,
-    snippedDiagram,
-    activeLang,
-    studyScope,
-  ]);
-
-  // Auto-fetch deck when whiteboard sub-tab is activated or page changes
-  useEffect(() => {
-    if (subTab === "whiteboard") {
-      loadWhiteboardDeck();
-    }
-  }, [subTab, currentPageNumber, loadWhiteboardDeck]);
-
   const {
     status,
     isConnected,
@@ -176,8 +88,6 @@ export function AscleonVoiceStudio({
     setBargeInMode,
     sendTextMessage,
     updatePageContext,
-    sendWhiteboardContext,
-    sendWhiteboardInteraction,
     messages,
     currentInputTranscript,
     currentOutputTranscript,
@@ -185,8 +95,6 @@ export function AscleonVoiceStudio({
     outputLevel,
     errorMessage,
     activeVisualTrigger,
-    activeChoreography,
-    activeWidgetControl,
     clearVisualTrigger,
   } = useLiveVoice({
     bookTitle,
@@ -197,71 +105,8 @@ export function AscleonVoiceStudio({
     language: activeLang,
     voiceName: selectedVoice,
     bargeInMode,
-    mode: subTab === "whiteboard" ? "whiteboard" : "viva",
     onVisualTrigger: handleVisualTrigger,
-    onWhiteboardBranchTopic: (focusQuestion) => {
-      fetch("/api/voice/whiteboard", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bookId,
-          bookTitle,
-          pageNumber: currentPageNumber,
-          pageText: currentSectionText,
-          selectedText,
-          language: activeLang,
-          customFocus: focusQuestion,
-        }),
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.deck && data.deck.scenes) {
-            setWhiteboardDeck((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    scenes: [...prev.scenes, ...data.deck.scenes],
-                  }
-                : data.deck
-            );
-          }
-        })
-        .catch((e) => console.warn("Failed to branch whiteboard:", e));
-    },
   });
-
-  const buildWhiteboardSummary = React.useCallback((deckToSummarize: WhiteboardDeck) => {
-    const detailedScenes = deckToSummarize.scenes
-      .map((s, sIdx) => {
-        const nodesList = (s.illustration?.nodes || [])
-          .map(
-            (n) =>
-              `{id:"${n.id}", label:"${n.label}", step:${n.revealedInStep ?? 0}, sketch:"${n.sketchType || "node"}"}`
-          )
-          .join(", ");
-        return `SceneIndex ${sIdx} ("${s.title}"): totalSteps=${s.illustration?.totalSteps || 3}, widget=${s.widget?.type}, nodes=[${nodesList}], script="${s.spokenScriptHint}"`;
-      })
-      .join("\n");
-    return `Topic: "${deckToSummarize.topicTitle}"\n${detailedScenes}`;
-  }, []);
-
-  // Keep live voice updated with detailed whiteboard choreography map
-  useEffect(() => {
-    if (whiteboardDeck && isConnected && subTab === "whiteboard") {
-      sendWhiteboardContext(buildWhiteboardSummary(whiteboardDeck), false);
-    }
-  }, [whiteboardDeck, isConnected, subTab, sendWhiteboardContext, buildWhiteboardSummary]);
-
-  const handleStartLiveWhiteboardLecture = React.useCallback(async () => {
-    if (!whiteboardDeck) return;
-    const summary = buildWhiteboardSummary(whiteboardDeck);
-    if (!isConnected) {
-      sendWhiteboardContext(summary, true);
-      await connect();
-    } else {
-      sendWhiteboardContext(summary, true);
-    }
-  }, [whiteboardDeck, isConnected, buildWhiteboardSummary, sendWhiteboardContext, connect]);
 
   const handleModeChange = (mode: VoiceBargeInMode) => {
     setBargeInModeState(mode);
@@ -351,24 +196,18 @@ export function AscleonVoiceStudio({
                 "flex size-7 items-center justify-center rounded-full border-2 border-[color:var(--ink)] shadow-chip transition-all",
                 isConnected
                   ? "bg-[color:var(--orange)] text-[color:var(--ink)]"
-                  : subTab === "whiteboard"
-                  ? "bg-[color:var(--orange)] text-[color:var(--ink)]"
                   : "bg-[color:var(--cream)] text-[color:var(--ink)]"
               )}
             >
-              {subTab === "whiteboard" ? (
-                <Tv className="size-3.5 stroke-[2.5]" />
-              ) : (
-                <Radio className="size-3.5 stroke-[2.5]" />
-              )}
+              <Radio className="size-3.5 stroke-[2.5]" />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-mono text-xs font-black tracking-tight text-[color:var(--cream)] uppercase">
-                  {subTab === "whiteboard" ? "ASCLEON WHITEBOARD" : "ASCLEON VOICE AGENT"}
+                  ASCLEON VOICE AGENT
                 </span>
                 <span className="rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-2 py-0.5 text-[9px] font-black uppercase text-[color:var(--ink)] shadow-[1px_1px_0px_#0f0e10]">
-                  {subTab === "whiteboard" ? "VIDEO SCRIBE MENTOR" : "LIVE CLINICAL MENTOR"}
+                  LIVE CLINICAL MENTOR
                 </span>
               </div>
             </div>
@@ -434,39 +273,6 @@ export function AscleonVoiceStudio({
             )}
           </div>
         </div>
-
-        {/* SUB-TAB MODE SWITCHER: ORAL VIVA vs LIVE WHITEBOARD MENTOR (Shown only when not in forcedMode) */}
-        {!forcedMode && (
-          <div className="flex items-center gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] p-1 shadow-chip">
-            <button
-              type="button"
-              onClick={() => setSubTab("viva")}
-              className={cn(
-                "cursor-pointer rounded-full px-3 py-1 font-mono text-xs font-black uppercase transition-all flex items-center gap-1.5",
-                subTab === "viva"
-                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
-                  : "text-[color:var(--ink)]/70 hover:text-[color:var(--ink)]"
-              )}
-            >
-              <Radio className="size-3.5 stroke-[2.5]" />
-              <span>Oral Viva & Voice</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setSubTab("whiteboard")}
-              className={cn(
-                "cursor-pointer rounded-full px-3 py-1 font-mono text-xs font-black uppercase transition-all flex items-center gap-1.5",
-                subTab === "whiteboard"
-                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
-                  : "text-[color:var(--ink)]/70 hover:text-[color:var(--ink)]"
-              )}
-            >
-              <Tv className="size-3.5 stroke-[2.5]" />
-              <span>Live Whiteboard Mentor</span>
-              <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-            </button>
-          </div>
-        )}
 
         {/* Study Language Switch (Unified across Reader) */}
         {onStudyLanguageChange && (
@@ -553,60 +359,8 @@ export function AscleonVoiceStudio({
         </div>
       )}
 
-      {/* 2. MAIN SUB-TAB STAGES */}
-      {subTab === "whiteboard" ? (
-        <div className="flex flex-1 flex-col overflow-hidden p-2">
-          {whiteboardDeck ? (
-            <WhiteboardMentorStage
-              deck={whiteboardDeck}
-              activeChoreography={activeChoreography}
-              activeWidgetControl={activeWidgetControl}
-              currentMentorSubtitle={currentOutputTranscript}
-              isVoiceConnected={isConnected}
-              voiceStatus={status}
-              onConnectVoice={connect}
-              onDisconnectVoice={disconnect}
-              onStartLiveLecture={handleStartLiveWhiteboardLecture}
-              isMuted={isMuted}
-              onToggleMute={toggleMute}
-              onStudentInteraction={(interactionText) => {
-                sendWhiteboardInteraction(interactionText);
-                if (!isConnected) {
-                  connect();
-                }
-              }}
-              onRefreshDeck={() => loadWhiteboardDeck(true)}
-              isDeckLoading={isDeckLoading}
-              isCinema={isCinema}
-              onToggleCinema={() => setIsCinema(!isCinema)}
-              className="h-full rounded-[18px]"
-            />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center p-6 text-center rounded-[18px] border-2 border-[color:var(--ink)] bg-[color:var(--cream)] shadow-chip">
-              <RefreshCw className={cn("size-8 mb-3 text-[color:var(--orange)]", isDeckLoading && "animate-spin")} />
-              <div className="font-sans text-sm font-black text-[color:var(--ink)]">
-                {isDeckLoading
-                  ? "Ascleon Mentor is Illustrating the Clinical Whiteboard..."
-                  : "Whiteboard Deck Ready to Synthesize"}
-              </div>
-              <div className="mt-1 font-mono text-xs font-bold text-[color:var(--ink)]/70 max-w-sm">
-                Generating animated pathophysiology cascade and generative UI widgets for Page {currentPageNumber}...
-              </div>
-              {!isDeckLoading && (
-                <button
-                  type="button"
-                  onClick={() => loadWhiteboardDeck(true)}
-                  className="mt-4 cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-4 py-1.5 font-sans text-xs font-black uppercase text-[color:var(--ink)] shadow-chip hover:scale-105"
-                >
-                  Generate Whiteboard Now
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      ) : (
-        /* ORAL VIVA & VOICE STAGE */
-        <div className="flex flex-1 flex-col overflow-hidden p-3 gap-3">
+      {/* 2. ORAL VIVA & VOICE STAGE */}
+      <div className="flex flex-1 flex-col overflow-hidden p-3 gap-3">
         {/* INTERACTIVE LIVE ORB HERO CARD */}
         <div className="flex flex-col items-center justify-center rounded-[18px] border-2 border-[color:var(--ink)] bg-[color:var(--cream)] p-4 shadow-chip">
           <div className="relative flex items-center justify-center">
@@ -817,7 +571,6 @@ export function AscleonVoiceStudio({
           ))}
         </div>
       </div>
-      )}
 
       {/* 5. FOOTER CONTROLS & TEXT INPUT (Matches AI Chat composer in LivingReader) */}
       <div className="border-t-2 border-[color:var(--ink)] bg-[color:var(--ink-soft)] p-3">

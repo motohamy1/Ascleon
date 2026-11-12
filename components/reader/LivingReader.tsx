@@ -10,7 +10,7 @@ import {
 } from "@/lib/ai/knowledge/sample-book-data";
 import { MorphCanvas } from "@/components/reader/MorphCanvas";
 import { AscleonVoiceStudio } from "@/components/reader/AscleonVoiceStudio";
-import { WhiteboardStudio } from "@/components/reader/whiteboard/WhiteboardStudio";
+import { WhiteboardVideoStudio } from "@/components/whiteboard/WhiteboardVideoStudio";
 import { StudyLanguageSwitch } from "@/components/reader/StudyLanguageSwitch";
 import { StudyLanguage, DEFAULT_STUDY_LANGUAGE } from "@/lib/language";
 import {
@@ -1182,11 +1182,12 @@ export default function LivingReader({
   // Resizable Splitter State
   const [splitRatio, setSplitRatio] = useState<number>(54);
   const [isWhiteboardExpanded, setIsWhiteboardExpanded] = useState<boolean>(false);
+  const [whiteboardSelectionSeq, setWhiteboardSelectionSeq] = useState<number>(0);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const effectiveSplitRatio =
-    isWhiteboardExpanded && (activeIntent === "voice" || activeIntent === "whiteboard")
+    isWhiteboardExpanded && activeIntent === "whiteboard"
       ? 36
       : splitRatio;
 
@@ -1584,6 +1585,12 @@ export default function LivingReader({
                     handleRunMorph(selectedText);
                     setMobileActivePane("studio");
                   }}
+                  onWhiteboardSelection={() => {
+                    setSelectionPos(null);
+                    setWhiteboardSelectionSeq((n) => n + 1);
+                    setActiveIntent("whiteboard");
+                    setMobileActivePane("studio");
+                  }}
                   onAskAI={() => {
                     handleAskAISelection(selectedText);
                     setMobileActivePane("studio");
@@ -1685,6 +1692,12 @@ export default function LivingReader({
                     handleRunMorph(selectedText);
                     setMobileActivePane("studio");
                   }}
+                  onWhiteboardSelection={() => {
+                    setSelectionPos(null);
+                    setWhiteboardSelectionSeq((n) => n + 1);
+                    setActiveIntent("whiteboard");
+                    setMobileActivePane("studio");
+                  }}
                   onAskAI={() => {
                     handleAskAISelection(selectedText);
                     setMobileActivePane("studio");
@@ -1758,6 +1771,20 @@ export default function LivingReader({
                                 >
                                   <Sparkles className="size-2.5" />
                                   <span>Morph Block</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedText(para);
+                                    setWhiteboardSelectionSeq((n) => n + 1);
+                                    setActiveIntent("whiteboard");
+                                  }}
+                                  className="flex cursor-pointer items-center gap-1 rounded-full border border-current/20 bg-current/5 px-2 py-0.5 font-bold hover:bg-current/15"
+                                  title="Generate Whiteboard Video on this paragraph"
+                                >
+                                  <Tv className="size-2.5" />
+                                  <span>Whiteboard</span>
                                 </button>
 
                                 <button
@@ -2057,6 +2084,16 @@ export default function LivingReader({
                     className="cursor-pointer rounded-full bg-[color:var(--orange)] px-2.5 py-0.5 text-[10px] font-black text-[color:var(--ink)]"
                   >
                     Morph Now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWhiteboardSelectionSeq((n) => n + 1);
+                      setActiveIntent("whiteboard");
+                    }}
+                    className="cursor-pointer rounded-full bg-[color:var(--cream)] px-2.5 py-0.5 text-[10px] font-black text-[color:var(--ink)]"
+                  >
+                    Whiteboard
                   </button>
                   <button
                     type="button"
@@ -2736,11 +2773,11 @@ export default function LivingReader({
                 </div>
               )}
 
-              {/* TAB 3: ASCLEON LIVE WHITEBOARD MENTOR */}
+              {/* TAB 3: ASCLEON GENERATIVE WHITEBOARD VIDEO */}
               {activeIntent === "whiteboard" && (
                 <div className="flex animate-in fade-in flex-col h-full duration-150">
-                  <WhiteboardStudio
-                    book={book as any}
+                  <WhiteboardVideoStudio
+                    book={book}
                     currentPageNumber={book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
                     activePageLiveText={
                       (book.fileURL && activePageLiveText)
@@ -2757,7 +2794,7 @@ export default function LivingReader({
                       else setCurrentIdx(Math.max(0, page - 1));
                     }}
                     onWhiteboardExpandChange={setIsWhiteboardExpanded}
-                    authoritativeReferences={activeReferences}
+                    selectionTriggerSeq={whiteboardSelectionSeq}
                   />
                 </div>
               )}
@@ -2777,11 +2814,6 @@ export default function LivingReader({
                     authoritativeReferences={activeReferences}
                     studyLanguage={studyLanguage}
                     onStudyLanguageChange={setStudyLanguage}
-                    bookId={String(book._id || "")}
-                    studyScope={studyScope}
-                    snippedDiagram={snippedDiagram?.url || null}
-                    onWhiteboardExpandChange={setIsWhiteboardExpanded}
-                    forcedMode="viva"
                     onTriggerMorph={() => {
                       setActiveIntent("morph");
                       handleRunMorph();
@@ -2900,31 +2932,32 @@ export default function LivingReader({
 
                   {dynamicQBankList.length > 0 ? (
                     <>
-                      <div className="flex items-center justify-between text-[11px] font-bold">
-                        <span className="text-[color:var(--ink)]/80">
+                      <div className="flex items-center justify-between text-[11px] font-bold" dir="auto">
+                        <span dir="auto" className="text-[color:var(--ink)]/80 text-start [unicode-bidi:isolate]">
                           {dynamicQBankList[activeQBankIdx]?.topic || `Question on Page ${currentSegment?.pageNumber || currentIdx + 1}`}
                         </span>
-                        <span className="rounded-full border-2 border-[color:var(--ink)] bg-[#ff4c00] px-2.5 py-0.5 text-[10px] font-black text-[color:var(--ink)] shadow-xs">
+                        <span dir="ltr" className="shrink-0 rounded-full border-2 border-[color:var(--ink)] bg-[#ff4c00] px-2.5 py-0.5 text-[10px] font-black text-[color:var(--ink)] shadow-xs">
                           Case {((activeQBankIdx % dynamicQBankList.length) + 1)} / {dynamicQBankList.length}
                         </span>
                       </div>
 
                       {/* Vignette Presentation */}
-                      <div className="rounded-[14px] border-2 border-[color:var(--ink)] bg-white p-4 shadow-xs">
-                        <p className="font-serif text-xs leading-relaxed text-[color:var(--ink)] font-medium">
+                      <div className="rounded-[14px] border-2 border-[color:var(--ink)] bg-white p-4 shadow-xs" dir="auto">
+                        <p dir="auto" className="font-serif text-xs leading-relaxed text-[color:var(--ink)] font-medium text-start [unicode-bidi:plaintext] select-text">
                           {dynamicQBankList[activeQBankIdx]?.vignette}
                         </p>
                       </div>
 
                       {/* Multiple Choice Options */}
-                      <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-2" dir="auto">
                         {(dynamicQBankList[activeQBankIdx]?.options || []).map((option, idx) => (
                           <button
                             key={idx}
                             type="button"
+                            dir="auto"
                             onClick={() => !quizSubmitted && setQuizAnswer(idx)}
                             className={cn(
-                              "flex cursor-pointer items-start gap-2 rounded-[14px] border-2 border-[color:var(--ink)] p-3 text-left text-xs transition-all shadow-xs",
+                              "flex cursor-pointer items-start gap-2.5 rounded-[14px] border-2 border-[color:var(--ink)] p-3 text-start text-xs transition-all shadow-xs",
                               quizAnswer === idx
                                 ? "bg-[#ff4c00] text-[color:var(--ink)] font-black"
                                 : "bg-white text-[color:var(--ink)] hover:bg-[#7fd8c9]/25",
@@ -2937,10 +2970,12 @@ export default function LivingReader({
                               "bg-[#ff6e33]/30 text-[color:var(--ink)]",
                             )}
                           >
-                            <span className="shrink-0 font-mono font-black text-[color:var(--ink)]">
+                            <bdi dir="ltr" className="shrink-0 font-mono font-black text-[color:var(--ink)] select-none">
                               {String.fromCharCode(65 + idx)}.
+                            </bdi>
+                            <span dir="auto" className="flex-1 font-medium text-start [unicode-bidi:isolate]">
+                              {option}
                             </span>
-                            <span className="font-medium">{option}</span>
                           </button>
                         ))}
                       </div>
@@ -2955,47 +2990,64 @@ export default function LivingReader({
                           Submit Answer &amp; Reveal Rationale
                         </button>
                       ) : (
-                        <div className="flex animate-in fade-in flex-col gap-3 rounded-[16px] border-2 border-[color:var(--ink)] bg-white p-4 text-xs text-[color:var(--ink)] shadow-chip">
+                        <div className="flex animate-in fade-in flex-col gap-3 rounded-[16px] border-2 border-[color:var(--ink)] bg-white p-4 text-xs text-[color:var(--ink)] shadow-chip" dir="auto">
                           {/* Answer Banner */}
-                          <div className="flex items-center gap-2 font-black text-[color:var(--ink)] text-sm">
+                          <div className="flex items-center gap-2 font-black text-[color:var(--ink)] text-sm" dir="auto">
                             {quizAnswer === dynamicQBankList[activeQBankIdx]?.correctIndex ? (
                               <>
-                                <CheckCircle2 className="size-5 text-[#2e6f68]" />
-                                <span>Correct! ({String.fromCharCode(65 + dynamicQBankList[activeQBankIdx]?.correctIndex)})</span>
+                                <CheckCircle2 className="size-5 text-[#2e6f68] shrink-0" />
+                                <span dir="auto" className="text-start [unicode-bidi:isolate]">
+                                  {studyLanguage === "ar" ? "إجابة صحيحة!" : "Correct!"} <bdi dir="ltr">({String.fromCharCode(65 + dynamicQBankList[activeQBankIdx]?.correctIndex)})</bdi>
+                                </span>
                               </>
                             ) : (
                               <>
-                                <XCircle className="size-5 text-[#ff4c00]" />
-                                <span className="text-[#ff4c00]">Incorrect. Correct choice is ({String.fromCharCode(65 + dynamicQBankList[activeQBankIdx]?.correctIndex)})</span>
+                                <XCircle className="size-5 text-[#ff4c00] shrink-0" />
+                                <span dir="auto" className="text-[#ff4c00] text-start [unicode-bidi:isolate]">
+                                  {studyLanguage === "ar" ? "إجابة غير صحيحة. الخيار الصحيح هو" : "Incorrect. Correct choice is"} <bdi dir="ltr">({String.fromCharCode(65 + dynamicQBankList[activeQBankIdx]?.correctIndex)})</bdi>
+                                </span>
                               </>
                             )}
                           </div>
 
                           {/* Distractor Breakdown */}
                           {dynamicQBankList[activeQBankIdx]?.distractorRationales && (
-                            <div className="flex flex-col gap-1.5 border-t border-[color:var(--ink)]/20 pt-2 text-[11px] leading-relaxed text-[color:var(--ink)]">
-                              <strong className="text-[color:var(--ink)]">Distractor Analysis &amp; Clinical Reasoning:</strong>
+                            <div dir="auto" className="flex flex-col gap-1.5 border-t border-[color:var(--ink)]/20 pt-2 text-[11px] leading-relaxed text-[color:var(--ink)]">
+                              <strong dir="auto" className="text-[color:var(--ink)] text-start block [unicode-bidi:isolate]">
+                                {studyLanguage === "ar" ? "تحليل الخيارات والاستدلال السريري:" : "Distractor Analysis & Clinical Reasoning:"}
+                              </strong>
                               {Object.entries(dynamicQBankList[activeQBankIdx].distractorRationales).map(([optIdx, rationale]) => (
                                 <div
                                   key={optIdx}
+                                  dir="auto"
                                   className={cn(
-                                    "rounded-lg p-2.5 text-[10.5px] border border-[color:var(--ink)]/20",
+                                    "flex items-start gap-2 rounded-lg p-2.5 text-[10.5px] border border-[color:var(--ink)]/20 text-start",
                                     Number(optIdx) === dynamicQBankList[activeQBankIdx].correctIndex
                                       ? "bg-[#7fd8c9] font-bold text-[color:var(--ink)]"
                                       : "bg-[#f6d7a1]/40 text-[color:var(--ink)]/90"
                                   )}
                                 >
-                                  <span className="font-black">({String.fromCharCode(65 + Number(optIdx))}): </span>
-                                  <span>{rationale}</span>
+                                  <bdi dir="ltr" className="shrink-0 font-black select-none">
+                                    ({String.fromCharCode(65 + Number(optIdx))}):
+                                  </bdi>
+                                  <span dir="auto" className="flex-1 leading-relaxed text-start [unicode-bidi:isolate]">
+                                    {rationale}
+                                  </span>
                                 </div>
                               ))}
                             </div>
                           )}
 
                           {/* High Yield Takeaway Box */}
-                          <div className="rounded-xl border-2 border-[color:var(--ink)] bg-[#ff4c00] p-3 text-[11px] text-[color:var(--ink)] shadow-xs">
-                            <span className="font-black text-[color:var(--ink)]">🎯 High-Yield Exam Takeaway: </span>
-                            <span className="font-medium">{dynamicQBankList[activeQBankIdx]?.highYieldTakeaway}</span>
+                          <div dir="auto" className="rounded-xl border-2 border-[color:var(--ink)] bg-[#ff4c00] p-3 text-[11px] text-[color:var(--ink)] shadow-xs">
+                            <div className="flex items-center gap-1.5 mb-1 text-start" dir="auto">
+                              <span className="font-black text-[color:var(--ink)] [unicode-bidi:isolate]">
+                                🎯 {studyLanguage === "ar" ? "اللؤلؤة الامتحانية المركزة:" : "High-Yield Exam Takeaway:"}
+                              </span>
+                            </div>
+                            <p dir="auto" className="font-medium text-start leading-relaxed [unicode-bidi:plaintext]">
+                              {dynamicQBankList[activeQBankIdx]?.highYieldTakeaway}
+                            </p>
                           </div>
 
                           {/* Question Navigation Controls */}

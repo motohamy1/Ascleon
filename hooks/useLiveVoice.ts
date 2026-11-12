@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { StudyLanguage, joinStreamingTranscript, isHallucinatedNoiseTranscript } from "@/lib/language";
 import { DEFAULT_LIVE_VOICE, VoiceBargeInMode } from "@/lib/voice-config";
-import { WhiteboardChoreographEvent, WhiteboardWidgetControlEvent } from "@/types/whiteboard";
 
 export interface LiveVoiceMessage {
   id: string;
@@ -28,11 +27,7 @@ export interface UseLiveVoiceOptions {
   language?: StudyLanguage;
   voiceName?: string;
   bargeInMode?: VoiceBargeInMode;
-  mode?: "viva" | "whiteboard";
   onVisualTrigger?: (event: VisualTriggerEvent) => void;
-  onWhiteboardChoreograph?: (event: WhiteboardChoreographEvent) => void;
-  onWhiteboardWidgetControl?: (event: WhiteboardWidgetControlEvent) => void;
-  onWhiteboardBranchTopic?: (focusQuestion: string, preferredWidgetType?: string) => void;
 }
 
 export type LiveVoiceStatus =
@@ -52,11 +47,7 @@ export function useLiveVoice({
   language = "en",
   voiceName = DEFAULT_LIVE_VOICE,
   bargeInMode: initialBargeInMode = "smart",
-  mode = "viva",
   onVisualTrigger,
-  onWhiteboardChoreograph,
-  onWhiteboardWidgetControl,
-  onWhiteboardBranchTopic,
 }: UseLiveVoiceOptions) {
   const [status, setStatus] = useState<LiveVoiceStatus>("disconnected");
   const [isMuted, setIsMuted] = useState(false);
@@ -68,8 +59,6 @@ export function useLiveVoice({
   const [outputLevel, setOutputLevel] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeVisualTrigger, setActiveVisualTrigger] = useState<VisualTriggerEvent | null>(null);
-  const [activeChoreography, setActiveChoreography] = useState<WhiteboardChoreographEvent | null>(null);
-  const [activeWidgetControl, setActiveWidgetControl] = useState<WhiteboardWidgetControlEvent | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const inputAudioCtxRef = useRef<AudioContext | null>(null);
@@ -357,7 +346,6 @@ export function useLiveVoice({
             authoritativeReferences,
             language,
             voiceName,
-            mode,
             resumptionHandle: resumptionHandleRef.current,
             isResuming,
           }),
@@ -583,53 +571,6 @@ export function useLiveVoice({
                           explanation: { type: "STRING" },
                         },
                         required: ["conceptName", "action"],
-                      },
-                    },
-                    {
-                      name: "whiteboard_choreograph",
-                      description:
-                        "Choreographs the interactive whiteboard in real-time as you speak: points the glowing laser pointer at a specific node/annotation, reveals progressive drawing steps, or displays a handwritten chalk callout.",
-                      behavior: "NON_BLOCKING",
-                      parameters: {
-                        type: "OBJECT",
-                        properties: {
-                          sceneIndex: { type: "INTEGER" },
-                          revealStepIndex: { type: "INTEGER" },
-                          laserTargetId: { type: "STRING" },
-                          chalkAnnotation: { type: "STRING" },
-                        },
-                      },
-                    },
-                    {
-                      name: "whiteboard_control_widget",
-                      description:
-                        "Controls the live Generative Clinical UI widget on the whiteboard: toggles a pharmacological drug/intervention, highlights a differential diagnosis row, or selects a clinical algorithm branch.",
-                      behavior: "NON_BLOCKING",
-                      parameters: {
-                        type: "OBJECT",
-                        properties: {
-                          activeInterventionId: { type: "STRING" },
-                          toggleIntervention: { type: "BOOLEAN" },
-                          activeConditionId: { type: "STRING" },
-                          activeStepId: { type: "STRING" },
-                        },
-                      },
-                    },
-                    {
-                      name: "whiteboard_branch_topic",
-                      description:
-                        "Spawns a new visual whiteboard scene when the student asks an off-topic or deep-dive clinical question.",
-                      behavior: "NON_BLOCKING",
-                      parameters: {
-                        type: "OBJECT",
-                        properties: {
-                          focusQuestion: { type: "STRING" },
-                          preferredWidgetType: {
-                            type: "STRING",
-                            enum: ["physiology_simulator", "differential_matrix", "clinical_algorithm", "source_pinboard"],
-                          },
-                        },
-                        required: ["focusQuestion"],
                       },
                     },
                   ],
@@ -878,7 +819,7 @@ export function useLiveVoice({
               }
             }
 
-            // 5. Tool Call handling (Whiteboard choreography & Visual triggers)
+            // 5. Tool Call handling (Visual triggers)
             if (data.toolCall) {
               const calls = data.toolCall.functionCalls || [];
               const responses: any[] = [];
@@ -901,66 +842,6 @@ export function useLiveVoice({
                         status: "displayed_on_screen",
                         action: event.action,
                         concept: event.conceptName,
-                      },
-                    },
-                    id: call.id,
-                  });
-                } else if (call.name === "whiteboard_choreograph") {
-                  const choreoEvent: WhiteboardChoreographEvent = {
-                    sceneIndex: typeof call.args?.sceneIndex === "number" ? call.args.sceneIndex : undefined,
-                    revealStepIndex: typeof call.args?.revealStepIndex === "number" ? call.args.revealStepIndex : undefined,
-                    laserTargetId: call.args?.laserTargetId,
-                    chalkAnnotation: call.args?.chalkAnnotation,
-                  };
-                  setActiveChoreography(choreoEvent);
-                  if (onWhiteboardChoreograph) {
-                    onWhiteboardChoreograph(choreoEvent);
-                  }
-
-                  responses.push({
-                    response: {
-                      output: {
-                        status: "choreography_applied",
-                        appliedStep: choreoEvent.revealStepIndex,
-                        laserTarget: choreoEvent.laserTargetId,
-                      },
-                    },
-                    id: call.id,
-                  });
-                } else if (call.name === "whiteboard_control_widget") {
-                  const widgetEvent: WhiteboardWidgetControlEvent = {
-                    activeInterventionId: call.args?.activeInterventionId,
-                    toggleIntervention: call.args?.toggleIntervention,
-                    activeConditionId: call.args?.activeConditionId,
-                    activeStepId: call.args?.activeStepId,
-                  };
-                  setActiveWidgetControl(widgetEvent);
-                  if (onWhiteboardWidgetControl) {
-                    onWhiteboardWidgetControl(widgetEvent);
-                  }
-
-                  responses.push({
-                    response: {
-                      output: {
-                        status: "widget_control_applied",
-                        activeIntervention: widgetEvent.activeInterventionId,
-                        toggleState: widgetEvent.toggleIntervention,
-                      },
-                    },
-                    id: call.id,
-                  });
-                } else if (call.name === "whiteboard_branch_topic") {
-                  const focusQuestion = call.args?.focusQuestion || "Clinical Focus";
-                  const preferredWidgetType = call.args?.preferredWidgetType;
-                  if (onWhiteboardBranchTopic) {
-                    onWhiteboardBranchTopic(focusQuestion, preferredWidgetType);
-                  }
-
-                  responses.push({
-                    response: {
-                      output: {
-                        status: "branch_topic_scheduled",
-                        focusQuestion,
                       },
                     },
                     id: call.id,
@@ -1030,14 +911,10 @@ export function useLiveVoice({
     authoritativeReferences,
     language,
     voiceName,
-    mode,
     cleanupAudio,
     sendRealtimeAudio,
     flushPendingMessages,
     onVisualTrigger,
-    onWhiteboardChoreograph,
-    onWhiteboardWidgetControl,
-    onWhiteboardBranchTopic,
   ]);
 
   const sendTextMessage = useCallback((text: string) => {
@@ -1142,51 +1019,6 @@ export function useLiveVoice({
     }
   }, [language]);
 
-  const sendWhiteboardContext = useCallback((deckSummary: string, autoStartNarration = false) => {
-    const directive = autoStartNarration
-      ? `[WHITEBOARD DIRECTOR START: The student just pressed Play on the interactive whiteboard! Here is the active whiteboard deck with exact scene indices, step indices, and node IDs:\n"""${deckSummary}"""\nBegin explaining Scene 0 immediately in your natural voice! As you introduce each node and step, invoke 'whiteboard_choreograph' with { sceneIndex, revealStepIndex, laserTargetId, chalkAnnotation } so the marker hand draws and points at each anatomical sketch in real-time sync with your words.]`
-      : `[WHITEBOARD CONTEXT UPDATE: The active whiteboard illustration deck is:\n"""${deckSummary}"""\nSynchronize your vocal explanation and use the 'whiteboard_choreograph' and 'whiteboard_control_widget' tools to highlight steps and widgets on the board.]`;
-
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !isSetupCompleteRef.current) {
-      if (autoStartNarration) {
-        pendingTextQueueRef.current.push(directive);
-      }
-      return;
-    }
-    const updateFrame = {
-      clientContent: {
-        turns: [
-          {
-            role: "user",
-            parts: [{ text: directive }],
-          },
-        ],
-        turnComplete: autoStartNarration,
-      },
-    };
-    wsRef.current.send(JSON.stringify(updateFrame));
-  }, []);
-
-  const sendWhiteboardInteraction = useCallback((interactionText: string) => {
-    const promptText = `[STUDENT WHITEBOARD INTERACTION: ${interactionText}. Address this immediately and concisely in your speech while calling 'whiteboard_choreograph' to point at the relevant node.]`;
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !isSetupCompleteRef.current) {
-      pendingTextQueueRef.current.push(promptText);
-      return;
-    }
-    const interactionFrame = {
-      clientContent: {
-        turns: [
-          {
-            role: "user",
-            parts: [{ text: promptText }],
-          },
-        ],
-        turnComplete: true,
-      },
-    };
-    wsRef.current.send(JSON.stringify(interactionFrame));
-  }, []);
-
   const resetSession = useCallback(() => {
     disconnect();
     resumptionHandleRef.current = null;
@@ -1196,8 +1028,6 @@ export function useLiveVoice({
     outputTranscriptAccRef.current = "";
     setCurrentInputTranscript("");
     setCurrentOutputTranscript("");
-    setActiveChoreography(null);
-    setActiveWidgetControl(null);
     statusRef.current = "disconnected";
     setStatus("disconnected");
   }, [disconnect]);
@@ -1222,8 +1052,6 @@ export function useLiveVoice({
     setBargeInMode,
     sendTextMessage,
     updatePageContext,
-    sendWhiteboardContext,
-    sendWhiteboardInteraction,
     messages,
     currentInputTranscript,
     currentOutputTranscript,
@@ -1231,10 +1059,6 @@ export function useLiveVoice({
     outputLevel,
     errorMessage,
     activeVisualTrigger,
-    activeChoreography,
-    activeWidgetControl,
     clearVisualTrigger: () => setActiveVisualTrigger(null),
-    clearChoreography: () => setActiveChoreography(null),
-    clearWidgetControl: () => setActiveWidgetControl(null),
   };
 }

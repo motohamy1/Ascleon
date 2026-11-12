@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { connectToDatabase } from "@/database/mongoose";
 import StudyProgress from "@/database/models/study-progress.model";
 import Book from "@/database/models/book.model";
+import VoiceSession from "@/database/models/voice-session.model";
 import { UserStudyProgressData } from "@/types";
 import { serializeData } from "@/lib/utils";
 
@@ -258,3 +259,150 @@ export async function resetUserStudyProgress(
     };
   }
 }
+
+export interface ActiveStudySourceResult {
+  title: string;
+  slug: string;
+  coverURL?: string;
+  author?: string;
+  lastStudiedPage: number;
+  totalPages: number;
+  progressPercent: number;
+  activeIntent?: string;
+}
+
+interface LeanProgressSummary {
+  bookSlug?: string;
+  lastStudiedPage?: number;
+  totalPages?: number;
+  progressPercent?: number;
+  activeIntent?: string;
+}
+
+interface LeanSessionSummary {
+  bookId?: unknown;
+}
+
+interface LeanBookSummary {
+  _id: unknown;
+  title: string;
+  slug: string;
+  author?: string;
+  coverURL?: string;
+  totalPages?: number;
+  readingStatus?: string;
+}
+
+/**
+ * Returns the currently active study source / book for the authenticated user:
+ * 1. Book from most recent StudyProgress
+ * 2. Book from most recent VoiceSession
+ * 3. Book with readingStatus 'in_progress'
+ * 4. Most recently uploaded book
+ */
+export async function getActiveStudySource(): Promise<{
+  success: boolean;
+  data: ActiveStudySourceResult | null;
+}> {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return { success: true, data: null };
+    }
+
+    await connectToDatabase();
+
+    const [recentProgresses, recentSessions, books] = await Promise.all([
+      StudyProgress.find({ clerkId: userId })
+        .select(
+          "bookSlug lastStudiedPage totalPages progressPercent activeIntent lastStudiedAt"
+        )
+        .sort({ lastStudiedAt: -1 })
+        .limit(10)
+        .lean<LeanProgressSummary[]>(),
+      VoiceSession.find({ clerkId: userId })
+        .select("bookId startedAt")
+        .sort({ startedAt: -1 })
+        .limit(5)
+        .lean<LeanSessionSummary[]>(),
+      Book.find({ clerkId: userId })
+        .select("_id title slug author coverURL totalPages readingStatus")
+        .sort({ createdAt: -1 })
+        .lean<LeanBookSummary[]>(),
+    ]);
+
+    if (!books || books.length === 0) {
+      return { success: true, data: null };
+    }
+
+    const bookBySlug = new Map<string, LeanBookSummary>(
+      books.map((b) => [b.slug, b])
+    );
+    const bookById = new Map<string, LeanBookSummary>(
+      books.map((b) => [String(b._id), b])
+    );
+    const progressBySlug = new Map<string, LeanProgressSummary>();
+    for (const prog of recentProgresses) {
+      if (prog.bookSlug && !progressBySlug.has(prog.bookSlug)) {
+        progressBySlug.set(prog.bookSlug, prog);
+      }
+    }
+
+    const progressTarget = recentProgresses
+      .map((p) => (p.bookSlug ? bookBySlug.get(p.bookSlug) : undefined))
+      .find((b): b is LeanBookSummary => Boolean(b));
+    const sessionTarget = recentSessions
+      .map((s) => (s.bookId ? bookById.get(String(s.bookId)) : undefined))
+      .find((b): b is LeanBookSummary => Boolean(b));
+
+    const targetBook =
+      progressTarget ||
+      sessionTarget ||
+      books.find((b) => b.readingStatus === "in_progress") ||
+      books[0];
+
+    if (!targetBook) {
+      return { success: true, data: null };
+    }
+
+    const matchedProgress = progressBySlug.get(targetBook.slug);
+    const lastStudiedPage = matchedProgress
+      ? Math.max(1, matchedProgress.lastStudiedPage || 1)
+      : 1;
+    const totalPages =
+      (matchedProgress?.totalPages && matchedProgress.totalPages > 0
+        ? matchedProgress.totalPages
+        : targetBook.totalPages) || 0;
+    const progressPercent = matchedProgress
+      ? Math.min(
+          100,
+          Math.max(
+            0,
+            matchedProgress.progressPercent ??
+              (totalPages > 0
+                ? Math.round((lastStudiedPage / totalPages) * 100)
+                : 0)
+          )
+        )
+      : 0;
+    const activeIntent = matchedProgress?.activeIntent;
+
+    return {
+      success: true,
+      data: serializeData({
+        title: targetBook.title,
+        slug: targetBook.slug,
+        coverURL: targetBook.coverURL,
+        author: targetBook.author,
+        lastStudiedPage,
+        totalPages,
+        progressPercent,
+        activeIntent,
+      }),
+    };
+  } catch (error) {
+    console.error("Error fetching active study source:", error);
+    return { success: false, data: null };
+  }
+}
+

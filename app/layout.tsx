@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Serif, Mona_Sans} from "next/font/google";
+import { IBM_Plex_Serif, Mona_Sans, Caveat, Marhey } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import { ClerkProvider } from "@clerk/nextjs";
@@ -16,7 +16,21 @@ const monaSans = Mona_Sans({
     variable: '--font-mona-sans',
     subsets: ['latin'],
     display: 'swap'
-})
+});
+
+const caveat = Caveat({
+    variable: '--font-caveat',
+    subsets: ['latin'],
+    weight: ['500', '600', '700'],
+    display: 'swap'
+});
+
+const marhey = Marhey({
+    variable: '--font-marhey',
+    subsets: ['arabic', 'latin'],
+    weight: ['400', '500', '600', '700'],
+    display: 'swap'
+});
 
 
 export const metadata: Metadata = {
@@ -41,7 +55,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${ibmPlexSerif.variable} ${monaSans.variable} relative font-sans antialiased`}
+        className={`${ibmPlexSerif.variable} ${monaSans.variable} ${caveat.variable} ${marhey.variable} relative font-sans antialiased`}
       >
         <ClerkProvider>
           <Navbar />

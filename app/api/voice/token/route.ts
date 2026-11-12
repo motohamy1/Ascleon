@@ -17,7 +17,6 @@ export async function POST(req: NextRequest) {
       authoritativeReferences = [],
       language = "en",
       voiceName = DEFAULT_LIVE_VOICE,
-      mode = "viva", // "viva" or "whiteboard"
       resumptionHandle = null,
       isResuming = false,
     } = body;
@@ -69,13 +68,8 @@ PEDAGOGICAL & ORAL INTERACTION DIRECTIVES:
 3. Spoken Delivery:
    - Speak with natural, warm, human inflection like a world-class scholar or mentor sitting next to the student.
    - NO markdown formatting (no asterisks, hashtags, or emojis) — your output streams directly as real-time audio!
-4. Visual Grounding & Live Whiteboard Choreography:
-   - When introducing a pivotal mechanism, structure, or formula, invoke 'show_concept_on_page' or 'whiteboard_choreograph' in the background to highlight nodes on the screen while you speak.
-   - ${
-     mode === "whiteboard"
-       ? "CRITICAL WHITEBOARD DIRECTOR MODE: You are actively directing a VideoScribe-style Medical Whiteboard Animation! As you explain each step of a scene, call 'whiteboard_choreograph' with { sceneIndex, revealStepIndex, laserTargetId, chalkAnnotation } so the hand marker draws each node in real-time sync with your voice, and use 'whiteboard_control_widget' when demonstrating interventions or algorithms."
-       : "When the student asks to visualize a mechanism, invoke 'show_concept_on_page'."
-   }`;
+4. Visual Grounding & Page Highlights:
+   - When introducing a pivotal mechanism, structure, or formula, invoke 'show_concept_on_page' in the background to highlight concepts or open Morph view on the screen while you speak.`;
 
     const liveConfig: any = {
       responseModalities: [Modality.AUDIO],
@@ -129,81 +123,6 @@ PEDAGOGICAL & ORAL INTERACTION DIRECTIVES:
                   },
                 },
                 required: ["conceptName", "action"],
-              },
-            },
-            {
-              name: "whiteboard_choreograph",
-              description:
-                "Choreographs the interactive whiteboard in real-time as you speak: points the glowing laser pointer at a specific node/annotation, reveals progressive drawing steps, or displays a handwritten chalk callout.",
-              behavior: "NON_BLOCKING",
-              parameters: {
-                type: "OBJECT",
-                properties: {
-                  sceneIndex: {
-                    type: "INTEGER",
-                    description: "0-based index of the scene to show or advance to",
-                  },
-                  revealStepIndex: {
-                    type: "INTEGER",
-                    description: "0-based progressive step index to draw on the chalk canvas",
-                  },
-                  laserTargetId: {
-                    type: "STRING",
-                    description: "ID of the chalk node, pin, or widget element to point the laser at",
-                  },
-                  chalkAnnotation: {
-                    type: "STRING",
-                    description: "Short handwritten clinical pearl to stamp on the whiteboard",
-                  },
-                },
-              },
-            },
-            {
-              name: "whiteboard_control_widget",
-              description:
-                "Controls the live Generative Clinical UI widget on the whiteboard: toggles a pharmacological drug/intervention, highlights a differential diagnosis row, or selects a clinical algorithm branch.",
-              behavior: "NON_BLOCKING",
-              parameters: {
-                type: "OBJECT",
-                properties: {
-                  activeInterventionId: {
-                    type: "STRING",
-                    description: "ID of the simulator drug/intervention to toggle (e.g. 'rx-first-line')",
-                  },
-                  toggleIntervention: {
-                    type: "BOOLEAN",
-                    description: "Whether to turn the intervention ON (true) or OFF (false)",
-                  },
-                  activeConditionId: {
-                    type: "STRING",
-                    description: "ID of the differential diagnosis condition to highlight",
-                  },
-                  activeStepId: {
-                    type: "STRING",
-                    description: "ID of the clinical algorithm decision step to navigate to",
-                  },
-                },
-              },
-            },
-            {
-              name: "whiteboard_branch_topic",
-              description:
-                "Spawns a new visual whiteboard scene when the student asks an off-topic or deep-dive clinical question.",
-              behavior: "NON_BLOCKING",
-              parameters: {
-                type: "OBJECT",
-                properties: {
-                  focusQuestion: {
-                    type: "STRING",
-                    description: "The specific clinical mechanism or question to illustrate next",
-                  },
-                  preferredWidgetType: {
-                    type: "STRING",
-                    enum: ["physiology_simulator", "differential_matrix", "clinical_algorithm", "source_pinboard"],
-                    description: "The most appropriate clinical widget to generate",
-                  },
-                },
-                required: ["focusQuestion"],
               },
             },
           ],

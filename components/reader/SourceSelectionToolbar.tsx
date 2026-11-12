@@ -11,8 +11,8 @@ import {
   X,
   Copy,
   Check,
+  Tv,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 export interface ScannedPinItem {
   id: string;
@@ -29,6 +29,7 @@ interface SourceSelectionToolbarProps {
   selectedText: string;
   position: { x: number; y: number } | null;
   onMorphSelection: () => void;
+  onWhiteboardSelection?: () => void;
   onAskAI: (promptPrefix?: string) => void;
   onVoiceViva: () => void;
   onQuizSelection: () => void;
@@ -40,6 +41,7 @@ export function SourceSelectionToolbar({
   selectedText,
   position,
   onMorphSelection,
+  onWhiteboardSelection,
   onAskAI,
   onVoiceViva,
   onQuizSelection,
@@ -99,6 +101,18 @@ export function SourceSelectionToolbar({
           <Sparkles className="size-3" />
           <span>Morph Passage</span>
         </button>
+
+        {/* 1b. Whiteboard Video on Selection */}
+        {onWhiteboardSelection && (
+          <button
+            type="button"
+            onClick={onWhiteboardSelection}
+            className="flex cursor-pointer items-center gap-1 rounded-xl border border-[color:var(--ink)] bg-[color:var(--cream)] px-2.5 py-1.5 text-[11px] font-black text-[color:var(--ink)] shadow-sm transition-transform hover:-translate-y-0.5 hover:bg-[color:var(--mint)]"
+          >
+            <Tv className="size-3" />
+            <span>Whiteboard</span>
+          </button>
+        )}
 
         {/* 2. Ask AI Mentor */}
         <button

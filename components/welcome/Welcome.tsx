@@ -1,7 +1,15 @@
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight } from 'lucide-react';
-import { SignInButton, SignedIn, SignedOut } from '@clerk/nextjs';
+import Image from 'next/image';
+import { ArrowUpRight, BookOpen } from 'lucide-react';
+import { SignInButton, SignedIn, SignedOut, useUser } from '@clerk/nextjs';
 import { AscleonLogo } from '@/components/ui/AscleonLogo';
+import {
+  getActiveStudySource,
+  ActiveStudySourceResult,
+} from '@/lib/actions/study-progress.actions';
 
 const features = [
   {
@@ -56,7 +64,70 @@ const steps = [
   },
 ];
 
-const Welcome = () => {
+export interface WelcomeProps {
+  userFirstName?: string | null;
+  activeStudy?: ActiveStudySourceResult | null;
+}
+
+const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
+  const { user: clientUser, isSignedIn } = useUser();
+  const [clientActiveStudy, setClientActiveStudy] = useState<
+    ActiveStudySourceResult | null | undefined
+  >(undefined);
+  const fetchedOnSignInRef = useRef(false);
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      fetchedOnSignInRef.current = false;
+      return;
+    }
+
+    if (fetchedOnSignInRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    fetchedOnSignInRef.current = true;
+
+    getActiveStudySource()
+      .then((res) => {
+        if (!cancelled && res.success) {
+          setClientActiveStudy(res.data ?? null);
+        }
+      })
+      .catch((err) =>
+        console.error('Error fetching active study source:', err)
+      );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn]);
+
+  const currentActiveStudy =
+    isSignedIn === false
+      ? null
+      : clientActiveStudy !== undefined
+        ? clientActiveStudy
+        : (activeStudy ?? null);
+
+  const rawName =
+    userFirstName ||
+    clientUser?.firstName ||
+    clientUser?.fullName ||
+    clientUser?.username ||
+    clientUser?.primaryEmailAddress?.emailAddress?.split('@')[0] ||
+    'Reader';
+
+  const displayName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+  const studyHref = currentActiveStudy
+    ? `/books/${currentActiveStudy.slug}`
+    : '/space/active';
+  const activeTitleSizeClass =
+    currentActiveStudy && currentActiveStudy.title.length > 20
+      ? 'text-[28px] sm:text-[32px]'
+      : 'text-[36px] sm:text-[42px]';
+
   return (
     <div className="flex flex-col gap-3">
       {/* HERO ROW */}
@@ -65,7 +136,10 @@ const Welcome = () => {
         <div className="relative flex min-h-[410px] sm:min-h-[455px] lg:min-h-[505px] xl:min-h-[535px] flex-col justify-between overflow-hidden rounded-[24px] bg-[color:var(--cream)] p-6 sm:p-10 lg:p-12 lg:col-span-8 shadow-chip">
           <div className="flex items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <AscleonLogo size={40} className="shadow-xs transition-transform duration-200 hover:scale-105" />
+              <AscleonLogo
+                size={40}
+                className="shadow-xs transition-transform duration-200 hover:scale-105"
+              />
               <p className="meta-label text-[color:var(--ink)]/80">
                 Ascleon® · reading, out loud
               </p>
@@ -73,7 +147,17 @@ const Welcome = () => {
             <div className="barcode h-8 w-24 shrink-0 text-[color:var(--ink)]" />
           </div>
 
-          <div className="mt-6 sm:mt-10 max-w-2xl">
+          <div className="mt-5 sm:mt-8 max-w-2xl">
+            <SignedIn>
+              <p className="mb-2.5 text-[15px] sm:text-base font-bold tracking-tight text-[color:var(--ink)]/85">
+                Welcome back,{' '}
+                <span className="font-extrabold text-[color:var(--magenta)]">
+                  {displayName}
+                </span>
+                . Ready to pick up where you left off?
+              </p>
+            </SignedIn>
+
             <h1 className="display text-[color:var(--ink)] text-[clamp(3.6rem,8.5vw,7.6rem)] leading-[0.93]">
               Talk to
               <br />
@@ -95,7 +179,7 @@ const Welcome = () => {
               </SignedOut>
               <SignedIn>
                 <Link
-                  href="/space/active"
+                  href={studyHref}
                   className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 active:translate-y-0"
                 >
                   Start reading
@@ -141,19 +225,62 @@ const Welcome = () => {
             </SignInButton>
           </SignedOut>
           <SignedIn>
-            <Link href="/space/active" className="flex flex-1">
+            <Link href={studyHref} className="flex flex-1">
               <div className="group relative flex min-h-[250px] sm:min-h-[280px] lg:min-h-[310px] w-full cursor-pointer flex-col justify-between overflow-hidden rounded-[24px] bg-[color:var(--orange)] p-6 sm:p-7 shadow-chip transition-transform duration-200 hover:-translate-y-1">
-                <p className="meta-label text-[color:var(--ink)]/80">
-                  First time here
-                </p>
-                <h2 className="display mt-4 text-[42px] sm:text-[48px] leading-[1.02] text-[color:var(--ink)]">
-                  One PDF,
-                  <br />
-                  one conversation.
-                </h2>
-                <p className="mt-3 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85">
-                  Live voice sessions with your book, up to 60 minutes.
-                </p>
+                {currentActiveStudy ? (
+                  <>
+                    <p className="meta-label text-[color:var(--ink)]/80">
+                      Active study source
+                    </p>
+                    <div className="mt-4 flex items-center gap-3.5 sm:gap-4">
+                      <div className="relative aspect-[2/3] w-12 sm:w-14 shrink-0 overflow-hidden rounded-lg border-2 border-[color:var(--ink)]/25 bg-[color:var(--cream)]/40 shadow-sm">
+                        {currentActiveStudy.coverURL ? (
+                          <Image
+                            src={currentActiveStudy.coverURL}
+                            alt={currentActiveStudy.title}
+                            fill
+                            sizes="64px"
+                            className="object-cover"
+                            unoptimized={
+                              currentActiveStudy.coverURL.startsWith('data:') ||
+                              currentActiveStudy.coverURL.startsWith('blob:') ||
+                              currentActiveStudy.coverURL.startsWith('/api/') ||
+                              currentActiveStudy.coverURL.endsWith('.svg')
+                            }
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[color:var(--ink)]">
+                            <BookOpen className="size-5 opacity-75" />
+                          </div>
+                        )}
+                      </div>
+                      <h2
+                        className={`display min-w-0 flex-1 leading-[1.02] text-[color:var(--ink)] line-clamp-3 break-words ${activeTitleSizeClass}`}
+                      >
+                        {currentActiveStudy.title}
+                      </h2>
+                    </div>
+                    <p className="mt-3 pr-14 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85 line-clamp-2">
+                      {currentActiveStudy.totalPages > 0
+                        ? `${currentActiveStudy.author ? `${currentActiveStudy.author} · ` : ''}Page ${currentActiveStudy.lastStudiedPage} of ${currentActiveStudy.totalPages} — enter study space.`
+                        : `${currentActiveStudy.author ? `${currentActiveStudy.author} · ` : ''}Click to enter your study space.`}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="meta-label text-[color:var(--ink)]/80">
+                      First time here
+                    </p>
+                    <h2 className="display mt-4 text-[42px] sm:text-[48px] leading-[1.02] text-[color:var(--ink)]">
+                      One PDF,
+                      <br />
+                      one conversation.
+                    </h2>
+                    <p className="mt-3 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85">
+                      Live voice sessions with your book, up to 60 minutes.
+                    </p>
+                  </>
+                )}
                 <ArrowUpRight className="absolute right-6 bottom-5 size-12 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
               </div>
             </Link>
@@ -189,7 +316,9 @@ const Welcome = () => {
           >
             <span className={`meta-label text-xs ${f.dim}`}>{f.n}</span>
             <div>
-              <h3 className="display text-[26px] sm:text-[28px] leading-tight">{f.title}</h3>
+              <h3 className="display text-[26px] sm:text-[28px] leading-tight">
+                {f.title}
+              </h3>
               <p
                 className={`mt-2.5 text-xs sm:text-[13px] font-semibold leading-snug ${f.body}`}
               >
