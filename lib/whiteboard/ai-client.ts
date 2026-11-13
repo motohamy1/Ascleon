@@ -359,6 +359,93 @@ export async function callStructuredJson<T>(params: {
   throw new Error(`All AI JSON providers failed (${errors.slice(0, 3).join(" | ")})`);
 }
 
+function pcmToWav(pcmBuffer: Buffer, sampleRate = 24000): Buffer {
+  const wavHeader = Buffer.alloc(44);
+  const dataSize = pcmBuffer.length;
+  const fileSize = dataSize + 36;
+  wavHeader.write("RIFF", 0);
+  wavHeader.writeUInt32LE(fileSize, 4);
+  wavHeader.write("WAVE", 8);
+  wavHeader.write("fmt ", 12);
+  wavHeader.writeUInt32LE(16, 16);
+  wavHeader.writeUInt16LE(1, 20);
+  wavHeader.writeUInt16LE(1, 22);
+  wavHeader.writeUInt32LE(sampleRate, 24);
+  wavHeader.writeUInt32LE(sampleRate * 2, 28);
+  wavHeader.writeUInt16LE(2, 32);
+  wavHeader.writeUInt16LE(16, 34);
+  wavHeader.write("data", 36);
+  wavHeader.writeUInt32LE(dataSize, 40);
+  return Buffer.concat([wavHeader, pcmBuffer]);
+}
+
+export class PinnedTtsModelError extends Error {
+  model: string;
+  constructor(model: string, causeMessage: string) {
+    super(`Pinned TTS model ${model} failed: ${causeMessage}`);
+    this.name = "PinnedTtsModelError";
+    this.model = model;
+  }
+}
+
+export const TTS_MODEL_PRIORITY = [
+  "gemini-3.8-flash-tts",
+  "gemini-3.8-flash-lite-tts",
+  "gemini-2.5-flash-preview-tts",
+  "gemini-3.1-flash-tts-preview",
+] as const;
+
+async function requestGeminiGenerateContentTts(params: {
+  apiKey: string;
+  model: string;
+  text: string;
+  style: string;
+  voiceId: string;
+  timeoutMs: number;
+}): Promise<Buffer> {
+  const { apiKey, model, text, style, voiceId, timeoutMs } = params;
+  const styledPrompt = style.trim()
+    ? `Say in a ${style.trim()} voice: ${text}`
+    : text;
+
+  const resp = await fetch(`${GEMINI_BASE}/models/${model}:generateContent`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: styledPrompt }] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: voiceId },
+          },
+        },
+      },
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const msg = payload?.error?.message || `HTTP ${resp.status}`;
+    if (resp.status === 429 || resp.status === 503 || resp.status === 500) {
+      markCooldown(`tts:${model}`, 60_000);
+    }
+    throw new Error(`HTTP ${resp.status}: ${msg}`);
+  }
+
+  const inlineData = payload?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+  if (!inlineData?.data) {
+    throw new Error("TTS generateContent returned no audio data.");
+  }
+
+  const pcmBuffer = Buffer.from(inlineData.data, "base64");
+  return pcmToWav(pcmBuffer, 24000);
+}
+
 async function requestGeminiTtsModel(params: {
   apiKey: string;
   model: string;
@@ -368,6 +455,11 @@ async function requestGeminiTtsModel(params: {
   timeoutMs: number;
 }): Promise<Buffer> {
   const { apiKey, model, text, style, voiceId, timeoutMs } = params;
+
+  if (model.includes("preview-tts") || model.includes("-tts-preview")) {
+    return requestGeminiGenerateContentTts({ apiKey, model, text, style, voiceId, timeoutMs });
+  }
+
   const resp = await fetch(`${GEMINI_BASE}/interactions`, {
     method: "POST",
     headers: {
@@ -426,29 +518,83 @@ async function requestGeminiTtsModel(params: {
 }
 
 /**
- * Synthesizes 24kHz mono WAV speech via Gemini TTS REST with fail-fast timeout,
- * model fallback, and a brief RPM-burst backoff retry on transient 429.
+ * Synthesizes 24kHz mono WAV speech via Gemini TTS while respecting a lesson-pinned model.
+ * When preferredModel is set with strictPin=true, never silently mixes a different model into the same voice track.
  */
-export async function callGeminiTtsAudio(params: {
+export async function callGeminiTtsAudioWithMeta(params: {
   text: string;
   style: string;
   voiceId: string;
+  preferredModel?: string;
+  strictPin?: boolean;
   timeoutMs?: number;
-}): Promise<Buffer> {
-  const { text, style, voiceId, timeoutMs = 24_000 } = params;
+}): Promise<{ buffer: Buffer; model: string }> {
+  const {
+    text,
+    style,
+    voiceId,
+    preferredModel,
+    strictPin = false,
+    timeoutMs = 24_000,
+  } = params;
   const apiKey = getGeminiApiKey();
 
-  const models = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"];
+  if (preferredModel && strictPin) {
+    try {
+      const buffer = await requestGeminiTtsModel({
+        apiKey,
+        model: preferredModel,
+        text,
+        style,
+        voiceId,
+        timeoutMs,
+      });
+      return { buffer, model: preferredModel };
+    } catch (firstErr) {
+      const firstMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+      if (firstMsg.includes("429") || firstMsg.includes("503")) {
+        await new Promise((r) => setTimeout(r, 2200));
+        try {
+          const buffer = await requestGeminiTtsModel({
+            apiKey,
+            model: preferredModel,
+            text,
+            style,
+            voiceId,
+            timeoutMs,
+          });
+          return { buffer, model: preferredModel };
+        } catch (retryErr) {
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          throw new PinnedTtsModelError(preferredModel, retryMsg);
+        }
+      }
+      throw new PinnedTtsModelError(preferredModel, firstMsg);
+    }
+  }
+
+  const models = [...TTS_MODEL_PRIORITY];
+  const baseOrder = preferredModel
+    ? [preferredModel, ...models.filter((m) => m !== preferredModel)]
+    : models;
   const ordered = [
-    ...models.filter((m) => !isCoolingDown(`tts:${m}`)),
-    ...models.filter((m) => isCoolingDown(`tts:${m}`)),
+    ...baseOrder.filter((m) => !isCoolingDown(`tts:${m}`)),
+    ...baseOrder.filter((m) => isCoolingDown(`tts:${m}`)),
   ];
 
   const errors: string[] = [];
   let sawRateLimit = false;
   for (const model of ordered) {
     try {
-      return await requestGeminiTtsModel({ apiKey, model, text, style, voiceId, timeoutMs });
+      const buffer = await requestGeminiTtsModel({
+        apiKey,
+        model,
+        text,
+        style,
+        voiceId,
+        timeoutMs,
+      });
+      return { buffer, model };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("429")) sawRateLimit = true;
@@ -457,21 +603,36 @@ export async function callGeminiTtsAudio(params: {
   }
 
   if (sawRateLimit) {
-    await new Promise((r) => setTimeout(r, 3200));
-    try {
-      return await requestGeminiTtsModel({
-        apiKey,
-        model: ordered[0],
-        text,
-        style,
-        voiceId,
-        timeoutMs,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      errors.push(`${ordered[0]}-retry: ${msg}`);
+    await new Promise((r) => setTimeout(r, 2500));
+    for (const model of ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"]) {
+      try {
+        const buffer = await requestGeminiTtsModel({
+          apiKey,
+          model,
+          text,
+          style,
+          voiceId,
+          timeoutMs,
+        });
+        return { buffer, model };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${model}-retry: ${msg}`);
+      }
     }
   }
 
   throw new Error(`TTS synthesis failed (${errors.join(" | ")})`);
+}
+
+export async function callGeminiTtsAudio(params: {
+  text: string;
+  style: string;
+  voiceId: string;
+  preferredModel?: string;
+  strictPin?: boolean;
+  timeoutMs?: number;
+}): Promise<Buffer> {
+  const { buffer } = await callGeminiTtsAudioWithMeta(params);
+  return buffer;
 }

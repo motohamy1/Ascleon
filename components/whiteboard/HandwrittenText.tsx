@@ -157,12 +157,6 @@ export function HandwrittenText({
               className="absolute max-w-[490px] rounded-xl px-5 py-3 shadow-xs"
             >
               <div
-                className="font-mono text-[16px] font-black tracking-wider uppercase opacity-75 mb-0.5"
-                style={{ color: style.color }}
-              >
-                {style.badgeText}
-              </div>
-              <div
                 className="text-[40px] font-bold leading-[1.28]"
                 style={{
                   color: style.color,

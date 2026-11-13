@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Play, RefreshCw, Sparkles, BookOpen } from "lucide-react";
+import { AlertTriangle, Play, RefreshCw, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WhiteboardBeat, WhiteboardVideoData } from "@/types/whiteboard-video";
 import { CameraRig } from "./CameraRig";
@@ -43,7 +43,7 @@ export function WhiteboardPlayer({
   const [wantAutoPlay, setWantAutoPlay] = useState(true);
   const [isOverview, setIsOverview] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [showCaptions, setShowCaptions] = useState(true);
+  const [showCaptions, setShowCaptions] = useState(false);
   const [penTip, setPenTip] = useState<ActivePenTip | null>(null);
   const [blobUrlMap, setBlobUrlMap] = useState<Record<string, string>>({});
 
@@ -221,7 +221,6 @@ export function WhiteboardPlayer({
     } else {
       setWantAutoPlay(false);
       setIsPlaying(false);
-      setIsOverview(true);
     }
   }, [activeBeatIndex, video.beats.length, isBeatPlayable]);
 
@@ -516,6 +515,17 @@ export function WhiteboardPlayer({
           })}
         </CameraRig>
 
+        {showCaptions && activeBeat && !isOverview && (
+          <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 flex justify-center">
+            <div
+              dir="auto"
+              className="ascleon-bidi max-w-3xl truncate rounded-full border border-[color:var(--ink)]/25 bg-[#141318]/88 px-4 py-1.5 text-xs font-semibold text-[#fbf7f0] shadow-sm backdrop-blur-xs"
+            >
+              {activeBeat.narration}
+            </div>
+          </div>
+        )}
+
         {!isPlaying && !isOverview && beatProgress <= 0.002 && isBeatPlayable(activeBeatIndex) && (
           <button
             type="button"
@@ -527,21 +537,6 @@ export function WhiteboardPlayer({
           </button>
         )}
       </div>
-
-      {/* Dedicated Non-Occluding Grounded Caption + Source Citation Bar */}
-      {showCaptions && activeBeat && !isOverview && (
-        <div className="border-t-2 border-[color:var(--ink)] bg-[#141318] px-3 py-2 text-[#fbf7f0]">
-          <div dir="auto" className="ascleon-bidi text-xs sm:text-[13px] font-semibold leading-snug text-center max-w-4xl mx-auto">
-            {activeBeat.narration}
-          </div>
-          <div className="mt-1 flex items-center justify-center gap-1.5 font-mono text-[9.5px] text-[color:var(--cream)]/75">
-            <BookOpen className="size-3 text-[color:var(--orange)] shrink-0" />
-            <span className="truncate max-w-xl">
-              Page {activeBeat.sourcePage} · &ldquo;{activeBeat.sourceQuote}&rdquo;
-            </span>
-          </div>
-        </div>
-      )}
 
       {/* Bottom Video Transport & Voice Switcher */}
       <PlayerControls

@@ -65,6 +65,8 @@ export interface VoiceTrackBeat {
 
 export interface VoiceTrack {
   voiceId: string;
+  pinnedModel?: string;
+  style?: string;
   status: "pending" | "rendering" | "ready" | "partial" | "failed";
   beats: VoiceTrackBeat[];
   totalDurationMs: number;

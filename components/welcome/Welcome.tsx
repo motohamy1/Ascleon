@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ArrowUpRight, BookOpen } from 'lucide-react';
-import { SignInButton, SignedIn, SignedOut, useUser } from '@clerk/nextjs';
+import { SignInButton, Show, useUser } from '@clerk/nextjs';
 import { AscleonLogo } from '@/components/ui/AscleonLogo';
 import {
   getActiveStudySource,
@@ -148,7 +148,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
           </div>
 
           <div className="mt-5 sm:mt-8 max-w-2xl">
-            <SignedIn>
+            <Show when="signed-in">
               <p className="mb-2.5 text-[15px] sm:text-base font-bold tracking-tight text-[color:var(--ink)]/85">
                 Welcome back,{' '}
                 <span className="font-extrabold text-[color:var(--magenta)]">
@@ -156,7 +156,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                 </span>
                 . Ready to pick up where you left off?
               </p>
-            </SignedIn>
+            </Show>
 
             <h1 className="display text-[color:var(--ink)] text-[clamp(3.6rem,8.5vw,7.6rem)] leading-[0.93]">
               Talk to
@@ -169,15 +169,15 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
               so the hard parts finally open up.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-4">
-              <SignedOut>
+              <Show when="signed-out">
                 <SignInButton mode="modal">
                   <button className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 active:translate-y-0">
                     Start reading
                     <ArrowUpRight className="size-4.5" />
                   </button>
                 </SignInButton>
-              </SignedOut>
-              <SignedIn>
+              </Show>
+              <Show when="signed-in">
                 <Link
                   href={studyHref}
                   className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 active:translate-y-0"
@@ -185,7 +185,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                   Start reading
                   <ArrowUpRight className="size-4.5" />
                 </Link>
-              </SignedIn>
+              </Show>
               <Link
                 href="/library"
                 className="group flex items-center gap-1.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] hover:underline underline-offset-4"
@@ -206,7 +206,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
 
         {/* Right stack */}
         <div className="flex flex-col gap-3 lg:col-span-4">
-          <SignedOut>
+          <Show when="signed-out">
             <SignInButton mode="modal">
               <div className="group relative flex min-h-[250px] sm:min-h-[280px] lg:min-h-[310px] flex-1 cursor-pointer flex-col justify-between overflow-hidden rounded-[24px] bg-[color:var(--orange)] p-6 sm:p-7 shadow-chip transition-transform duration-200 hover:-translate-y-1">
                 <p className="meta-label text-[color:var(--ink)]/80">
@@ -223,8 +223,8 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                 <ArrowUpRight className="absolute right-6 bottom-5 size-12 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
               </div>
             </SignInButton>
-          </SignedOut>
-          <SignedIn>
+          </Show>
+          <Show when="signed-in">
             <Link href={studyHref} className="flex flex-1">
               <div className="group relative flex min-h-[250px] sm:min-h-[280px] lg:min-h-[310px] w-full cursor-pointer flex-col justify-between overflow-hidden rounded-[24px] bg-[color:var(--orange)] p-6 sm:p-7 shadow-chip transition-transform duration-200 hover:-translate-y-1">
                 {currentActiveStudy ? (
@@ -284,7 +284,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                 <ArrowUpRight className="absolute right-6 bottom-5 size-12 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
               </div>
             </Link>
-          </SignedIn>
+          </Show>
 
           <div className="flex min-h-[160px] sm:min-h-[185px] flex-col justify-between rounded-[24px] bg-[color:var(--panel)] p-5 sm:p-6 shadow-chip">
             <div className="flex items-center justify-between gap-4">

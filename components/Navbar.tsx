@@ -4,8 +4,7 @@ import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  SignedIn,
-  SignedOut,
+  Show,
   SignInButton,
   UserButton,
   useAuth,
@@ -122,7 +121,7 @@ const Navbar = () => {
 
         {/* Right: Auth & CTAs (Desktop: lg screens and up) */}
         <div className="hidden items-center gap-2.5 lg:flex">
-          <SignedOut>
+          <Show when="signed-out">
             <SignInButton mode="modal">
               <button
                 type="button"
@@ -134,8 +133,8 @@ const Navbar = () => {
                 Sign in
               </button>
             </SignInButton>
-          </SignedOut>
-          <SignedIn>
+          </Show>
+          <Show when="signed-in">
             <div
               className={cn(
                 'flex items-center rounded-full p-1.5',
@@ -150,12 +149,12 @@ const Navbar = () => {
                 }}
               />
             </div>
-          </SignedIn>
+          </Show>
         </div>
 
         {/* Mobile menu toggle & quick auth (< lg screens) */}
         <div className="flex shrink-0 items-center gap-2 lg:hidden">
-          <SignedIn>
+          <Show when="signed-in">
             <div
               className={cn(
                 'flex items-center rounded-full p-1 sm:p-1.5',
@@ -170,7 +169,7 @@ const Navbar = () => {
                 }}
               />
             </div>
-          </SignedIn>
+          </Show>
           <button
             type="button"
             onClick={() => setOpen((prev) => !prev)}
@@ -224,7 +223,7 @@ const Navbar = () => {
               })}
             </nav>
             <div className="mt-2 border-t border-[color:var(--ink)]/15 pt-2">
-              <SignedOut>
+              <Show when="signed-out">
                 <SignInButton mode="modal">
                   <button
                     type="button"
@@ -234,15 +233,15 @@ const Navbar = () => {
                     Sign in
                   </button>
                 </SignInButton>
-              </SignedOut>
-              <SignedIn>
+              </Show>
+              <Show when="signed-in">
                 <div className="flex items-center justify-between px-2 py-1">
                   <span className="text-xs font-semibold text-[color:var(--ink)]">
                     Account Profile
                   </span>
                   <UserButton />
                 </div>
-              </SignedIn>
+              </Show>
             </div>
           </div>
         </div>

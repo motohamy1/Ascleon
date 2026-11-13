@@ -55,6 +55,8 @@ export function normalizeVoiceTrackBeats(
 
   return {
     voiceId,
+    pinnedModel: rawTrack?.pinnedModel,
+    style: rawTrack?.style,
     status,
     beats: normalizedBeats,
     totalDurationMs,
@@ -63,6 +65,8 @@ export function normalizeVoiceTrackBeats(
 
 export function computeVideoStatus(doc: {
   beats: Array<{ vectorStatus: string }>;
+  voiceTracks?: Record<string, Partial<VoiceTrack>>;
+  activeVoiceId?: string;
 }): WhiteboardVideoStatus {
   const total = doc.beats.length;
   if (total === 0) return "failed";
@@ -70,10 +74,16 @@ export function computeVideoStatus(doc: {
   const failed = doc.beats.filter((b) => b.vectorStatus === "failed").length;
   const generating = doc.beats.filter((b) => b.vectorStatus === "generating").length;
 
-  if (ready === total) return "completed";
+  const activeVoice = doc.activeVoiceId || DEFAULT_WHITEBOARD_VOICE;
+  const track = doc.voiceTracks?.[activeVoice];
+  const audioBeats = (track?.beats || []) as Array<{ status?: string }>;
+  const audioReady = audioBeats.filter((b) => b?.status === "ready").length;
+  const audioFailed = audioBeats.filter((b) => b?.status === "failed").length;
+
+  if (ready === total && audioReady === total && total > 0) return "completed";
   if (generating > 0) return "rendering";
-  if (failed === total) return "failed";
-  if (ready > 0 || failed > 0) return "partial";
+  if (failed === total || (audioFailed === total && total > 0 && ready === 0)) return "failed";
+  if (ready > 0 || failed > 0 || audioReady > 0 || audioFailed > 0) return "partial";
   return "planning";
 }
 
@@ -83,6 +93,7 @@ export function serializeWhiteboardVideo(
   const raw = doc as Record<string, unknown>;
   const beats = Array.isArray(raw.beats) ? (raw.beats as WhiteboardVideoData["beats"]) : [];
   const rawTracks = (raw.voiceTracks || {}) as Record<string, VoiceTrack>;
+  const activeVoiceId = (raw.activeVoiceId as string) || DEFAULT_WHITEBOARD_VOICE;
   const voiceTracks: Record<string, VoiceTrack> = {};
 
   for (const [vId, rawTrack] of Object.entries(rawTracks)) {
@@ -100,11 +111,11 @@ export function serializeWhiteboardVideo(
     pacing: (raw.pacing as WhiteboardVideoData["pacing"]) || "auto",
     title: String(raw.title || "Whiteboard Explanation"),
     summary: String(raw.summary || ""),
-    status: computeVideoStatus({ beats }),
+    status: computeVideoStatus({ beats, voiceTracks, activeVoiceId }),
     styleAnchorUrl: raw.styleAnchorUrl as string | undefined,
     beats,
     voiceTracks,
-    activeVoiceId: String(raw.activeVoiceId || DEFAULT_WHITEBOARD_VOICE),
+    activeVoiceId,
     createdAt: raw.createdAt ? new Date(String(raw.createdAt)).toISOString() : new Date().toISOString(),
     updatedAt: raw.updatedAt ? new Date(String(raw.updatedAt)).toISOString() : new Date().toISOString(),
   };

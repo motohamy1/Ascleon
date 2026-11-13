@@ -1,14 +1,17 @@
 import { StudyLanguage } from "@/lib/language";
-import { callGeminiTtsAudio } from "./ai-client";
+import { callGeminiTtsAudioWithMeta } from "./ai-client";
 import { uploadWhiteboardAsset } from "./blob";
-import { DEFAULT_WHITEBOARD_VOICE, isValidWhiteboardVoice } from "./voices";
+import {
+  DEFAULT_WHITEBOARD_VOICE,
+  getLessonTeachingStyle,
+  isValidWhiteboardVoice,
+} from "./voices";
 
 /**
  * Parses exact playback duration in milliseconds from a RIFF WAV buffer.
  */
 export function parseWavDurationMs(wavBuffer: Buffer): number {
   if (wavBuffer.length < 44 || wavBuffer.toString("ascii", 0, 4) !== "RIFF") {
-    // Fallback assume 24 kHz mono 16-bit PCM (48,000 bytes/sec)
     return Math.max(1000, Math.round((Math.max(0, wavBuffer.length - 44) / 48000) * 1000));
   }
 
@@ -31,19 +34,9 @@ export function parseWavDurationMs(wavBuffer: Buffer): number {
   return Math.max(800, Math.round(((wavBuffer.length - 44) / byteRate) * 1000));
 }
 
-function resolveTtsStyleHint(language: StudyLanguage, beatHint?: string): string {
-  const base = beatHint?.trim() || "clear, engaging medical educator";
-  if (language === "ar") {
-    return `${base}, warm natural Egyptian Arabic teaching tone`;
-  }
-  if (language === "mixed") {
-    return `${base}, Egyptian Arabic with crisp English clinical terms`;
-  }
-  return base;
-}
-
 /**
- * Synthesizes a beat's narration WAV via Gemini 3.8 TTS REST and stores it in Vercel Blob.
+ * Legacy per-beat narration synthesizer, now using the unified lesson teaching style
+ * and supporting a pinned TTS model so voice timbre never shifts mid-video.
  */
 export async function synthesizeBeatNarration(params: {
   videoId: string;
@@ -52,15 +45,27 @@ export async function synthesizeBeatNarration(params: {
   spokenStyleHint?: string;
   language: StudyLanguage;
   voiceId: string;
-}): Promise<{ audioUrl: string; audioDurationMs: number }> {
-  const { videoId, beatIndex, narration, spokenStyleHint, language, voiceId } = params;
+  preferredModel?: string;
+  strictPin?: boolean;
+}): Promise<{ audioUrl: string; audioDurationMs: number; model: string }> {
+  const {
+    videoId,
+    beatIndex,
+    narration,
+    language,
+    voiceId,
+    preferredModel,
+    strictPin = false,
+  } = params;
   const safeVoice = isValidWhiteboardVoice(voiceId) ? voiceId : DEFAULT_WHITEBOARD_VOICE;
-  const style = resolveTtsStyleHint(language, spokenStyleHint);
+  const style = getLessonTeachingStyle(language);
 
-  const wavBuffer = await callGeminiTtsAudio({
+  const { buffer: wavBuffer, model } = await callGeminiTtsAudioWithMeta({
     text: narration,
     style,
     voiceId: safeVoice,
+    preferredModel,
+    strictPin,
   });
   const audioDurationMs = parseWavDurationMs(wavBuffer);
 
@@ -73,5 +78,55 @@ export async function synthesizeBeatNarration(params: {
   return {
     audioUrl: uploaded.url,
     audioDurationMs,
+    model,
+  };
+}
+
+/**
+ * Synthesizes one full section's narration in a single natural TTS call,
+ * enforcing a pinned model and consistent teaching style across all sections.
+ */
+export async function synthesizeLessonSectionNarration(params: {
+  lessonId: string;
+  sectionIndex: number;
+  narration: string;
+  language: StudyLanguage;
+  voiceId: string;
+  style?: string;
+  preferredModel?: string;
+  strictPin?: boolean;
+}): Promise<{ audioUrl: string; audioDurationMs: number; model: string }> {
+  const {
+    lessonId,
+    sectionIndex,
+    narration,
+    language,
+    voiceId,
+    style,
+    preferredModel,
+    strictPin = false,
+  } = params;
+  const safeVoice = isValidWhiteboardVoice(voiceId) ? voiceId : DEFAULT_WHITEBOARD_VOICE;
+  const resolvedStyle = style?.trim() || getLessonTeachingStyle(language);
+
+  const { buffer: wavBuffer, model } = await callGeminiTtsAudioWithMeta({
+    text: narration,
+    style: resolvedStyle,
+    voiceId: safeVoice,
+    preferredModel,
+    strictPin,
+  });
+  const audioDurationMs = parseWavDurationMs(wavBuffer);
+
+  const uploaded = await uploadWhiteboardAsset(
+    `whiteboard/lessons/${lessonId}/audio/${safeVoice}/section-${sectionIndex}.wav`,
+    wavBuffer,
+    "audio/wav"
+  );
+
+  return {
+    audioUrl: uploaded.url,
+    audioDurationMs,
+    model,
   };
 }

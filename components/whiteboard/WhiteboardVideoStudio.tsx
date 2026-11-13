@@ -21,10 +21,12 @@ import {
   WhiteboardScopeType,
   WhiteboardVideoData,
 } from "@/types/whiteboard-video";
+import { getBoardLimits, LessonBoardData } from "@/types/lesson-board";
 import {
   DEFAULT_WHITEBOARD_VOICE,
   WHITEBOARD_NARRATOR_VOICES,
 } from "@/lib/whiteboard/voices";
+import { LessonBoardPlayer } from "@/components/board/LessonBoardPlayer";
 import { WhiteboardPlayer } from "./WhiteboardPlayer";
 import { cn } from "@/lib/utils";
 
@@ -44,6 +46,8 @@ interface WhiteboardVideoStudioProps {
 }
 
 const VOICE_PREF_KEY = "ascleon_whiteboard_voice_id";
+const USE_LESSON_BOARD_V2 =
+  process.env.NEXT_PUBLIC_WHITEBOARD_V2 !== "false";
 
 function estimateDurationPreview(
   scopeType: WhiteboardScopeType,
@@ -51,6 +55,15 @@ function estimateDurationPreview(
   pageSpan: number,
   pacing: WhiteboardPacing
 ): string {
+  if (USE_LESSON_BOARD_V2) {
+    const limits = getBoardLimits(scopeType, wordCount, pacing);
+    const minSec = limits.minSections * 18;
+    const maxSec = limits.maxSections * 26;
+    const fmt = (s: number) =>
+      s < 60 ? `${s}s` : `${(s / 60).toFixed(1).replace(/\.0$/, "")}m`;
+    return `${limits.minSections}–${limits.maxSections} sections · ~${fmt(minSec)}–${fmt(maxSec)}`;
+  }
+
   let minB = 4;
   let maxB = 7;
   if (scopeType === "selection") {
@@ -82,7 +95,8 @@ function estimateDurationPreview(
 
   const minSec = minB * 12;
   const maxSec = maxB * 16;
-  const fmt = (s: number) => (s < 60 ? `${s}s` : `${(s / 60).toFixed(1).replace(/\.0$/, "")}m`);
+  const fmt = (s: number) =>
+    s < 60 ? `${s}s` : `${(s / 60).toFixed(1).replace(/\.0$/, "")}m`;
   return `${minB}–${maxB} scenes · ~${fmt(minSec)}–${fmt(maxSec)}`;
 }
 
@@ -109,25 +123,34 @@ export function WhiteboardVideoStudio({
   className,
 }: WhiteboardVideoStudioProps) {
   const blueprintTopics = useMemo<BlueprintTopicItem[]>(() => {
-    const bp = book.blueprint as { topicMap?: { topics?: BlueprintTopicItem[] } } | undefined;
+    const bp = book.blueprint as
+      | { topicMap?: { topics?: BlueprintTopicItem[] } }
+      | undefined;
     return bp?.topicMap?.topics || [];
   }, [book.blueprint]);
 
   const matchedTopic = useMemo(() => {
     return (
       blueprintTopics.find(
-        (t) => currentPageNumber >= t.startPage && currentPageNumber <= t.endPage
+        (t) =>
+          currentPageNumber >= t.startPage && currentPageNumber <= t.endPage
       ) || null
     );
   }, [blueprintTopics, currentPageNumber]);
 
-  const totalBookPages = Number(book.totalPages || book.totalSegments || currentPageNumber || 1);
+  const totalBookPages = Number(
+    book.totalPages || book.totalSegments || currentPageNumber || 1
+  );
 
   const [scopeType, setScopeType] = useState<WhiteboardScopeType>(() =>
-    selectedText ? "selection" : studyScope?.type || (matchedTopic ? "topic" : "page")
+    selectedText
+      ? "selection"
+      : studyScope?.type || (matchedTopic ? "topic" : "page")
   );
   const [selectedTopicId, setSelectedTopicId] = useState<string>("");
-  const [rangeStart, setRangeStart] = useState<number>(studyScope?.startPage || currentPageNumber);
+  const [rangeStart, setRangeStart] = useState<number>(
+    studyScope?.startPage || currentPageNumber
+  );
   const [rangeEnd, setRangeEnd] = useState<number>(
     studyScope?.endPage || Math.min(totalBookPages, currentPageNumber + 2)
   );
@@ -144,6 +167,7 @@ export function WhiteboardVideoStudio({
     return DEFAULT_WHITEBOARD_VOICE;
   });
 
+  const [lesson, setLesson] = useState<LessonBoardData | null>(null);
   const [video, setVideo] = useState<WhiteboardVideoData | null>(null);
   const [isConfiguring, setIsConfiguring] = useState(true);
   const [isPlanning, setIsPlanning] = useState(false);
@@ -151,7 +175,9 @@ export function WhiteboardVideoStudio({
   const [isSwitchingVoice, setIsSwitchingVoice] = useState(false);
   const [isCinema, setIsCinema] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(
+    null
+  );
   const [prevTriggerSeq, setPrevTriggerSeq] = useState(selectionTriggerSeq);
 
   if (selectionTriggerSeq !== prevTriggerSeq) {
@@ -184,7 +210,10 @@ export function WhiteboardVideoStudio({
       if (found) return found;
     }
     if (matchedTopic) return matchedTopic;
-    const firstLine = (activePageLiveText || "").split("\n")[0]?.replace(/^#+\s*/, "").trim();
+    const firstLine = (activePageLiveText || "")
+      .split("\n")[0]
+      ?.replace(/^#+\s*/, "")
+      .trim();
     return {
       id: `page-topic-${currentPageNumber}`,
       title:
@@ -193,9 +222,21 @@ export function WhiteboardVideoStudio({
           : book.topic || book.title || `Page ${currentPageNumber}`,
       startPage: currentPageNumber,
       endPage: Math.min(totalBookPages, currentPageNumber + 2),
-      summary: `Covers Pages ${currentPageNumber}–${Math.min(totalBookPages, currentPageNumber + 2)}.`,
+      summary: `Covers Pages ${currentPageNumber}–${Math.min(
+        totalBookPages,
+        currentPageNumber + 2
+      )}.`,
     };
-  }, [selectedTopicId, blueprintTopics, matchedTopic, activePageLiveText, currentPageNumber, totalBookPages, book.topic, book.title]);
+  }, [
+    selectedTopicId,
+    blueprintTopics,
+    matchedTopic,
+    activePageLiveText,
+    currentPageNumber,
+    totalBookPages,
+    book.topic,
+    book.title,
+  ]);
 
   const effectiveScope = useMemo(() => {
     if (scopeType === "selection" && selectedText) {
@@ -232,14 +273,24 @@ export function WhiteboardVideoStudio({
       endPage: currentPageNumber,
       topicTitle: `Page ${currentPageNumber}`,
     };
-  }, [scopeType, selectedText, currentPageNumber, activeTopic, rangeStart, rangeEnd, totalBookPages]);
+  }, [
+    scopeType,
+    selectedText,
+    currentPageNumber,
+    activeTopic,
+    rangeStart,
+    rangeEnd,
+    totalBookPages,
+  ]);
 
   const dynamicEstimateText = useMemo(() => {
     const words =
       scopeType === "selection" && selectedText
         ? selectedText.split(/\s+/).filter(Boolean).length
-        : Math.max(150, (activePageLiveText || "").split(/\s+/).filter(Boolean).length) *
-          Math.max(1, effectiveScope.endPage - effectiveScope.startPage + 1);
+        : Math.max(
+            150,
+            (activePageLiveText || "").split(/\s+/).filter(Boolean).length
+          ) * Math.max(1, effectiveScope.endPage - effectiveScope.startPage + 1);
     const span = effectiveScope.endPage - effectiveScope.startPage + 1;
     return estimateDurationPreview(scopeType, words, span, pacing);
   }, [scopeType, selectedText, activePageLiveText, effectiveScope, pacing]);
@@ -263,13 +314,281 @@ export function WhiteboardVideoStudio({
         audio.onended = () => setPreviewingVoiceId(null);
         await audio.play();
       } catch (err) {
-        setErrorMsg(err instanceof Error ? err.message : "Failed to play voice preview");
+        setErrorMsg(
+          err instanceof Error ? err.message : "Failed to play voice preview"
+        );
         setPreviewingVoiceId(null);
       }
     },
     [studyLanguage]
   );
 
+  // =========================================================================
+  // LESSON BOARD V2 PIPELINE (sections + deterministic route + pinned TTS)
+  // =========================================================================
+  const synthesizeLessonSection = useCallback(
+    async (
+      lessonId: string,
+      sectionIndex: number,
+      voiceId: string,
+      signal: AbortSignal,
+      forceAudio = false
+    ) => {
+      const res = await fetch(
+        `/api/whiteboard/lessons/${lessonId}/sections/${sectionIndex}/audio`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal,
+          body: JSON.stringify({ voiceId, forceAudio }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.lesson) {
+        throw new Error(
+          data.error || `Failed recording section ${sectionIndex + 1}`
+        );
+      }
+      const nextLesson = data.lesson as LessonBoardData;
+      setLesson(nextLesson);
+      return {
+        lesson: nextLesson,
+        rePinned: Boolean(data.rePinned),
+      };
+    },
+    []
+  );
+
+  const runLessonAudioQueue = useCallback(
+    async (
+      initialLesson: LessonBoardData,
+      voiceId: string,
+      signal: AbortSignal
+    ) => {
+      let currentLesson = initialLesson;
+      const getPending = (l: LessonBoardData) => {
+        const track = l.voiceTracks?.[voiceId];
+        return l.sections
+          .map((_, i) => i)
+          .filter(
+            (i) =>
+              track?.sections?.[i]?.status !== "ready" ||
+              !track?.sections?.[i]?.audioUrl
+          );
+      };
+
+      let pending = getPending(currentLesson);
+      if (pending.length === 0) {
+        setIsConfiguring(false);
+        setIsGeneratingMore(false);
+        return;
+      }
+
+      setIsGeneratingMore(true);
+
+      // Section 0 runs first to lock the single pinned TTS model for the whole lesson
+      if (pending.includes(0)) {
+        const res0 = await synthesizeLessonSection(
+          currentLesson.id,
+          0,
+          voiceId,
+          signal
+        );
+        currentLesson = res0.lesson;
+      }
+
+      // Open the board immediately once Section 0 is ready
+      setIsConfiguring(false);
+
+      // Process remaining sections sequentially/bounded and handle model re-pinning cleanly
+      let guard = 0;
+      while (!signal.aborted && guard < 3) {
+        guard++;
+        pending = getPending(currentLesson);
+        if (pending.length === 0) break;
+
+        let sawRepin = false;
+        for (const idx of pending) {
+          if (signal.aborted) break;
+          try {
+            const res = await synthesizeLessonSection(
+              currentLesson.id,
+              idx,
+              voiceId,
+              signal
+            );
+            currentLesson = res.lesson;
+            if (res.rePinned) {
+              sawRepin = true;
+              break;
+            }
+          } catch (err) {
+            if (!signal.aborted) {
+              console.warn(
+                `[LessonBoard] Section ${idx} audio error:`,
+                err
+              );
+            }
+          }
+        }
+
+        if (!sawRepin) break;
+      }
+
+      if (!signal.aborted) {
+        setIsGeneratingMore(false);
+      }
+    },
+    [synthesizeLessonSection]
+  );
+
+  const startLessonGeneration = useCallback(
+    async (forceRefresh = false) => {
+      generationAbortRef.current?.abort();
+      const controller = new AbortController();
+      generationAbortRef.current = controller;
+
+      setErrorMsg(null);
+      setIsPlanning(true);
+      try {
+        localStorage.setItem(VOICE_PREF_KEY, selectedVoice);
+      } catch {}
+
+      if (effectiveScope.type !== "selection") {
+        onStudyScopeChange({
+          type: effectiveScope.type,
+          startPage: effectiveScope.startPage,
+          endPage: effectiveScope.endPage,
+          topicTitle: effectiveScope.topicTitle,
+          topicId:
+            "topicId" in effectiveScope ? effectiveScope.topicId : undefined,
+        });
+      }
+
+      try {
+        const res = await fetch("/api/whiteboard/lessons", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            bookId: String(book._id || book.slug || "default-book"),
+            bookTitle: book.title,
+            language: studyLanguage,
+            pacing,
+            voiceId: selectedVoice,
+            forceRefresh,
+            fallbackPageText: activePageLiveText,
+            scope: effectiveScope,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.lesson) {
+          throw new Error(data.error || "Failed to plan whiteboard lesson");
+        }
+
+        const plannedLesson = data.lesson as LessonBoardData;
+        setLesson(plannedLesson);
+        setIsPlanning(false);
+
+        await runLessonAudioQueue(
+          plannedLesson,
+          selectedVoice,
+          controller.signal
+        );
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        setIsPlanning(false);
+        setIsGeneratingMore(false);
+        setErrorMsg(
+          err instanceof Error
+            ? err.message
+            : "Could not generate whiteboard lesson."
+        );
+      }
+    },
+    [
+      selectedVoice,
+      effectiveScope,
+      onStudyScopeChange,
+      book._id,
+      book.slug,
+      book.title,
+      studyLanguage,
+      pacing,
+      activePageLiveText,
+      runLessonAudioQueue,
+    ]
+  );
+
+  const handleRetryLessonSection = useCallback(
+    async (sectionIndex: number) => {
+      if (!lesson) return;
+      const controller = new AbortController();
+      try {
+        await synthesizeLessonSection(
+          lesson.id,
+          sectionIndex,
+          lesson.activeVoiceId,
+          controller.signal,
+          true
+        );
+      } catch (err) {
+        setErrorMsg(
+          err instanceof Error ? err.message : "Failed to retry section audio"
+        );
+      }
+    },
+    [lesson, synthesizeLessonSection]
+  );
+
+  const handleSwitchLessonVoice = useCallback(
+    async (nextVoiceId: string) => {
+      if (!lesson || nextVoiceId === lesson.activeVoiceId) return;
+      setSelectedVoice(nextVoiceId);
+      try {
+        localStorage.setItem(VOICE_PREF_KEY, nextVoiceId);
+      } catch {}
+
+      generationAbortRef.current?.abort();
+      const controller = new AbortController();
+      generationAbortRef.current = controller;
+
+      setIsSwitchingVoice(true);
+      try {
+        const res = await fetch(`/api/whiteboard/lessons/${lesson.id}/voice`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({ voiceId: nextVoiceId }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.lesson) {
+          throw new Error(data.error || "Failed to switch voice");
+        }
+        const switched = data.lesson as LessonBoardData;
+        setLesson(switched);
+        await runLessonAudioQueue(switched, nextVoiceId, controller.signal);
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setErrorMsg(
+            err instanceof Error
+              ? err.message
+              : "Failed to switch narrator voice"
+          );
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSwitchingVoice(false);
+        }
+      }
+    },
+    [lesson, runLessonAudioQueue]
+  );
+
+  // =========================================================================
+  // LEGACY V1 BEAT PLAYER PIPELINE (retained behind NEXT_PUBLIC_WHITEBOARD_V2=false)
+  // =========================================================================
   const renderBeat = useCallback(
     async (
       videoId: string,
@@ -278,19 +597,24 @@ export function WhiteboardVideoStudio({
       signal: AbortSignal,
       options?: { forceVector?: boolean; forceAudio?: boolean }
     ) => {
-      const res = await fetch(`/api/whiteboard/videos/${videoId}/beats/${beatIndex}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal,
-        body: JSON.stringify({
-          voiceId,
-          forceVector: Boolean(options?.forceVector),
-          forceAudio: Boolean(options?.forceAudio),
-        }),
-      });
+      const res = await fetch(
+        `/api/whiteboard/videos/${videoId}/beats/${beatIndex}/generate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal,
+          body: JSON.stringify({
+            voiceId,
+            forceVector: Boolean(options?.forceVector),
+            forceAudio: Boolean(options?.forceAudio),
+          }),
+        }
+      );
       const data = await res.json();
       if (!res.ok || !data.video) {
-        throw new Error(data.error || `Failed generating scene ${beatIndex + 1}`);
+        throw new Error(
+          data.error || `Failed generating scene ${beatIndex + 1}`
+        );
       }
       setVideo(data.video as WhiteboardVideoData);
       return data.video as WhiteboardVideoData;
@@ -299,13 +623,19 @@ export function WhiteboardVideoStudio({
   );
 
   const runBeatQueue = useCallback(
-    async (initialVideo: WhiteboardVideoData, voiceId: string, signal: AbortSignal) => {
+    async (
+      initialVideo: WhiteboardVideoData,
+      voiceId: string,
+      signal: AbortSignal
+    ) => {
       const track = initialVideo.voiceTracks?.[voiceId];
       const pendingIndices = initialVideo.beats
         .map((b, i) => ({
           i,
           needsVector: b.vectorStatus !== "ready" || !b.vectorData,
-          needsAudio: track?.beats?.[i]?.status !== "ready" || !track?.beats?.[i]?.audioUrl,
+          needsAudio:
+            track?.beats?.[i]?.status !== "ready" ||
+            !track?.beats?.[i]?.audioUrl,
         }))
         .filter((x) => x.needsVector || x.needsAudio)
         .map((x) => x.i);
@@ -318,7 +648,6 @@ export function WhiteboardVideoStudio({
 
       setIsGeneratingMore(true);
 
-      // Beat 0 must run first if it isn't ready yet, locking the style anchor for Beats 1..N
       if (pendingIndices.includes(0)) {
         await renderBeat(initialVideo.id, 0, voiceId, signal);
         setIsConfiguring(false);
@@ -337,14 +666,19 @@ export function WhiteboardVideoStudio({
             await renderBeat(initialVideo.id, nextIdx, voiceId, signal);
           } catch (err) {
             if (!signal.aborted) {
-              console.warn(`[WhiteboardVideoStudio] Beat ${nextIdx} error:`, err);
+              console.warn(
+                `[WhiteboardVideoStudio] Beat ${nextIdx} error:`,
+                err
+              );
             }
           }
         }
       };
 
       await Promise.all(
-        Array.from({ length: Math.min(concurrency, remaining.length) }, () => worker())
+        Array.from({ length: Math.min(concurrency, remaining.length) }, () =>
+          worker()
+        )
       );
 
       if (!signal.aborted) {
@@ -354,7 +688,7 @@ export function WhiteboardVideoStudio({
     [renderBeat]
   );
 
-  const startGeneration = useCallback(
+  const startLegacyGeneration = useCallback(
     async (forceRefresh = false) => {
       generationAbortRef.current?.abort();
       const controller = new AbortController();
@@ -366,14 +700,14 @@ export function WhiteboardVideoStudio({
         localStorage.setItem(VOICE_PREF_KEY, selectedVoice);
       } catch {}
 
-      // Sync scope with parent reader (for page/range/topic)
       if (effectiveScope.type !== "selection") {
         onStudyScopeChange({
           type: effectiveScope.type,
           startPage: effectiveScope.startPage,
           endPage: effectiveScope.endPage,
           topicTitle: effectiveScope.topicTitle,
-          topicId: "topicId" in effectiveScope ? effectiveScope.topicId : undefined,
+          topicId:
+            "topicId" in effectiveScope ? effectiveScope.topicId : undefined,
         });
       }
 
@@ -408,7 +742,11 @@ export function WhiteboardVideoStudio({
         if (controller.signal.aborted) return;
         setIsPlanning(false);
         setIsGeneratingMore(false);
-        setErrorMsg(err instanceof Error ? err.message : "Could not generate whiteboard video.");
+        setErrorMsg(
+          err instanceof Error
+            ? err.message
+            : "Could not generate whiteboard video."
+        );
       }
     },
     [
@@ -431,13 +769,22 @@ export function WhiteboardVideoStudio({
       const controller = new AbortController();
       try {
         const targetBeat = video.beats[beatIndex];
-        const targetAudio = video.voiceTracks?.[video.activeVoiceId]?.beats?.[beatIndex];
-        await renderBeat(video.id, beatIndex, video.activeVoiceId, controller.signal, {
-          forceVector: targetBeat?.vectorStatus === "failed",
-          forceAudio: targetAudio?.status === "failed",
-        });
+        const targetAudio =
+          video.voiceTracks?.[video.activeVoiceId]?.beats?.[beatIndex];
+        await renderBeat(
+          video.id,
+          beatIndex,
+          video.activeVoiceId,
+          controller.signal,
+          {
+            forceVector: targetBeat?.vectorStatus === "failed",
+            forceAudio: targetAudio?.status === "failed",
+          }
+        );
       } catch (err) {
-        setErrorMsg(err instanceof Error ? err.message : "Failed to retry scene");
+        setErrorMsg(
+          err instanceof Error ? err.message : "Failed to retry scene"
+        );
       }
     },
     [video, renderBeat]
@@ -472,7 +819,11 @@ export function WhiteboardVideoStudio({
         await runBeatQueue(switchedVideo, nextVoiceId, controller.signal);
       } catch (err) {
         if (!controller.signal.aborted) {
-          setErrorMsg(err instanceof Error ? err.message : "Failed to switch narrator voice");
+          setErrorMsg(
+            err instanceof Error
+              ? err.message
+              : "Failed to switch narrator voice"
+          );
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -483,7 +834,30 @@ export function WhiteboardVideoStudio({
     [video, runBeatQueue]
   );
 
-  if (!isConfiguring && video) {
+  const startGeneration = USE_LESSON_BOARD_V2
+    ? startLessonGeneration
+    : startLegacyGeneration;
+
+  if (!isConfiguring && USE_LESSON_BOARD_V2 && lesson) {
+    return (
+      <LessonBoardPlayer
+        key={lesson.id}
+        lesson={lesson}
+        isCinema={isCinema}
+        isSwitchingVoice={isSwitchingVoice}
+        isGeneratingAudio={isGeneratingMore}
+        onToggleCinema={() => setIsCinema((prev) => !prev)}
+        onRetrySectionAudio={handleRetryLessonSection}
+        onChangeVoice={handleSwitchLessonVoice}
+        onChangeScope={() => setIsConfiguring(true)}
+        onRegenerateLesson={() => startLessonGeneration(true)}
+        onNavigateToPage={onNavigateToPage}
+        className={cn("h-full rounded-[18px]", className)}
+      />
+    );
+  }
+
+  if (!isConfiguring && !USE_LESSON_BOARD_V2 && video) {
     return (
       <WhiteboardPlayer
         key={video.id}
@@ -495,11 +869,21 @@ export function WhiteboardVideoStudio({
         onRetryBeat={handleRetryBeat}
         onChangeVoice={handleSwitchVoiceOnPlayer}
         onChangeScope={() => setIsConfiguring(true)}
-        onRegenerateVideo={() => startGeneration(true)}
+        onRegenerateVideo={() => startLegacyGeneration(true)}
         className={cn("h-full rounded-[18px]", className)}
       />
     );
   }
+
+  const canResumeLesson =
+    USE_LESSON_BOARD_V2 &&
+    lesson &&
+    lesson.voiceTracks?.[lesson.activeVoiceId]?.sections?.[0]?.status ===
+      "ready";
+  const canResumeLegacy =
+    !USE_LESSON_BOARD_V2 &&
+    video &&
+    video.beats?.[0]?.vectorStatus === "ready";
 
   return (
     <div
@@ -513,10 +897,10 @@ export function WhiteboardVideoStudio({
         <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b-2 border-[color:var(--ink)]/15">
           <div>
             <div className="font-mono text-[9.5px] font-black uppercase tracking-wider text-[color:var(--ink)]/70">
-              ASCLEON WHITEBOARD STUDIO
+              ASCLEON WHITEBOARD LESSON
             </div>
             <h2 className="font-sans text-sm sm:text-base font-black text-[color:var(--ink)]">
-              Generate Whiteboard Explainer Video
+              Build Connected Whiteboard Lesson
             </h2>
           </div>
 
@@ -539,7 +923,7 @@ export function WhiteboardVideoStudio({
           </div>
         </div>
 
-        {/* Scope Selector */}
+        {/* 1. Source Scope */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]/80">
@@ -592,7 +976,7 @@ export function WhiteboardVideoStudio({
                 </span>
               </div>
               <p className="mt-1 text-[11px] text-[color:var(--ink)]/75 line-clamp-1">
-                Complete topic arc across pages {activeTopic.startPage}–{activeTopic.endPage}
+                Pages {activeTopic.startPage}–{activeTopic.endPage}
               </p>
             </button>
 
@@ -643,7 +1027,9 @@ export function WhiteboardVideoStudio({
                 min={1}
                 max={totalBookPages}
                 value={rangeStart}
-                onChange={(e) => setRangeStart(Math.max(1, Number(e.target.value) || 1))}
+                onChange={(e) =>
+                  setRangeStart(Math.max(1, Number(e.target.value) || 1))
+                }
                 className="w-16 rounded border border-[color:var(--ink)]/40 bg-white px-2 py-0.5 font-mono text-xs font-bold"
               />
               <span className="font-mono text-[10px] font-bold">to</span>
@@ -653,7 +1039,15 @@ export function WhiteboardVideoStudio({
                 max={totalBookPages}
                 value={rangeEnd}
                 onChange={(e) =>
-                  setRangeEnd(Math.max(rangeStart, Math.min(totalBookPages, Number(e.target.value) || rangeStart)))
+                  setRangeEnd(
+                    Math.max(
+                      rangeStart,
+                      Math.min(
+                        totalBookPages,
+                        Number(e.target.value) || rangeStart
+                      )
+                    )
+                  )
                 }
                 className="w-16 rounded border border-[color:var(--ink)]/40 bg-white px-2 py-0.5 font-mono text-xs font-bold"
               />
@@ -664,7 +1058,9 @@ export function WhiteboardVideoStudio({
             <select
               value={activeTopic.id}
               onChange={(e) => {
-                const chosen = blueprintTopics.find((t) => t.id === e.target.value);
+                const chosen = blueprintTopics.find(
+                  (t) => t.id === e.target.value
+                );
                 if (chosen) {
                   setSelectedTopicId(chosen.id);
                   onNavigateToPage?.(chosen.startPage);
@@ -681,11 +1077,11 @@ export function WhiteboardVideoStudio({
           )}
         </div>
 
-        {/* Pacing + Narrator Voice */}
+        {/* 2. Voice & Depth */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
           <div className="space-y-1.5 min-w-0">
             <span className="block font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]/80">
-              2. Video Length Pacing
+              2. Lesson Depth
             </span>
             <div className="grid grid-cols-3 gap-1 rounded-[12px] border border-[color:var(--ink)]/30 bg-[color:var(--panel)] p-1">
               {(
@@ -714,7 +1110,7 @@ export function WhiteboardVideoStudio({
 
           <div className="space-y-1.5 min-w-0">
             <span className="block font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]/80">
-              3. Narrator Voice
+              3. Tutor Voice
             </span>
             <div className="flex min-w-0 items-center gap-1.5">
               <select
@@ -724,7 +1120,7 @@ export function WhiteboardVideoStudio({
               >
                 {WHITEBOARD_NARRATOR_VOICES.map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.name} · {v.gender} ({v.tone})
+                    {v.name} · {v.tone}
                   </option>
                 ))}
               </select>
@@ -732,7 +1128,7 @@ export function WhiteboardVideoStudio({
                 type="button"
                 onClick={() => handlePreviewVoice(selectedVoice)}
                 disabled={previewingVoiceId === selectedVoice}
-                title="Listen to narrator voice sample"
+                title="Listen to tutor voice sample"
                 className="shrink-0 cursor-pointer flex items-center justify-center rounded-[12px] border border-[color:var(--ink)] bg-[color:var(--panel)] px-2.5 py-1.5 hover:bg-[color:var(--orange)] disabled:opacity-50"
               >
                 {previewingVoiceId === selectedVoice ? (
@@ -760,27 +1156,29 @@ export function WhiteboardVideoStudio({
           </div>
         )}
 
-        {/* Planning / Scene 1 Render Progress Notice */}
+        {/* Planning / Recording Progress */}
         {(isPlanning || isGeneratingMore) && (
           <div className="flex items-center gap-2.5 rounded-[14px] border-2 border-[color:var(--ink)] bg-[color:var(--panel)] px-3 py-2.5 text-xs font-bold">
             <Loader2 className="size-4 animate-spin text-[color:var(--orange)] shrink-0" />
             <span>
               {isPlanning
-                ? "Writing grounded script & planning visual scenes from your source…"
-                : `Drawing & narrating Scene 1 of ${video?.beats.length || "…"} (playback starts automatically once Scene 1 is ready)…`}
+                ? "Writing grounded lesson outline & connecting clinical pathway…"
+                : USE_LESSON_BOARD_V2
+                ? `Recording section 1 of ${lesson?.sections.length || "…"} (playback starts as soon as Section 1 is ready)…`
+                : `Drawing & narrating Scene 1 of ${video?.beats.length || "…"}…`}
             </span>
           </div>
         )}
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2 pt-2 border-t-2 border-[color:var(--ink)]/15">
-          {video && video.beats?.[0]?.vectorStatus === "ready" && (
+          {(canResumeLesson || canResumeLegacy) && (
             <button
               type="button"
               onClick={() => setIsConfiguring(false)}
               className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] px-3.5 py-2 font-mono text-[10px] font-black uppercase hover:bg-[color:var(--cream)]"
             >
-              Resume Video
+              Resume Lesson
             </button>
           )}
           <button
@@ -792,26 +1190,26 @@ export function WhiteboardVideoStudio({
             {isPlanning ? (
               <>
                 <Sparkles className="size-4 animate-pulse" />
-                <span>Planning Storyboard…</span>
+                <span>Planning Lesson Map…</span>
               </>
             ) : isGeneratingMore ? (
               <>
                 <Loader2 className="size-4 animate-spin" />
-                <span>Preparing Scene 1…</span>
+                <span>Preparing Section 1…</span>
               </>
             ) : (
               <>
                 <Play className="size-4 stroke-[2.5] fill-current" />
-                <span>Generate Whiteboard Video</span>
+                <span>Generate Whiteboard Lesson</span>
               </>
             )}
           </button>
-          {video && (
+          {(lesson || video) && (
             <button
               type="button"
               disabled={isPlanning || isGeneratingMore}
               onClick={() => startGeneration(true)}
-              title="Force regenerate fresh storyboard & sketches"
+              title="Force regenerate fresh lesson"
               className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] p-2.5 hover:bg-[color:var(--orange)] disabled:opacity-50"
             >
               <RefreshCw className="size-4 stroke-[2.5]" />

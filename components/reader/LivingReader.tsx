@@ -11,13 +11,17 @@ import {
 import { MorphCanvas } from "@/components/reader/MorphCanvas";
 import { AscleonVoiceStudio } from "@/components/reader/AscleonVoiceStudio";
 import { WhiteboardVideoStudio } from "@/components/whiteboard/WhiteboardVideoStudio";
-import { StudyLanguageSwitch } from "@/components/reader/StudyLanguageSwitch";
+import {
+  StudioMenuDrawer,
+  GLASS_BUTTON_BASE,
+  GLASS_BUTTON_ACTIVE,
+  GLASS_BUTTON_VOICE_ACTIVE,
+} from "@/components/reader/StudioMenuDrawer";
 import { StudyLanguage, DEFAULT_STUDY_LANGUAGE } from "@/lib/language";
 import {
   SourceSelectionToolbar,
   ScannedPinItem,
 } from "@/components/reader/SourceSelectionToolbar";
-import { RagDigestionBadge } from "@/components/reader/RagDigestionBadge";
 import OriginalPdfViewer from "./OriginalPdfViewer";
 import RichStudyMessage from "./RichStudyMessage";
 import { AscleonLogo } from "@/components/ui/AscleonLogo";
@@ -28,8 +32,7 @@ import {
   ChevronRight,
   Mic,
   Sparkles,
-  ZoomIn,
-  ZoomOut,
+  Menu,
   MessageSquare,
   FileText,
   HelpCircle,
@@ -57,7 +60,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VoiceLanguage, DEFAULT_VOICE_LANGUAGE } from "@/lib/constants";
-import StudyScopeBar, { StudyScope } from "./StudyScopeBar";
+import type { StudyScope } from "./StudyScopeBar";
 import { UserStudyProgressData, ReadingStatus } from "@/types";
 import {
   saveUserStudyProgress,
@@ -292,6 +295,9 @@ export default function LivingReader({
   const [activeIntent, setActiveIntent] = useState<StudyIntent>(() => {
     return (initialProgress?.studioState?.activeIntent as StudyIntent) || "chat";
   });
+  const [isStudioMenuOpen, setIsStudioMenuOpen] = useState(false);
+  const [showFeatureBar, setShowFeatureBar] = useState(true);
+  const studioMenuToggleRef = useRef<HTMLButtonElement>(null);
   const [language, setLanguage] = useState<VoiceLanguage>(
     (book.language as VoiceLanguage) || DEFAULT_VOICE_LANGUAGE,
   );
@@ -1302,11 +1308,6 @@ export default function LivingReader({
             <h1 className="display line-clamp-1 text-xs font-bold text-[color:var(--cream)] sm:text-sm truncate">
               {book.title}
             </h1>
-            {(book.blueprint?.domain || book.topic) && (
-              <span className="hidden md:inline-flex shrink-0 items-center rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[9.5px] font-bold text-emerald-300">
-                {book.blueprint?.domain || book.topic}
-              </span>
-            )}
           </div>
         </div>
 
@@ -1934,195 +1935,266 @@ export default function LivingReader({
           {/* ============================================================== */}
           <div
             className={cn(
-              "h-full flex-col overflow-hidden rounded-[20px] bg-[color:var(--ink-soft)]",
+              "relative h-full flex-col overflow-hidden rounded-[20px] bg-[color:var(--ink-soft)]",
               mobileActivePane === "studio" ? "flex w-full" : "hidden",
               "lg:flex lg:flex-1"
             )}
           >
-            {/* TOP CONTROL BAR - Responsive & Aligned with Left Toolbar */}
-            <div className="flex h-11 shrink-0 items-center justify-between gap-1 sm:gap-2 border-b border-white/10 px-2 sm:px-3 bg-[#141318] overflow-x-auto no-scrollbar flex-nowrap">
-              {/* Back to Source button on mobile */}
-              <button
-                type="button"
-                onClick={() => setMobileActivePane("reader")}
-                className="flex lg:hidden items-center gap-1 rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10.5px] font-bold text-[color:var(--cream)] hover:bg-white/20 cursor-pointer shrink-0"
-              >
-                <BookOpen className="size-3 text-[color:var(--orange)]" />
-                <span>Source</span>
-              </button>
-              {/* Zoom & View Controls - Desktop Only */}
-              <div className="hidden lg:flex shrink-0 items-center gap-0.5 sm:gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] p-0.5 sm:p-1 text-xs">
+            {/* MINIMAL STUDIO HEADER (Single Clean Bar + Quick Voice Toggle + Hamburger Drawer Trigger) */}
+            <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-white/10 bg-[#141318]/90 backdrop-blur-md px-2.5 sm:px-3.5 z-20">
+              {/* Left: Mobile Back + Active Mode Pill + Tappable Scope/Language Pill */}
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                 <button
                   type="button"
-                  onClick={handleZoomOut}
-                  className="flex size-5 sm:size-6 cursor-pointer items-center justify-center rounded-full text-[color:var(--ink)] transition-colors hover:bg-[color:var(--ink)]/10"
-                  title="Zoom Out"
-                >
-                  <ZoomOut className="size-3 sm:size-3.5" />
-                </button>
-                <span className="w-8 sm:w-10 text-center font-mono text-[10px] sm:text-[11px] font-bold text-[color:var(--ink)]">
-                  {fitMode === "normal" ? `${zoomLevel}%` : "Auto"}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleZoomIn}
-                  className="flex size-5 sm:size-6 cursor-pointer items-center justify-center rounded-full text-[color:var(--ink)] transition-colors hover:bg-[color:var(--ink)]/10"
-                  title="Zoom In"
-                >
-                  <ZoomIn className="size-3 sm:size-3.5" />
-                </button>
-
-                <div className="mx-0.5 sm:mx-1 h-3 w-px bg-[color:var(--ink)]/20" />
-
-                {/* Fit Modes */}
-                <button
-                  type="button"
-                  onClick={handleFitWidth}
+                  onClick={() => setMobileActivePane("reader")}
                   className={cn(
-                    "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider transition-colors whitespace-nowrap",
-                    fitMode === "fit-width"
-                      ? "bg-[color:var(--ink)] text-[color:var(--cream)]"
-                      : "text-[color:var(--ink)]/70 hover:text-[color:var(--ink)]",
+                    GLASS_BUTTON_BASE,
+                    "flex lg:hidden items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-bold shrink-0"
                   )}
                 >
-                  <span className="hidden sm:inline">Fit </span>Width
+                  <BookOpen className="size-3 text-[color:var(--orange)]" />
+                  <span>Source</span>
                 </button>
+
                 <button
                   type="button"
-                  onClick={handleFitPage}
+                  onClick={() => setIsStudioMenuOpen(true)}
                   className={cn(
-                    "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider transition-colors whitespace-nowrap",
-                    fitMode === "fit-page"
-                      ? "bg-[color:var(--ink)] text-[color:var(--cream)]"
-                      : "text-[color:var(--ink)]/70 hover:text-[color:var(--ink)]",
+                    activeIntent === "voice" ? GLASS_BUTTON_VOICE_ACTIVE : GLASS_BUTTON_ACTIVE,
+                    "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black tracking-wide shrink-0"
                   )}
+                  title="Switch AI feature"
                 >
-                  <span className="hidden sm:inline">Fit </span>Page
+                  {activeIntent === "chat" && <MessageSquare className="size-3" />}
+                  {activeIntent === "morph" && <Sparkles className="size-3" />}
+                  {activeIntent === "whiteboard" && <Tv className="size-3" />}
+                  {activeIntent === "voice" && <Mic className="size-3" />}
+                  {activeIntent === "quiz" && <HelpCircle className="size-3" />}
+                  {activeIntent === "summary" && <FileText className="size-3" />}
+                  <span>
+                    {activeIntent === "voice"
+                      ? "Ascleon Voice"
+                      : activeIntent === "chat"
+                      ? "AI Chat"
+                      : activeIntent === "morph"
+                      ? "Morph"
+                      : activeIntent === "whiteboard"
+                      ? "Whiteboard"
+                      : activeIntent === "quiz"
+                      ? "Qbanks"
+                      : "Summary"}
+                  </span>
                 </button>
 
-                <div className="hidden lg:block mx-0.5 sm:mx-1 h-3 w-px bg-[color:var(--ink)]/20" />
-
-                {/* Themes */}
-                <div className="hidden lg:flex items-center gap-1">
-                  {(["paper", "ink"] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setTheme(t)}
-                      className={cn(
-                        "size-2.5 sm:size-3 rounded-full border border-[color:var(--ink)]/30 transition-transform cursor-pointer",
-                        t === "paper" && "bg-[#fbf7f0]",
-                        t === "ink" && "bg-[color:var(--ink)]",
-                        theme === t && "scale-125 ring-2 ring-[color:var(--orange)]",
-                      )}
-                      title={`Set theme to ${t}`}
-                    />
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsStudioMenuOpen(true)}
+                  className={cn(
+                    GLASS_BUTTON_BASE,
+                    "hidden sm:inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10.5px] font-bold truncate max-w-[200px]"
+                  )}
+                  title="Open controls to change scope, language, or view settings"
+                >
+                  <span className="truncate">
+                    {studyScope.type === "topic" && studyScope.topicTitle
+                      ? studyScope.topicTitle
+                      : studyScope.type === "range"
+                      ? `P.${studyScope.startPage}–${studyScope.endPage}`
+                      : `P.${book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}`}
+                  </span>
+                  <span className="opacity-40">·</span>
+                  <span className="uppercase font-mono text-[10px] text-[color:var(--orange)]">
+                    {studyLanguage === "ar" ? "عربي" : studyLanguage === "mixed" ? "Mix" : "EN"}
+                  </span>
+                </button>
               </div>
 
-              {/* Universal Study Language Switch (Controls Voice, AI Chat, Morph, Q banks, Summaries) */}
-              <StudyLanguageSwitch
-                currentLanguage={studyLanguage}
-                onLanguageChange={setStudyLanguage}
-                compact={!isLgScreen}
-              />
+              {/* Right: Features Toggle + Hamburger Drawer Button */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  aria-expanded={showFeatureBar}
+                  onClick={() => setShowFeatureBar((prev) => !prev)}
+                  className={cn(
+                    showFeatureBar ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
+                    "flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] sm:text-[11px] font-bold"
+                  )}
+                  title={showFeatureBar ? "Minimize AI features bar" : "Show AI features bar"}
+                >
+                  <Layers className="size-3" />
+                  <span>Features</span>
+                  {showFeatureBar ? (
+                    <ChevronUp className="size-3 opacity-80" />
+                  ) : (
+                    <ChevronDown className="size-3 opacity-80" />
+                  )}
+                </button>
 
-              {/* Real-time RAG Digestion Progress Badge */}
-              {book._id && (
-                <RagDigestionBadge
-                  bookId={String(book._id)}
-                  initialStatus={book.ingestionStatus || "completed"}
-                  initialProgress={book.ingestionProgress ?? 100}
-                />
-              )}
-
-              {/* Start New Session Trigger */}
-              <button
-                type="button"
-                onClick={() => setShowStartNewModal(true)}
-                className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-white/20 bg-white/10 px-1.5 sm:px-2.5 py-1 text-[10px] sm:text-xs font-bold text-[color:var(--cream)] shadow-xs transition-all hover:bg-white/20 whitespace-nowrap"
-                title="Start a new session or restart book"
-              >
-                <RotateCcw className="size-3 text-[color:var(--orange)]" />
-                <span className="hidden sm:inline">Start </span>
-                <span>New</span>
-              </button>
-
-              {/* Ascleon Live Voice Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveIntent("voice");
-                }}
-                className={cn(
-                  "flex shrink-0 cursor-pointer items-center gap-1 rounded-full border-2 border-[color:var(--ink)] px-2 sm:px-3 py-1 text-[10px] sm:text-xs font-bold transition-all whitespace-nowrap",
-                  activeIntent === "voice"
-                    ? "bg-[#43a08f] text-[color:var(--ink)] shadow-chip"
-                    : "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip hover:-translate-y-0.5",
-                )}
-              >
-                <Mic className="size-3 sm:size-3.5" />
-                <span className="hidden md:inline">Ascleon </span>
-                <span>Voice</span>
-              </button>
+                <button
+                  ref={studioMenuToggleRef}
+                  type="button"
+                  aria-expanded={isStudioMenuOpen}
+                  aria-label="Toggle studio menu"
+                  onClick={() => setIsStudioMenuOpen((prev) => !prev)}
+                  className={cn(
+                    isStudioMenuOpen ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
+                    "relative flex size-8 items-center justify-center rounded-full"
+                  )}
+                  title="Open studio tools & settings"
+                >
+                  {isStudioMenuOpen ? <X className="size-4" /> : <Menu className="size-4" />}
+                  {(selectedText || snippedDiagram) && !isStudioMenuOpen && (
+                    <span
+                      className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-[color:var(--orange)] ring-2 ring-[#141318] animate-pulse"
+                      title="Active selection ready"
+                    />
+                  )}
+                </button>
+              </div>
             </div>
 
-            {/* ACTIVE SOURCE SELECTION CONTEXT BANNER (Synchronized with Left Panel) */}
-            {selectedText && (
-              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[color:var(--orange)]/30 bg-[color:var(--orange)]/10 px-4 py-2 text-xs">
-                <div className="flex items-center gap-2 overflow-hidden">
-                  <span className="size-2 shrink-0 rounded-full bg-[color:var(--orange)] animate-ping" />
-                  <span className="truncate font-medium text-[color:var(--cream)]">
-                    <strong className="text-[color:var(--orange)]">Focused Target:</strong> &ldquo;{selectedText}&rdquo;
-                  </span>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handleRunMorph(selectedText)}
-                    className="cursor-pointer rounded-full bg-[color:var(--orange)] px-2.5 py-0.5 text-[10px] font-black text-[color:var(--ink)]"
-                  >
-                    Morph Now
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWhiteboardSelectionSeq((n) => n + 1);
-                      setActiveIntent("whiteboard");
-                    }}
-                    className="cursor-pointer rounded-full bg-[color:var(--cream)] px-2.5 py-0.5 text-[10px] font-black text-[color:var(--ink)]"
-                  >
-                    Whiteboard
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePinSelectionToVault(selectedText)}
-                    className="cursor-pointer rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-[10px] font-bold text-[color:var(--cream)]"
-                  >
-                    Pin
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleClearSelection}
-                    className="cursor-pointer rounded-full p-1 text-[color:var(--cream)]/60 hover:text-[color:var(--cream)]"
-                    title="Clear target selection"
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                </div>
+            {/* PERSISTENT TOGGLEABLE MAIN AI FEATURES BAR (Glassmorphism, Show/Minimize) */}
+            {showFeatureBar && (
+              <div className="grid shrink-0 grid-cols-5 gap-1 sm:gap-1.5 border-b border-white/10 bg-[#141318]/75 backdrop-blur-md p-1.5 text-[10px] sm:text-[11px] animate-in fade-in slide-in-from-top-1 duration-150">
+                <button
+                  type="button"
+                  onClick={() => setActiveIntent("voice")}
+                  className={cn(
+                    activeIntent === "voice" ? GLASS_BUTTON_VOICE_ACTIVE : GLASS_BUTTON_BASE,
+                    "flex items-center justify-center gap-1 rounded-full py-1.5 px-1.5 font-bold whitespace-nowrap"
+                  )}
+                >
+                  <Mic className="size-3 shrink-0" />
+                  <span className="truncate">Ascleon Voice</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveIntent("chat")}
+                  className={cn(
+                    activeIntent === "chat" ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
+                    "flex items-center justify-center gap-1 rounded-full py-1.5 px-1.5 font-bold whitespace-nowrap"
+                  )}
+                >
+                  <MessageSquare className="size-3 shrink-0" />
+                  <span className="truncate">AI Chat</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveIntent("morph");
+                    handleRunMorph();
+                  }}
+                  className={cn(
+                    activeIntent === "morph" ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
+                    "flex items-center justify-center gap-1 rounded-full py-1.5 px-1.5 font-bold whitespace-nowrap"
+                  )}
+                >
+                  <Sparkles className="size-3 shrink-0" />
+                  <span className="truncate">Morph</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveIntent("whiteboard");
+                    setIsWhiteboardExpanded(true);
+                  }}
+                  className={cn(
+                    activeIntent === "whiteboard" ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
+                    "flex items-center justify-center gap-1 rounded-full py-1.5 px-1.5 font-bold whitespace-nowrap"
+                  )}
+                >
+                  <Tv className="size-3 shrink-0" />
+                  <span className="truncate">Whiteboard</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveIntent("quiz");
+                    loadDynamicQBank();
+                  }}
+                  className={cn(
+                    activeIntent === "quiz" ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
+                    "flex items-center justify-center gap-1 rounded-full py-1.5 px-1.5 font-bold whitespace-nowrap"
+                  )}
+                >
+                  <HelpCircle className="size-3 shrink-0" />
+                  <span className="truncate">Qbanks</span>
+                </button>
               </div>
             )}
 
-            {/* Universal Study Scope Bar (Single Page, Multi-Page Range, or Complete Topic) */}
-            <StudyScopeBar
+            {/* HORIZONTAL SLIDE-OVER STUDIO DRAWER (Right Edge) */}
+            <StudioMenuDrawer
+              isOpen={isStudioMenuOpen}
+              onClose={() => setIsStudioMenuOpen(false)}
+              toggleButtonRef={studioMenuToggleRef}
+              activeIntent={activeIntent}
+              onSelectIntent={(intent) => {
+                if (intent === "morph") {
+                  setActiveIntent("morph");
+                  handleRunMorph();
+                } else if (intent === "whiteboard") {
+                  setActiveIntent("whiteboard");
+                  setIsWhiteboardExpanded(true);
+                } else if (intent === "quiz") {
+                  setActiveIntent("quiz");
+                  loadDynamicQBank();
+                } else if (intent === "summary") {
+                  setActiveIntent("summary");
+                  loadDynamicSummary();
+                } else {
+                  setActiveIntent(intent);
+                }
+              }}
+              selectedText={selectedText}
+              snippedDiagram={snippedDiagram}
+              onMorphSelection={() => handleRunMorph(selectedText)}
+              onWhiteboardSelection={() => {
+                setWhiteboardSelectionSeq((n) => n + 1);
+                setActiveIntent("whiteboard");
+              }}
+              onAskAISelection={() => handleAskAISelection(selectedText)}
+              onPinSelection={() => handlePinSelectionToVault(selectedText)}
+              onClearSelection={handleClearSelection}
+              onClearDiagram={() => setSnippedDiagram(null)}
+              isAiLoading={isAiLoading}
+              showDeepReferences={showDeepReferences}
+              referencesCount={activeReferences.length}
+              onToggleDeepReferences={() => setShowDeepReferences((prev) => !prev)}
+              onRunExecutiveSummary={() => {
+                setActiveIntent("chat");
+                const scopeLabel =
+                  studyScope.type === "topic" && studyScope.topicTitle
+                    ? `Topic "${studyScope.topicTitle}" (pp. ${studyScope.startPage}–${studyScope.endPage})`
+                    : studyScope.type === "range"
+                    ? `Pages ${studyScope.startPage}–${studyScope.endPage}`
+                    : `Page ${book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}`;
+                triggerDirectAIQuery(
+                  `Generate a high-yield executive summary, core mechanism breakdown, and clinical exam pearls for ${scopeLabel} of "${book.title}".`
+                );
+              }}
+              isMorphLoading={isMorphLoading}
+              morphActiveTopic={morphActiveTopic}
+              hasMorphArtifact={Boolean(activeMorphArtifact)}
+              onReMorph={() => handleRunMorph(undefined, undefined, true, morphActiveTopic || undefined)}
+              onResetMorph={() => handleResetMorph(book.fileURL ? activePdfPage : currentIdx)}
+              isWhiteboardExpanded={isWhiteboardExpanded}
+              onToggleWhiteboardExpand={() => setIsWhiteboardExpanded((prev) => !prev)}
+              isQBankLoading={isQBankLoading}
+              qbankCurrentIndex={activeQBankIdx}
+              qbankTotalCount={dynamicQBankList.length}
+              onGenerateNewQBank={() => loadDynamicQBank(undefined, true)}
+              isSummaryLoading={isSummaryLoading}
+              onRefreshSummary={() => loadDynamicSummary(true)}
               currentPage={book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
               totalPages={book.fileURL ? totalPdfPages : segments.length}
               topics={book.blueprint?.topicMap?.topics || []}
-              currentScope={studyScope}
-              onScopeChange={(newScope) => {
-                setStudyScope(newScope);
-              }}
+              studyScope={studyScope}
+              onScopeChange={setStudyScope}
               onNavigateToPage={(p) => {
                 if (book.fileURL) {
                   setActivePdfPage(p);
@@ -2132,89 +2204,21 @@ export default function LivingReader({
                   else setCurrentIdx(Math.min(segments.length - 1, p - 1));
                 }
               }}
+              studyLanguage={studyLanguage}
+              onLanguageChange={setStudyLanguage}
+              zoomLevel={zoomLevel}
+              fitMode={fitMode}
+              theme={theme}
+              onZoomIn={handleZoomIn}
+              onZoomOut={handleZoomOut}
+              onFitWidth={handleFitWidth}
+              onFitPage={handleFitPage}
+              onThemeChange={setTheme}
+              bookId={book._id ? String(book._id) : undefined}
+              ingestionStatus={book.ingestionStatus}
+              ingestionProgress={book.ingestionProgress}
+              onOpenStartNew={() => setShowStartNewModal(true)}
             />
-
-            {/* STUDIO SWITCHER TABS (5 CORE TABS: AI Chat, Morph, Whiteboard, Voice, Q banks) */}
-            <div className="grid shrink-0 grid-cols-5 gap-0.5 sm:gap-1 border-b border-white/10 bg-black/40 p-1 sm:p-1.5 text-[10px] sm:text-[11px]">
-              <button
-                type="button"
-                onClick={() => setActiveIntent("chat")}
-                className={cn(
-                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1 sm:py-1.5 font-bold transition-all whitespace-nowrap",
-                  activeIntent === "chat"
-                    ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
-                    : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
-                )}
-              >
-                <MessageSquare className="size-3" />
-                <span className="truncate">AI Chat</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveIntent("morph");
-                  handleRunMorph();
-                }}
-                className={cn(
-                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1 sm:py-1.5 font-bold transition-all whitespace-nowrap",
-                  activeIntent === "morph"
-                    ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
-                    : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
-                )}
-              >
-                <Sparkles className="size-3" />
-                <span className="truncate">Morph</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveIntent("whiteboard");
-                  setIsWhiteboardExpanded(true);
-                }}
-                className={cn(
-                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1 sm:py-1.5 font-bold transition-all whitespace-nowrap",
-                  activeIntent === "whiteboard"
-                    ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
-                    : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
-                )}
-              >
-                <Tv className="size-3" />
-                <span className="truncate">Whiteboard</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveIntent("voice")}
-                className={cn(
-                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1 sm:py-1.5 font-bold transition-all whitespace-nowrap",
-                  activeIntent === "voice"
-                    ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
-                    : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
-                )}
-              >
-                <Mic className="size-3" />
-                <span className="truncate">Voice</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveIntent("quiz");
-                  loadDynamicQBank();
-                }}
-                className={cn(
-                  "flex cursor-pointer items-center justify-center gap-1 rounded-full py-1 sm:py-1.5 font-bold transition-all whitespace-nowrap",
-                  activeIntent === "quiz"
-                    ? "border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip"
-                    : "border border-transparent text-[color:var(--cream)]/60 hover:bg-white/5 hover:text-[color:var(--cream)]",
-                )}
-              >
-                <HelpCircle className="size-3" />
-                <span className="truncate">Q banks</span>
-              </button>
-            </div>
 
             {/* TAB CONTENTS CONTAINER */}
             <div className="custom-scrollbar-dark flex-1 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4">
@@ -2275,7 +2279,7 @@ export default function LivingReader({
               {activeIntent === "morph" && (
                 <div className="flex animate-in fade-in flex-col gap-4 duration-200">
                   {/* TOP CONTROLLER: Scope & Custom Whole Topic Bar */}
-                  <div className="rounded-[18px] border-2 border-[color:var(--ink)] bg-[#1d1b22] p-2.5 sm:p-3 shadow-chip flex flex-col gap-2">
+                  <div className="rounded-[18px] border border-white/15 bg-white/[0.04] backdrop-blur-md p-2.5 sm:p-3 shadow-[0_8px_24px_rgba(0,0,0,0.28)] flex flex-col gap-2">
                     <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
                       <div className="flex items-center gap-1">
                         <span className="text-[10px] font-black uppercase tracking-wider text-[color:var(--cream)]/60 mr-1 hidden sm:inline">
@@ -2288,10 +2292,8 @@ export default function LivingReader({
                             handleRunMorph(undefined, undefined, false, null);
                           }}
                           className={cn(
-                            "cursor-pointer px-2.5 py-1 rounded-full text-[11px] font-bold transition-all flex items-center gap-1 border",
-                            !morphActiveTopic
-                              ? "bg-[color:var(--orange)] text-[color:var(--ink)] border-[color:var(--ink)] shadow-xs"
-                              : "bg-white/5 text-[color:var(--cream)]/70 border-white/10 hover:bg-white/10"
+                            !morphActiveTopic ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
+                            "px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1"
                           )}
                         >
                           <BookOpen className="size-3" />
@@ -2299,7 +2301,7 @@ export default function LivingReader({
                         </button>
 
                         {morphActiveTopic && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-[#43a08f]/20 border border-[#43a08f]/50 px-2.5 py-1 text-[11px] font-bold text-[#7fd8c9]">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-[#43a08f]/20 backdrop-blur-md border border-[#43a08f]/50 px-2.5 py-1 text-[11px] font-bold text-[#7fd8c9]">
                             <Sparkles className="size-3" />
                             <span className="max-w-[140px] truncate">{morphActiveTopic}</span>
                             <button
@@ -2321,7 +2323,10 @@ export default function LivingReader({
                         type="button"
                         disabled={isMorphLoading}
                         onClick={() => handleRunMorph(undefined, undefined, true, morphActiveTopic || undefined)}
-                        className="flex cursor-pointer items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10.5px] font-bold text-[color:var(--cream)]/80 hover:bg-white/15 hover:text-white disabled:opacity-40"
+                        className={cn(
+                          GLASS_BUTTON_BASE,
+                          "flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-bold disabled:opacity-40"
+                        )}
                         title="Re-synthesize with fresh Gemini AI analysis"
                       >
                         <RefreshCw className={cn("size-3", isMorphLoading && "animate-spin")} />
@@ -2342,7 +2347,7 @@ export default function LivingReader({
                             }
                           }}
                           placeholder="Write a whole topic to turn into magic (e.g. Acute Coronary Syndrome, Heart Failure)..."
-                          className="w-full rounded-full border-2 border-[color:var(--ink)] bg-[#121114] px-3.5 py-1.5 text-xs font-medium text-[color:var(--cream)] placeholder:text-[color:var(--cream)]/40 focus:border-[color:var(--orange)] focus:outline-none pr-28 sm:pr-32"
+                          className="w-full rounded-full border border-white/15 bg-black/35 backdrop-blur-md px-3.5 py-1.5 text-xs font-medium text-[color:var(--cream)] placeholder:text-[color:var(--cream)]/40 focus:border-[color:var(--orange)] focus:outline-none pr-28 sm:pr-32"
                         />
                         {book.blueprint?.topicMap?.topics && book.blueprint.topicMap.topics.length > 0 && (
                           <div className="absolute right-2 top-1/2 -translate-y-1/2">
@@ -2378,7 +2383,10 @@ export default function LivingReader({
                             handleRunMorph(undefined, undefined, true, morphTopicInput.trim());
                           }
                         }}
-                        className="cursor-pointer shrink-0 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-3.5 py-1.5 text-xs font-black uppercase tracking-wider text-[color:var(--ink)] shadow-chip hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                        className={cn(
+                          GLASS_BUTTON_ACTIVE,
+                          "shrink-0 rounded-full px-3.5 py-1.5 text-xs font-black uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed"
+                        )}
                       >
                         <span>Morph Topic ✦</span>
                       </button>
@@ -2405,12 +2413,12 @@ export default function LivingReader({
                     />
                   ) : (
                     <div className="flex flex-1 flex-col items-center justify-center py-6">
-                      <div className="w-full max-w-md rounded-[24px] border-2 border-[color:var(--orange)] bg-gradient-to-b from-[#1d1b20] to-[#121114] p-7 text-center shadow-chip flex flex-col items-center gap-4">
+                      <div className="w-full max-w-md rounded-[24px] border border-[color:var(--orange)]/45 bg-white/[0.04] backdrop-blur-xl p-7 text-center shadow-[0_16px_40px_rgba(0,0,0,0.4)] flex flex-col items-center gap-4">
                         <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[color:var(--cream)] via-[color:var(--orange)] to-[color:var(--magenta)] text-2xl text-[color:var(--ink)] shadow-lg shadow-[color:var(--orange)]/30 font-black">
                           ✦
                         </div>
 
-                        <div className="inline-flex items-center gap-1.5 rounded-full border border-[#43a08f]/40 bg-[#43a08f]/10 px-3 py-0.5 text-[11px] font-bold text-[#7fd8c9]">
+                        <div className="inline-flex items-center gap-1.5 rounded-full border border-[#43a08f]/40 bg-[#43a08f]/15 backdrop-blur-md px-3 py-0.5 text-[11px] font-bold text-[#7fd8c9]">
                           <span className="size-2 rounded-full bg-[#43a08f] animate-pulse" />
                           <span>
                             {selectedText
@@ -2476,7 +2484,10 @@ export default function LivingReader({
                           type="button"
                           onClick={() => handleRunMorph()}
                           disabled={isMorphLoading}
-                          className="mt-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-3 text-xs font-black uppercase tracking-wider text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50"
+                          className={cn(
+                            GLASS_BUTTON_ACTIVE,
+                            "mt-2 flex w-full items-center justify-center gap-2 rounded-full py-3 text-xs font-black uppercase tracking-wider disabled:opacity-50"
+                          )}
                         >
                           {isMorphLoading ? (
                             <>
@@ -2738,10 +2749,13 @@ export default function LivingReader({
                           const prompt = `Generate a high-yield executive summary, core mechanism breakdown, and clinical exam pearls for ${scopeLabel} of "${book.title}".`;
                           triggerDirectAIQuery(prompt);
                         }}
-                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[color:var(--orange)] bg-[color:var(--orange)]/15 px-3 py-1 text-[11px] font-black text-[color:var(--orange)] hover:bg-[color:var(--orange)]/25 transition-all shadow-xs"
+                        className={cn(
+                          GLASS_BUTTON_ACTIVE,
+                          "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-black disabled:opacity-40"
+                        )}
                         title="Run executive summary prompt for the active scope"
                       >
-                        <FileText className="size-3 text-[color:var(--orange)]" />
+                        <FileText className="size-3 text-white" />
                         <span>
                           {studyScope.type === "topic"
                             ? "Executive Topic Summary"
@@ -2761,7 +2775,10 @@ export default function LivingReader({
                             setActiveIntent("chat");
                             triggerDirectAIQuery(chip);
                           }}
-                          className="cursor-pointer rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-[color:var(--cream)]/80 transition-all hover:border-[color:var(--orange)]/60 hover:bg-[color:var(--orange)]/15 hover:text-[color:var(--cream)] disabled:cursor-not-allowed disabled:opacity-40"
+                          className={cn(
+                            GLASS_BUTTON_BASE,
+                            "rounded-full px-2.5 py-1 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-40"
+                          )}
                         >
                           {chip}
                         </button>
@@ -2833,7 +2850,10 @@ export default function LivingReader({
                       type="button"
                       disabled={isSummaryLoading}
                       onClick={() => loadDynamicSummary()}
-                      className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[10.5px] font-bold text-[color:var(--cream)] hover:bg-white/10 cursor-pointer disabled:opacity-40"
+                      className={cn(
+                        GLASS_BUTTON_BASE,
+                        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-bold disabled:opacity-40"
+                      )}
                     >
                       <RefreshCw className={cn("size-3", isSummaryLoading && "animate-spin text-[color:var(--orange)]")} />
                       <span>{isSummaryLoading ? "Synthesizing..." : "Re-Synthesize"}</span>
@@ -2923,7 +2943,7 @@ export default function LivingReader({
                       type="button"
                       disabled={isQBankLoading}
                       onClick={() => loadDynamicQBank(undefined, true)}
-                      className="inline-flex items-center gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-2.5 py-1 text-[10.5px] font-bold text-[color:var(--ink)] shadow-xs hover:-translate-y-0.5 cursor-pointer disabled:opacity-40"
+                      className="inline-flex items-center gap-1 rounded-full border border-white/45 bg-[color:var(--orange)]/80 backdrop-blur-md px-2.5 py-1 text-[10.5px] font-bold text-[color:var(--ink)] shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_4px_14px_rgba(0,0,0,0.16)] transition-all hover:bg-[color:var(--orange)] cursor-pointer disabled:opacity-40"
                     >
                       <RefreshCw className={cn("size-3", isQBankLoading && "animate-spin text-[color:var(--ink)]")} />
                       <span>{isQBankLoading ? "Generating..." : "New Questions"}</span>
@@ -2985,7 +3005,7 @@ export default function LivingReader({
                           type="button"
                           disabled={quizAnswer === null}
                           onClick={() => setQuizSubmitted(true)}
-                          className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-2.5 text-xs font-black uppercase text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 disabled:cursor-default disabled:opacity-40 disabled:hover:translate-y-0"
+                          className="cursor-pointer rounded-full border border-white/45 bg-[color:var(--orange)]/85 backdrop-blur-md py-2.5 text-xs font-black uppercase text-[color:var(--ink)] shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_6px_16px_rgba(0,0,0,0.18)] transition-all hover:bg-[color:var(--orange)] disabled:cursor-default disabled:opacity-40"
                         >
                           Submit Answer &amp; Reveal Rationale
                         </button>
@@ -3060,7 +3080,7 @@ export default function LivingReader({
                                 setQuizAnswer(null);
                                 setActiveQBankIdx((prev) => Math.max(0, prev - 1));
                               }}
-                              className="cursor-pointer rounded-full border border-[color:var(--ink)]/30 bg-white px-3 py-1.5 text-xs font-bold text-[color:var(--ink)] disabled:opacity-30"
+                              className="cursor-pointer rounded-full border border-[color:var(--ink)]/20 bg-white/60 backdrop-blur-md px-3 py-1.5 text-xs font-bold text-[color:var(--ink)] shadow-xs transition-all hover:bg-white/85 disabled:opacity-30"
                             >
                               ← Prev
                             </button>
@@ -3073,7 +3093,7 @@ export default function LivingReader({
                                   setQuizAnswer(null);
                                   setActiveQBankIdx((prev) => prev + 1);
                                 }}
-                                className="flex-1 cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-2 text-xs font-bold text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 text-center"
+                                className="flex-1 cursor-pointer rounded-full border border-white/45 bg-[color:var(--orange)]/85 backdrop-blur-md py-2 text-xs font-bold text-[color:var(--ink)] shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_6px_16px_rgba(0,0,0,0.18)] transition-all hover:bg-[color:var(--orange)] text-center"
                               >
                                 Next Question ({activeQBankIdx + 2}/{dynamicQBankList.length}) →
                               </button>
@@ -3082,7 +3102,7 @@ export default function LivingReader({
                                 type="button"
                                 disabled={isQBankLoading}
                                 onClick={() => loadDynamicQBank(undefined, true)}
-                                className="flex-1 cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-2 text-xs font-bold text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 text-center"
+                                className="flex-1 cursor-pointer rounded-full border border-white/45 bg-[color:var(--orange)]/85 backdrop-blur-md py-2 text-xs font-bold text-[color:var(--ink)] shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_6px_16px_rgba(0,0,0,0.18)] transition-all hover:bg-[color:var(--orange)] text-center"
                               >
                                 <span>{isQBankLoading ? "Generating New Questions..." : "Generate More Questions ✦"}</span>
                               </button>
@@ -3098,7 +3118,10 @@ export default function LivingReader({
                       <button
                         type="button"
                         onClick={() => loadDynamicQBank()}
-                        className="mt-2 rounded-full bg-[color:var(--orange)] px-4 py-1.5 font-bold text-[color:var(--ink)] cursor-pointer"
+                        className={cn(
+                          GLASS_BUTTON_ACTIVE,
+                          "mt-2 rounded-full px-4 py-1.5 font-bold"
+                        )}
                       >
                         Generate Practice Questions
                       </button>
@@ -3108,40 +3131,45 @@ export default function LivingReader({
               )}
             </div>
 
-            {/* BOTTOM PROMPT INPUT (Responsive & Keyboard-Aware on Mobile) */}
-            <div
-              className="shrink-0 border-t border-white/10 bg-[#141318] p-2.5 sm:p-3.5 transition-[padding] duration-150 ease-out"
-              style={{
-                paddingBottom: keyboardHeight > 0 ? `${keyboardHeight + 8}px` : undefined,
-              }}
-            >
-              <form
-                onSubmit={handleSendMessage}
-                className="relative flex items-center"
+            {/* BOTTOM PROMPT INPUT (Shown only in AI Chat mode, Keyboard-Aware on Mobile) */}
+            {activeIntent === "chat" && (
+              <div
+                className="shrink-0 border-t border-white/10 bg-[#141318]/85 backdrop-blur-md p-2.5 sm:p-3.5 transition-[padding] duration-150 ease-out"
+                style={{
+                  paddingBottom: keyboardHeight > 0 ? `${keyboardHeight + 8}px` : undefined,
+                }}
               >
-                <input
-                  type="text"
-                  value={inputQuery}
-                  onChange={(e) => setInputQuery(e.target.value)}
-                  onFocus={handleInputFocus}
-                  onBlur={handleInputBlur}
-                  placeholder={
-                    selectedText
-                      ? `Ask about selected (${selectedText.split(/\s+/).length}w) passage...`
-                      : `Ask the AI Study Agent about ${book.title}...`
-                  }
-                  className="w-full rounded-full border border-white/15 bg-white/[0.06] py-2 pl-3.5 pr-10 sm:py-2.5 sm:pl-4 sm:pr-11 text-xs text-[color:var(--cream)] placeholder-[color:var(--cream)]/40 transition-all focus:border-[color:var(--orange)] focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  disabled={!inputQuery.trim() || isAiLoading}
-                  className="absolute right-1.5 flex size-7 cursor-pointer items-center justify-center rounded-full border border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] transition-transform hover:-translate-y-0.5 disabled:cursor-default disabled:opacity-40 disabled:hover:translate-y-0"
-                  title="Send query"
+                <form
+                  onSubmit={handleSendMessage}
+                  className="relative flex items-center"
                 >
-                  <Send className="size-3.5" />
-                </button>
-              </form>
-            </div>
+                  <input
+                    type="text"
+                    value={inputQuery}
+                    onChange={(e) => setInputQuery(e.target.value)}
+                    onFocus={handleInputFocus}
+                    onBlur={handleInputBlur}
+                    placeholder={
+                      selectedText
+                        ? `Ask about selected (${selectedText.split(/\s+/).length}w) passage...`
+                        : `Ask the AI Study Agent about ${book.title}...`
+                    }
+                    className="w-full rounded-full border border-white/15 bg-white/[0.06] backdrop-blur-md py-2 pl-3.5 pr-10 sm:py-2.5 sm:pl-4 sm:pr-11 text-xs text-[color:var(--cream)] placeholder-[color:var(--cream)]/40 transition-all focus:border-[color:var(--orange)] focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!inputQuery.trim() || isAiLoading}
+                    className={cn(
+                      GLASS_BUTTON_ACTIVE,
+                      "absolute right-1.5 flex size-7 items-center justify-center rounded-full disabled:cursor-default disabled:opacity-40"
+                    )}
+                    title="Send query"
+                  >
+                    <Send className="size-3.5" />
+                  </button>
+                </form>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -3151,7 +3179,10 @@ export default function LivingReader({
         <button
           type="button"
           onClick={() => setMobileActivePane("studio")}
-          className="fixed bottom-4 right-4 z-40 flex lg:hidden items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[color:var(--ink)] shadow-chip transition-transform active:scale-95 cursor-pointer"
+          className={cn(
+            GLASS_BUTTON_ACTIVE,
+            "fixed bottom-4 right-4 z-40 flex lg:hidden items-center gap-2 rounded-full px-4 py-2.5 text-xs font-bold uppercase tracking-wider"
+          )}
         >
           <Sparkles className="size-4" />
           <span>Open Studio</span>

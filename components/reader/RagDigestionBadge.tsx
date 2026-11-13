@@ -84,7 +84,7 @@ export function RagDigestionBadge({
         <>
           <CheckCircle2 className="size-3 text-[#43a08f]" />
           <span className="font-mono uppercase tracking-wider text-[9.5px]">RAG Ready</span>
-          {domain && (
+          {domain && domain.trim().toLowerCase() !== "general" && (
             <span className="hidden sm:inline opacity-80 border-l border-white/20 pl-1 font-sans">
               {domain}
             </span>

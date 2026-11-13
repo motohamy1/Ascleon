@@ -1,0 +1,65 @@
+
+> ascleon@0.1.0 build
+> next build
+
+Γû▓ Next.js 16.1.6 (Turbopack)
+- Environments: .env.local, .env
+- Experiments (use with caution):
+  ┬╖ proxyClientMaxBodySize: "50mb"
+  ┬╖ serverActions
+
+  Creating an optimized production build ...
+(node:9340) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Γ£ô Compiled successfully in 9.0s
+  Running TypeScript ...
+  Collecting page data using 15 workers ...
+  Generating static pages using 15 workers (0/25) ...
+  Generating static pages using 15 workers (6/25) 
+  Generating static pages using 15 workers (12/25) 
+  Generating static pages using 15 workers (18/25) 
+Γ£ô Generating static pages using 15 workers (25/25) in 729.0ms
+  Finalizing page optimization ...
+
+Route (app)
+Γöî ╞Æ /
+Γö£ Γùï /_not-found
+Γö£ ╞Æ /api/books/[id]/ingestion-status
+Γö£ ╞Æ /api/books/[id]/rag-search
+Γö£ ╞Æ /api/books/[id]/segments
+Γö£ ╞Æ /api/books/digest
+Γö£ ╞Æ /api/books/ingest-background
+Γö£ ╞Æ /api/morph
+Γö£ ╞Æ /api/qbank
+Γö£ ╞Æ /api/reader-assistant
+Γö£ ╞Æ /api/storage/file
+Γö£ ╞Æ /api/storage/upload
+Γö£ ╞Æ /api/summary
+Γö£ ╞Æ /api/upload
+Γö£ ╞Æ /api/vapi-search-book
+Γö£ ╞Æ /api/voice/session
+Γö£ ╞Æ /api/voice/token
+Γö£ ╞Æ /api/whiteboard/lessons
+Γö£ ╞Æ /api/whiteboard/lessons/[id]
+Γö£ ╞Æ /api/whiteboard/lessons/[id]/sections/[index]/audio
+Γö£ ╞Æ /api/whiteboard/lessons/[id]/voice
+Γö£ ╞Æ /api/whiteboard/videos
+Γö£ ╞Æ /api/whiteboard/videos/[id]
+Γö£ ╞Æ /api/whiteboard/videos/[id]/beats/[index]/generate
+Γö£ ╞Æ /api/whiteboard/videos/[id]/voice
+Γö£ ╞Æ /api/whiteboard/voices/preview
+Γö£ ╞Æ /books/[slug]
+Γö£ Γùï /books/new
+Γö£ Γùï /icon.svg
+Γö£ ╞Æ /library
+Γö£ ╞Æ /progress
+Γö£ ╞Æ /space/active
+Γö£ Γùï /space/revision
+Γöö Γùï /subscriptions
+
+
+╞Æ Proxy (Middleware)
+
+Γùï  (Static)   prerendered as static content
+╞Æ  (Dynamic)  server-rendered on demand
+

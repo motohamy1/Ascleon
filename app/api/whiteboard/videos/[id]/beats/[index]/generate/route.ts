@@ -82,8 +82,9 @@ export async function POST(
       });
     }
 
-    const existingVoiceBeat = normalizeVoiceTrackBeats(rawTracks[voiceId], voiceId, beats.length)
-      .beats[beatIndex];
+    const normalizedTrack = normalizeVoiceTrackBeats(rawTracks[voiceId], voiceId, beats.length);
+    const existingVoiceBeat = normalizedTrack.beats[beatIndex];
+    const pinnedModel = normalizedTrack.pinnedModel;
 
     const needsVector = forceVector || beat.vectorStatus !== "ready" || !beat.vectorData;
     const needsAudio =
@@ -118,6 +119,8 @@ export async function POST(
             spokenStyleHint: beat.spokenStyleHint,
             language: (doc.language || "en") as StudyLanguage,
             voiceId,
+            preferredModel: pinnedModel,
+            strictPin: Boolean(pinnedModel),
           })
         : Promise.resolve(null),
     ]);
@@ -148,6 +151,9 @@ export async function POST(
 
     if (needsAudio) {
       if (audioResult.status === "fulfilled" && audioResult.value) {
+        if (!pinnedModel && audioResult.value.model) {
+          atomicSet[`voiceTracks.${voiceId}.pinnedModel`] = audioResult.value.model;
+        }
         atomicSet[`voiceTracks.${voiceId}.beats.${beatIndex}`] = {
           status: "ready",
           audioUrl: audioResult.value.audioUrl,
@@ -178,7 +184,11 @@ export async function POST(
     }
 
     const updatedBeats = updated.beats || [];
-    const recomputedStatus = computeVideoStatus({ beats: updatedBeats });
+    const recomputedStatus = computeVideoStatus({
+      beats: updatedBeats,
+      voiceTracks: updated.voiceTracks,
+      activeVoiceId: voiceId,
+    });
     const recomputedTrack = normalizeVoiceTrackBeats(
       (updated.voiceTracks || {})[voiceId],
       voiceId,

@@ -87,9 +87,22 @@ export const WHITEBOARD_NARRATOR_VOICES: WhiteboardNarratorVoice[] = [
   },
 ];
 
-export const DEFAULT_WHITEBOARD_VOICE = "Kore";
+export const DEFAULT_WHITEBOARD_VOICE = "Sulafat";
 
 export function isValidWhiteboardVoice(voiceId?: string | null): voiceId is string {
   if (!voiceId) return false;
   return WHITEBOARD_NARRATOR_VOICES.some((v) => v.id === voiceId);
+}
+
+/**
+ * Returns ONE consistent lesson-wide prosody instruction so voice delivery never drifts between sections.
+ */
+export function getLessonTeachingStyle(language: "en" | "ar" | "mixed"): string {
+  if (language === "ar") {
+    return "warm, calm Egyptian Arabic medical tutor, conversational pace with brief pauses between steps";
+  }
+  if (language === "mixed") {
+    return "warm Egyptian medical tutor speaking natural Egyptian Arabic with crisp English clinical terms, measured pace";
+  }
+  return "warm, calm, clear medical tutor, conversational pacing with brief pauses between concepts";
 }

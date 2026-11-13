@@ -25,8 +25,8 @@ export const r2Client = isR2Configured
     })
   : null;
 
-const R2_BUCKET = process.env.R2_BUCKET || "bookify-files";
-const R2_PUBLIC_BASE =
+export const R2_BUCKET = process.env.R2_BUCKET || "bookify-files";
+export const R2_PUBLIC_BASE =
   process.env.R2_PUBLIC_URL?.replace(/\/+$/, "") ||
   `https://pub-df301334814244229e232fdf0e0d3c5a.r2.dev`;
 
