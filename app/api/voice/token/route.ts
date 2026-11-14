@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenAI, Modality } from "@google/genai";
+import {
+  Behavior,
+  EndSensitivity,
+  GoogleGenAI,
+  LiveConnectConfig,
+  Modality,
+  StartSensitivity,
+  Type,
+} from "@google/genai";
 import { auth } from "@clerk/nextjs/server";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import { DEFAULT_LIVE_VOICE } from "@/lib/voice-config";
@@ -38,8 +46,8 @@ export async function POST(req: NextRequest) {
       authoritativeReferences = [],
       language = "en",
       voiceName = DEFAULT_LIVE_VOICE,
+      noisyPlace = false,
       resumptionHandle = null,
-      isResuming = false,
     } = body;
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -54,15 +62,20 @@ export async function POST(req: NextRequest) {
     const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
     const newSessionExpireTime = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
-    const referencesContext = Array.isArray(authoritativeReferences) && authoritativeReferences.length > 0
-      ? `\nCanonical Textbook References: ${authoritativeReferences
-          .map((r: any) => (typeof r === "string" ? r : r.source || r.title))
-          .filter(Boolean)
-          .join(", ")}`
-      : "";
+    const referencesContext =
+      Array.isArray(authoritativeReferences) && authoritativeReferences.length > 0
+        ? `\nCanonical Textbook References: ${authoritativeReferences
+            .map((r: unknown) =>
+              typeof r === "string"
+                ? r
+                : (r as { source?: string; title?: string })?.source ||
+                  (r as { source?: string; title?: string })?.title
+            )
+            .filter(Boolean)
+            .join(", ")}`
+        : "";
 
     const activeText = (selectedText || pageText || "").slice(0, 3000);
-
     const langDirective = buildLanguageDirective(language as StudyLanguage, "voice");
 
     const systemInstructionText = `You are Ascleon's elite 1-on-1 AI Live Oral Mentor across all academic and scientific disciplines. You are conducting an interactive, natural, humanoid oral session with a student studying "${bookTitle}" (Page ${pageNumber}).
@@ -92,7 +105,17 @@ PEDAGOGICAL & ORAL INTERACTION DIRECTIVES:
 4. Visual Grounding & Page Highlights:
    - When introducing a pivotal mechanism, structure, or formula, invoke 'show_concept_on_page' in the background to highlight concepts or open Morph view on the screen while you speak.`;
 
-    const liveConfig: any = {
+    const automaticActivityDetection = noisyPlace
+      ? { disabled: true }
+      : {
+          disabled: false,
+          startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+          endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
+          prefixPaddingMs: 300,
+          silenceDurationMs: 700,
+        };
+
+    const liveConfig: LiveConnectConfig = {
       responseModalities: [Modality.AUDIO],
       speechConfig: {
         voiceConfig: {
@@ -104,19 +127,13 @@ PEDAGOGICAL & ORAL INTERACTION DIRECTIVES:
       systemInstruction: {
         parts: [{ text: systemInstructionText }],
       },
-      // Real-time voice activity detection tuned for clear voice isolation & instant barge-in
       realtimeInputConfig: {
-        automaticActivityDetection: {
-          startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
-          endOfSpeechSensitivity: "END_SENSITIVITY_HIGH",
-          prefixPaddingMs: 200,
-          silenceDurationMs: 450,
-        },
+        automaticActivityDetection,
       },
-      // Enable seamless session resumption when pausing & resuming calls
+      contextWindowCompression: {
+        slidingWindow: {},
+      },
       sessionResumption: resumptionHandle ? { handle: resumptionHandle } : {},
-      // Authorize both incoming student speech and AI speech transcriptions in the constrained token
-      inputAudioTranscription: {},
       outputAudioTranscription: {},
       tools: [
         {
@@ -125,21 +142,21 @@ PEDAGOGICAL & ORAL INTERACTION DIRECTIVES:
               name: "show_concept_on_page",
               description:
                 "Displays a visual concept card or highlights a concept on the student's study reader in the background without interrupting speech.",
-              behavior: "NON_BLOCKING",
+              behavior: Behavior.NON_BLOCKING,
               parameters: {
-                type: "OBJECT",
+                type: Type.OBJECT,
                 properties: {
                   conceptName: {
-                    type: "STRING",
+                    type: Type.STRING,
                     description: "Name of the clinical concept or structure to highlight",
                   },
                   action: {
-                    type: "STRING",
+                    type: Type.STRING,
                     enum: ["highlight_concept", "open_morph"],
                     description: "Whether to highlight the concept or open Morph view",
                   },
                   explanation: {
-                    type: "STRING",
+                    type: Type.STRING,
                     description: "One short sentence explaining why this is highlighted",
                   },
                 },
@@ -172,48 +189,24 @@ PEDAGOGICAL & ORAL INTERACTION DIRECTIVES:
         expiresAt: expireTime,
         voiceName,
         language,
+        noisyPlace: Boolean(noisyPlace),
         systemInstruction: systemInstructionText,
       });
-    } catch (tokenErr: any) {
-      console.warn("Live ephemeral token constraint creation note:", tokenErr?.message);
-      // Fallback: create unconstrained ephemeral token if fine-grained constraints fail on tier
-      try {
-        const simpleToken = await ai.authTokens.create({
-          config: {
-            uses: 1,
-            expireTime,
-            newSessionExpireTime,
-          },
-        });
-        return NextResponse.json({
-          token: simpleToken.name,
-          model: `models/${liveModelName}`,
-          expiresAt: expireTime,
-          voiceName,
-          language,
-          systemInstruction: systemInstructionText,
-        });
-      } catch (fallbackErr: any) {
-        console.warn("Ephemeral token creation failed, using direct session key fallback:", fallbackErr?.message);
-        // Direct key fallback for Google AI Studio keys that do not have authTokens IAM privilege
-        return NextResponse.json({
-          directApiKey: apiKey,
-          model: `models/${liveModelName}`,
-          expiresAt: expireTime,
-          voiceName,
-          language,
-          systemInstruction: systemInstructionText,
-        });
-      }
+    } catch (tokenErr: unknown) {
+      const msg = tokenErr instanceof Error ? tokenErr.message : String(tokenErr);
+      console.error("[voice/token] Ephemeral token creation failed:", msg);
+      return NextResponse.json(
+        {
+          error: "Could not initialize secure live voice session token. Please try again.",
+        },
+        { status: 502 }
+      );
     }
-  } catch (error: any) {
-    console.error("Voice token generation error:", error);
+  } catch (error: unknown) {
+    console.error("[voice/token] Unexpected error:", error);
     return NextResponse.json(
-      {
-        fallbackSpeech: true,
-        message: "Live WebSocket initialization deferred; browser speech fallback active.",
-      },
-      { status: 200 }
+      { error: "Failed to initialize live voice session." },
+      { status: 500 }
     );
   }
 }

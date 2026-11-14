@@ -1,14 +1,16 @@
 /**
  * AudioWorkletProcessor: PCM Recorder
- * Anti-aliased downsampler from hardware AudioContext sampleRate to 16,000 Hz 16-bit linear PCM.
- * Computes RMS audio energy for live visualizer meters and streams raw ArrayBuffer chunks
- * to the main thread for streaming to Gemini 3.8 Live.
+ * Converts hardware microphone Float32 frames to 16,000 Hz 16-bit linear PCM.
+ * Streams clean, unedited audio in fixed 20ms (320-sample) chunks to Gemini Live
+ * so server-side VAD and echo/barge-in handling receive intact speech onsets and sibilants.
  */
 class PcmRecorderProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.targetSampleRate = 16000;
-    this.buffer = [];
+    this.chunkSize = 320; // 20ms at 16kHz
+    this.buffer = new Float32Array(this.chunkSize * 4);
+    this.bufferLength = 0;
     this.isRecording = true;
     this.phase = 0;
     this.rmsSum = 0;
@@ -17,26 +19,40 @@ class PcmRecorderProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (event) => {
       if (event.data?.command === "stop") {
         this.isRecording = false;
-        this.buffer = [];
+        this.bufferLength = 0;
         this.phase = 0;
+        this.rmsSum = 0;
+        this.rmsCount = 0;
+        this.port.postMessage({ type: "level", rms: 0 });
       } else if (event.data?.command === "start") {
         this.isRecording = true;
-        this.buffer = [];
+        this.bufferLength = 0;
         this.phase = 0;
+        this.rmsSum = 0;
+        this.rmsCount = 0;
       }
     };
   }
 
-  process(inputs, outputs, parameters) {
+  _appendSample(val) {
+    if (this.bufferLength >= this.buffer.length) {
+      const next = new Float32Array(this.buffer.length * 2);
+      next.set(this.buffer);
+      this.buffer = next;
+    }
+    this.buffer[this.bufferLength++] = val;
+  }
+
+  process(inputs) {
     if (!this.isRecording) return true;
 
     const input = inputs[0];
     if (!input || !input[0] || input[0].length === 0) return true;
 
     const channelData = input[0];
-    const sourceSampleRate = sampleRate; // global in AudioWorkletGlobalScope
+    const sourceSampleRate = sampleRate;
 
-    // Compute live audio energy (RMS)
+    // Live RMS energy for UI visualizer (~every 40ms)
     let sumSquares = 0;
     for (let k = 0; k < channelData.length; k++) {
       const v = channelData[k];
@@ -45,23 +61,21 @@ class PcmRecorderProcessor extends AudioWorkletProcessor {
     this.rmsSum += sumSquares;
     this.rmsCount += channelData.length;
 
-    // Report mic level approximately every ~1000 input samples (~20ms at 48kHz)
-    if (this.rmsCount >= 1000) {
+    const levelInterval = Math.max(640, Math.round(sourceSampleRate * 0.04));
+    if (this.rmsCount >= levelInterval) {
       const rawRms = Math.sqrt(this.rmsSum / this.rmsCount);
-      // Scaled level for visual meter (capped at 1.0) and true physical rawRms for noise gating
       this.port.postMessage({
         type: "level",
-        rms: Math.min(1, rawRms * 2.5),
-        rawRms: rawRms,
+        rms: Math.min(1, rawRms * 3.0),
       });
       this.rmsSum = 0;
       this.rmsCount = 0;
     }
 
-    // Anti-aliased downsampling to 16kHz
+    // Fast path when AudioContext already runs at 16kHz; anti-aliased box resample otherwise
     if (Math.abs(sourceSampleRate - this.targetSampleRate) < 1) {
       for (let i = 0; i < channelData.length; i++) {
-        this.buffer.push(channelData[i]);
+        this._appendSample(channelData[i]);
       }
     } else {
       const ratio = sourceSampleRate / this.targetSampleRate;
@@ -73,7 +87,6 @@ class PcmRecorderProcessor extends AudioWorkletProcessor {
         const start = Math.floor(pos);
         const end = Math.min(len, Math.floor(nextPos));
 
-        // Box averaging across the downsample interval to eliminate high-frequency distortion
         let sum = 0;
         let count = 0;
         for (let i = start; i < end; i++) {
@@ -81,48 +94,30 @@ class PcmRecorderProcessor extends AudioWorkletProcessor {
           count++;
         }
         const sampleVal = count > 0 ? sum / count : channelData[start] || 0;
-        this.buffer.push(sampleVal);
+        this._appendSample(sampleVal);
         pos = nextPos;
       }
       this.phase = pos - len;
     }
 
-    // Flush in chunks of 512 samples (~32ms at 16kHz)
-    const chunkSize = 512;
-    while (this.buffer.length >= chunkSize) {
-      const chunk = this.buffer.splice(0, chunkSize);
-      const pcm16 = new Int16Array(chunk.length);
-      let chunkSquareSum = 0;
-      let zeroCrossings = 0;
-      let peakAmp = 0;
-      let prevSign = chunk[0] >= 0;
-
-      for (let j = 0; j < chunk.length; j++) {
-        const s = Math.max(-1, Math.min(1, chunk[j]));
-        const absVal = Math.abs(s);
-        if (absVal > peakAmp) peakAmp = absVal;
-        chunkSquareSum += s * s;
-
-        const currentSign = s >= 0;
-        if (currentSign !== prevSign) {
-          zeroCrossings++;
-          prevSign = currentSign;
-        }
-
+    // Flush fixed 20ms (320-sample) 16-bit PCM chunks
+    while (this.bufferLength >= this.chunkSize) {
+      const pcm16 = new Int16Array(this.chunkSize);
+      for (let j = 0; j < this.chunkSize; j++) {
+        const s = Math.max(-1, Math.min(1, this.buffer[j]));
         pcm16[j] = s < 0 ? s * 0x8000 : s * 0x7fff;
       }
 
-      const chunkRms = Math.sqrt(chunkSquareSum / chunk.length);
-      const zcr = zeroCrossings / chunk.length;
-      const crestFactor = chunkRms > 0.001 ? peakAmp / chunkRms : 1;
+      const remaining = this.bufferLength - this.chunkSize;
+      if (remaining > 0) {
+        this.buffer.copyWithin(0, this.chunkSize, this.bufferLength);
+      }
+      this.bufferLength = remaining;
 
       this.port.postMessage(
         {
           type: "audio",
           buffer: pcm16.buffer,
-          chunkRms,
-          zcr,
-          crestFactor,
         },
         [pcm16.buffer]
       );

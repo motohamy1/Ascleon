@@ -4,124 +4,100 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Mic,
   MicOff,
+  PhoneOff,
+  Settings2,
+  Captions,
+  ShieldAlert,
   Sparkles,
-  Activity,
   X,
-  Volume2,
-  Send,
-  Radio,
-  AlertCircle,
-  ChevronDown,
   RefreshCw,
-  Hand,
+  AlertCircle,
+  Send,
+  MessageSquare,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StudyLanguage } from "@/lib/language";
-import { AVAILABLE_LIVE_VOICES, DEFAULT_LIVE_VOICE, VOICE_BARGE_IN_MODES, VoiceBargeInMode } from "@/lib/voice-config";
-import { useLiveVoice, VisualTriggerEvent } from "@/hooks/useLiveVoice";
+import { AVAILABLE_LIVE_VOICES } from "@/lib/voice-config";
 import { StudyLanguageSwitch } from "@/components/reader/StudyLanguageSwitch";
+import { useVoiceSession } from "@/components/reader/VoiceSessionContext";
 
 interface AscleonVoiceStudioProps {
-  bookTitle: string;
   currentPageNumber: number;
-  currentSectionText: string;
-  selectedText?: string;
-  authoritativeReferences?: unknown[];
-  studyLanguage?: StudyLanguage;
   onStudyLanguageChange?: (lang: StudyLanguage) => void;
-  // Backwards compatibility props
-  language?: { code?: string };
-  onLanguageChange?: (lang: unknown) => void;
   onClose?: () => void;
-  isFloating?: boolean;
   onTriggerMorph?: () => void;
+  onContinueInChat?: (summaryText: string) => void;
 }
 
 export function AscleonVoiceStudio({
-  bookTitle,
   currentPageNumber,
-  currentSectionText,
-  selectedText,
-  authoritativeReferences = [],
-  studyLanguage = "en",
   onStudyLanguageChange,
-  language,
-  onLanguageChange,
   onClose,
-  isFloating = false,
   onTriggerMorph,
+  onContinueInChat,
 }: AscleonVoiceStudioProps) {
-  // Normalize study language
-  const activeLang: StudyLanguage =
-    studyLanguage || (language?.code === "ar" ? "ar" : language?.code === "mixed" ? "mixed" : "en");
-
-  const [selectedVoice, setSelectedVoice] = useState<string>(DEFAULT_LIVE_VOICE);
-  const [bargeInMode, setBargeInModeState] = useState<VoiceBargeInMode>("smart");
-  const [typedInput, setTypedInput] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Restore saved noise filter preference
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("ascleon_voice_barge_in_mode") as VoiceBargeInMode;
-      if (saved && (saved === "shield" || saved === "smart" || saved === "sensitive")) {
-        setBargeInModeState(saved);
-      }
-    } catch {}
-  }, []);
-
-  const handleVisualTrigger = (event: VisualTriggerEvent) => {
-    if (event.action === "open_morph" && onTriggerMorph) {
-      onTriggerMorph();
-    }
-  };
-
   const {
     status,
     isConnected,
+    isActiveOrConnecting,
     isMuted,
     toggleMute,
+    noisyPlace,
+    setNoisyPlace,
+    isHoldToTalkActive,
+    startHoldToTalk,
+    stopHoldToTalk,
     connect,
     disconnect,
     resetSession,
-    interrupt,
-    setBargeInMode,
+    prefetchToken,
+    bindVisualizerElement,
     sendTextMessage,
-    updatePageContext,
     messages,
-    currentInputTranscript,
-    currentOutputTranscript,
-    inputLevel,
-    outputLevel,
+    currentCaption,
     errorMessage,
     activeVisualTrigger,
     clearVisualTrigger,
-  } = useLiveVoice({
-    bookTitle,
-    pageNumber: currentPageNumber,
-    pageText: currentSectionText,
-    selectedText,
-    authoritativeReferences,
-    language: activeLang,
-    voiceName: selectedVoice,
-    bargeInMode,
-    onVisualTrigger: handleVisualTrigger,
-  });
+    voiceName,
+    setVoiceName,
+    language,
+  } = useVoiceSession();
 
-  const handleModeChange = (mode: VoiceBargeInMode) => {
-    setBargeInModeState(mode);
-    setBargeInMode(mode);
-    try {
-      localStorage.setItem("ascleon_voice_barge_in_mode", mode);
-    } catch {}
-  };
+  const [showSettings, setShowSettings] = useState(false);
+  const [showTranscriptSheet, setShowTranscriptSheet] = useState(false);
+  const [showCaptions, setShowCaptions] = useState(true);
+  const [typedInput, setTypedInput] = useState("");
+  const orbContainerRef = useRef<HTMLDivElement>(null);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
 
-  // Keyboard shortcut: Spacebar interrupts mentor speech cleanly
   useEffect(() => {
+    bindVisualizerElement(orbContainerRef.current);
+    return () => bindVisualizerElement(null);
+  }, [bindVisualizerElement, isActiveOrConnecting]);
+
+  // Prefetch ephemeral token while idle so tapping Start connects fast
+  useEffect(() => {
+    if (status === "idle") {
+      prefetchToken();
+    }
+  }, [status, prefetchToken]);
+
+  // Auto-scroll transcript when sheet or post-call log updates
+  useEffect(() => {
+    if (transcriptScrollRef.current) {
+      transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
+    }
+  }, [messages, currentCaption, showTranscriptSheet]);
+
+  // Spacebar hold-to-talk when noisyPlace is active
+  useEffect(() => {
+    if (!isConnected || !noisyPlace) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
         e.code === "Space" &&
-        status === "mentor_speaking" &&
+        !e.repeat &&
         !(
           e.target instanceof HTMLInputElement ||
           e.target instanceof HTMLTextAreaElement ||
@@ -129,502 +105,684 @@ export function AscleonVoiceStudio({
         )
       ) {
         e.preventDefault();
-        interrupt();
+        startHoldToTalk();
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        e.preventDefault();
+        stopHoldToTalk();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [status, interrupt]);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [isConnected, noisyPlace, startHoldToTalk, stopHoldToTalk]);
 
-  // Track page changes during live call
-  useEffect(() => {
-    if (isConnected) {
-      updatePageContext(currentSectionText, currentPageNumber);
+  const handleStarterChip = async (prompt: string) => {
+    if (!isConnected) {
+      await connect();
     }
-  }, [currentPageNumber, currentSectionText, isConnected, updatePageContext]);
+    sendTextMessage(prompt);
+  };
 
-  // Scroll to bottom of message transcripts
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, currentInputTranscript, currentOutputTranscript]);
-
-  const handleSendText = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleSendText = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!typedInput.trim()) return;
-    const textToSend = typedInput;
+    const text = typedInput.trim();
     setTypedInput("");
-
     if (!isConnected) {
-      connect().then(() => {
-        sendTextMessage(textToSend);
-      });
-    } else {
-      sendTextMessage(textToSend);
+      await connect();
     }
+    sendTextMessage(text);
   };
 
-  const handleChipClick = (chipText: string) => {
-    if (!isConnected) {
-      connect().then(() => {
-        sendTextMessage(chipText);
-      });
-    } else {
-      sendTextMessage(chipText);
-    }
-  };
+  const statusLabel =
+    status === "connecting"
+      ? language === "ar"
+        ? "جاري الاتصال…"
+        : "Connecting…"
+      : status === "reconnecting"
+      ? language === "ar"
+        ? "إعادة الاتصال…"
+        : "Reconnecting…"
+      : status === "speaking"
+      ? language === "ar"
+        ? "يتحدث"
+        : "Speaking"
+      : isMuted
+      ? language === "ar"
+        ? "الميكروفون مكتوم"
+        : "Muted"
+      : noisyPlace
+      ? isHoldToTalkActive
+        ? language === "ar"
+          ? "يستمع إليك…"
+          : "Listening…"
+        : language === "ar"
+        ? "اضغط مطولاً للتحدث"
+        : "Hold to speak"
+      : language === "ar"
+      ? "يستمع"
+      : "Listening";
 
-  // Compute reactive visualizer energy
-  const activeLevel = status === "mentor_speaking" ? outputLevel : inputLevel;
-  const orbScale = isConnected ? 1 + Math.min(0.25, activeLevel * 0.4) : 1;
+  const latestCaption =
+    currentCaption || (messages.length > 0 ? messages[messages.length - 1].text : "");
 
-  return (
-    <div
-      className={cn(
-        "flex flex-col h-full bg-[color:var(--ink-soft)] text-[color:var(--ink)] overflow-hidden",
-        isFloating && "fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] h-[580px] rounded-[22px] border-2 border-[color:var(--ink)] shadow-[6px_6px_0px_#0f0e10]"
-      )}
-    >
-      {/* 1. TOP HEADER & CONTROLS BAR (Matches AI Chat header bar in LivingReader) */}
-      <div className="flex flex-col gap-2.5 border-b-2 border-[color:var(--ink)] bg-[color:var(--ink-soft)] p-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div
-              className={cn(
-                "flex size-7 items-center justify-center rounded-full border-2 border-[color:var(--ink)] shadow-chip transition-all",
-                isConnected
-                  ? "bg-[color:var(--orange)] text-[color:var(--ink)]"
-                  : "bg-[color:var(--cream)] text-[color:var(--ink)]"
-              )}
-            >
-              <Radio className="size-3.5 stroke-[2.5]" />
+  // Settings Popover / Sheet (shared across Idle & Live)
+  const renderSettingsPanel = () => {
+    if (!showSettings) return null;
+    return (
+      <div className="absolute right-3 top-14 z-30 w-72 rounded-2xl border-2 border-[color:var(--ink)] bg-[color:var(--panel)] p-4 text-[color:var(--ink)] shadow-[4px_4px_0px_#0f0e10]">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-xs font-black uppercase tracking-wider">Voice Settings</span>
+          <button
+            type="button"
+            onClick={() => setShowSettings(false)}
+            className="cursor-pointer rounded-full p-1 hover:bg-[color:var(--ink)]/10"
+            aria-label="Close settings"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="space-y-3.5 text-xs">
+          {/* Language */}
+          {onStudyLanguageChange && (
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold text-[color:var(--ink)]/70">
+                Session Language
+              </label>
+              <StudyLanguageSwitch
+                currentLanguage={language}
+                onLanguageChange={onStudyLanguageChange}
+              />
             </div>
+          )}
+
+          {/* Voice Persona */}
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-bold text-[color:var(--ink)]/70">
+              Mentor Voice {isConnected ? "(next session)" : ""}
+            </label>
+            <select
+              value={voiceName}
+              disabled={isConnected}
+              onChange={(e) => setVoiceName(e.target.value)}
+              className="w-full cursor-pointer rounded-xl border-2 border-[color:var(--ink)] bg-white px-3 py-1.5 text-xs font-bold text-[color:var(--ink)] focus:outline-none disabled:opacity-50"
+            >
+              {AVAILABLE_LIVE_VOICES.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name} ({v.gender}) — {v.tone}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Noisy Place Toggle */}
+          <div className="flex items-start justify-between gap-3 rounded-xl border border-[color:var(--ink)]/15 bg-white/70 p-2.5">
             <div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-mono text-xs font-black tracking-tight text-[color:var(--cream)] uppercase">
-                  ASCLEON VOICE AGENT
-                </span>
-                <span className="rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-2 py-0.5 text-[9px] font-black uppercase text-[color:var(--ink)] shadow-[1px_1px_0px_#0f0e10]">
-                  LIVE CLINICAL MENTOR
-                </span>
+              <div className="font-bold text-[color:var(--ink)]">
+                {language === "ar" ? "مكان مزدحم (اضغط للتحدث)" : "Noisy place (Hold-to-talk)"}
+              </div>
+              <div className="mt-0.5 text-[11px] leading-snug text-[color:var(--ink)]/65">
+                {language === "ar"
+                  ? "يمنع الضوضاء المحيطة من مقاطعة الشرح."
+                  : "Manual hold-to-speak so background chatter never interrupts."}
               </div>
             </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={noisyPlace}
+              onClick={() => setNoisyPlace(!noisyPlace)}
+              className={cn(
+                "relative mt-0.5 h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-[color:var(--ink)] transition-colors duration-150",
+                noisyPlace ? "bg-[color:var(--orange)]" : "bg-[color:var(--cream)]"
+              )}
+            >
+              <span
+                className={cn(
+                  "block size-4 rounded-full bg-[color:var(--ink)] transition-transform duration-150",
+                  noisyPlace ? "translate-x-5" : "translate-x-0.5"
+                )}
+              />
+            </button>
+          </div>
+
+          {/* Captions Toggle */}
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-[color:var(--ink)]/15 bg-white/70 p-2.5">
+            <span className="font-bold text-[color:var(--ink)]">
+              {language === "ar" ? "إظهار الترجمة الحية" : "Live mentor captions"}
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showCaptions}
+              onClick={() => setShowCaptions((prev) => !prev)}
+              className={cn(
+                "relative h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-[color:var(--ink)] transition-colors duration-150",
+                showCaptions ? "bg-[color:var(--mint)]" : "bg-[color:var(--cream)]"
+              )}
+            >
+              <span
+                className={cn(
+                  "block size-4 rounded-full bg-[color:var(--ink)] transition-transform duration-150",
+                  showCaptions ? "translate-x-5" : "translate-x-0.5"
+                )}
+              />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // =========================================================================
+  // 1. FOCUSED LIVE MODE (ChatGPT / Gemini / Claude style)
+  // =========================================================================
+  if (isActiveOrConnecting) {
+    return (
+      <div className="relative flex h-full flex-col justify-between overflow-hidden bg-[color:var(--ink-soft)] text-[color:var(--cream)]">
+        {/* Quiet Top Bar */}
+        <div className="flex items-center justify-between px-4 pt-3.5 pb-2">
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "size-2 rounded-full transition-colors duration-200",
+                status === "speaking"
+                  ? "bg-[color:var(--mint)]"
+                  : status === "connecting" || status === "reconnecting"
+                  ? "bg-amber-400 animate-pulse motion-reduce:animate-none"
+                  : isMuted
+                  ? "bg-red-400"
+                  : "bg-[color:var(--orange)]"
+              )}
+            />
+            <span className="text-xs font-semibold tracking-wide text-[color:var(--cream)]/85">
+              {statusLabel}
+            </span>
           </div>
 
           <div className="flex items-center gap-1.5">
-            {/* New Session Button if paused with existing messages */}
-            {messages.length > 0 && !isConnected && (
-              <button
-                type="button"
-                onClick={resetSession}
-                className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] px-2.5 py-1 font-mono text-[10px] font-black uppercase text-[color:var(--ink)] shadow-chip hover:bg-[color:var(--orange)] transition-colors"
-                title="Clear history and start a fresh session"
-              >
-                New Session
-              </button>
-            )}
-
-            {/* Vocal Noise Shield & Barge-In Filter Mode Selector */}
-            <div className="relative">
-              <select
-                value={bargeInMode}
-                onChange={(e) => handleModeChange(e.target.value as VoiceBargeInMode)}
-                className="appearance-none cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] pl-2.5 pr-6 py-1 font-mono text-[10px] font-black text-[color:var(--ink)] shadow-chip focus:outline-none"
-                title="Vocal Noise Filter Mode (Shield / Smart / Sensitive)"
-              >
-                {VOICE_BARGE_IN_MODES.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.id === "shield" ? "🛡️ " : m.id === "smart" ? "🎯 " : "⚡ "}
-                    {activeLang === "ar" ? m.nameAr : m.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 size-3 text-[color:var(--ink)] stroke-[2.5]" />
-            </div>
-
-            {/* Voice Persona Selector */}
-            <div className="relative">
-              <select
-                value={selectedVoice}
-                disabled={isConnected}
-                onChange={(e) => setSelectedVoice(e.target.value)}
-                className="appearance-none cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] pl-2.5 pr-6 py-1 font-mono text-[10px] font-black text-[color:var(--ink)] shadow-chip focus:outline-none disabled:opacity-50"
-                title="Select Mentor Voice Persona"
-              >
-                {AVAILABLE_LIVE_VOICES.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name} ({v.gender})
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 size-3 text-[color:var(--ink)] stroke-[2.5]" />
-            </div>
-
+            <button
+              type="button"
+              onClick={() => setShowSettings((s) => !s)}
+              className={cn(
+                "flex size-8 cursor-pointer items-center justify-center rounded-full border transition-colors",
+                showSettings
+                  ? "border-[color:var(--orange)] bg-[color:var(--orange)] text-[color:var(--ink)]"
+                  : "border-white/15 bg-white/5 text-[color:var(--cream)]/80 hover:bg-white/10"
+              )}
+              title="Voice settings"
+              aria-label="Voice settings"
+            >
+              <Settings2 className="size-4" />
+            </button>
             {onClose && (
               <button
                 type="button"
                 onClick={onClose}
-                className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] p-1.5 text-[color:var(--ink)] shadow-chip hover:bg-[color:var(--orange)]"
+                className="flex size-8 cursor-pointer items-center justify-center rounded-full border border-white/15 bg-white/5 text-[color:var(--cream)]/80 hover:bg-white/10"
+                title="Minimize"
+                aria-label="Minimize"
               >
-                <X className="size-3.5 stroke-[2.5]" />
+                <X className="size-4" />
               </button>
             )}
           </div>
         </div>
 
-        {/* Study Language Switch (Unified across Reader) */}
-        {onStudyLanguageChange && (
-          <div className="flex items-center justify-between pt-0.5">
-            <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[color:var(--cream)]/80">
-              Session Language:
-            </span>
-            <StudyLanguageSwitch
-              currentLanguage={activeLang}
-              onLanguageChange={onStudyLanguageChange}
-            />
-          </div>
-        )}
+        {renderSettingsPanel()}
 
-        {/* Studio Voice Isolation & Filter Badge */}
-        <div className="flex items-center justify-between pt-1 border-t border-white/10 text-[10px]">
-          <span className="font-mono font-bold text-[color:var(--cream)]/80 flex items-center gap-1">
-            <span className="size-1.5 rounded-full bg-[color:var(--mint)] animate-pulse" />
-            Vocal Filter:
-          </span>
-          <span className="font-mono text-[9.5px] font-bold text-[color:var(--cream)] bg-white/10 px-2 py-0.5 rounded-full">
-            {bargeInMode === "shield"
-              ? (activeLang === "ar" ? "🛡️ درع الضوضاء — عزل كامل بدون مقاطعة" : "🛡️ Noise Shield — Uninterrupted Turns")
-              : bargeInMode === "smart"
-              ? (activeLang === "ar" ? "🎯 تركيز صوتي ذكي — عزل أصوات الغرفة" : "🎯 Smart Vocal EQ — Adaptive Noise Gate")
-              : (activeLang === "ar" ? "⚡ حساسية عالية — للغرف الهادئة والسماعات" : "⚡ High Sensitivity — Quiet Space")}
-          </span>
-        </div>
-      </div>
-
-      {/* VISUAL TRIGGER ACTION BANNER ("Show while explaining") */}
-      {activeVisualTrigger && (
-        <div className="mx-3 mt-3 flex items-center justify-between rounded-[14px] border-2 border-[color:var(--ink)] bg-[color:var(--mint)] px-3 py-2 text-xs text-[color:var(--ink)] shadow-chip animate-in fade-in slide-in-from-top-2 duration-200">
-          <div className="flex items-center gap-2">
-            <Sparkles className="size-4 shrink-0 text-[color:var(--ink)]" />
-            <div>
-              <div className="font-black">
-                {activeVisualTrigger.action === "open_morph" ? "Morph View Activated:" : "Concept Highlighted:"}{" "}
-                <span className="underline decoration-2">{activeVisualTrigger.conceptName}</span>
-              </div>
-              {activeVisualTrigger.explanation && (
-                <div className="text-[11px] font-semibold text-[color:var(--ink)]/80">
-                  {activeVisualTrigger.explanation}
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5">
+        {/* Optional Visual Grounding Pill */}
+        {activeVisualTrigger && (
+          <div className="mx-auto mt-1 flex max-w-[90%] items-center gap-2 rounded-full border border-[color:var(--mint)]/40 bg-[color:var(--mint)]/15 px-3 py-1 text-[11px] text-[color:var(--mint)]">
+            <Sparkles className="size-3.5 shrink-0" />
+            <span className="truncate font-semibold">{activeVisualTrigger.conceptName}</span>
             {activeVisualTrigger.action === "open_morph" && onTriggerMorph && (
               <button
                 type="button"
                 onClick={onTriggerMorph}
-                className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] px-2.5 py-1 text-[10px] font-black uppercase text-[color:var(--ink)] shadow-[1px_1px_0px_#0f0e10] hover:bg-[color:var(--orange)]"
+                className="cursor-pointer rounded-full bg-[color:var(--mint)] px-2 py-0.5 text-[10px] font-black text-[color:var(--ink)]"
               >
-                View Morph
+                Open Morph
               </button>
             )}
             <button
               type="button"
               onClick={clearVisualTrigger}
-              className="cursor-pointer rounded p-1 text-[color:var(--ink)] hover:opacity-70"
+              className="cursor-pointer opacity-70 hover:opacity-100"
+              aria-label="Dismiss visual trigger"
             >
-              <X className="size-3.5 stroke-[2.5]" />
+              <X className="size-3" />
             </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ERROR NOTICE */}
+        {/* Centre Reactive Orb & Single Caption */}
+        <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+          <div
+            ref={orbContainerRef}
+            style={
+              {
+                "--voice-level": "0",
+                "--voice-scale": "1",
+              } as React.CSSProperties
+            }
+            className="relative flex items-center justify-center"
+          >
+            {/* Outer Ambient Halo */}
+            <div
+              className={cn(
+                "pointer-events-none absolute size-44 rounded-full transition-colors duration-300 motion-reduce:transition-none",
+                status === "speaking"
+                  ? "bg-[color:var(--mint)]/18"
+                  : isHoldToTalkActive
+                  ? "bg-[color:var(--orange)]/25"
+                  : "bg-[color:var(--orange)]/12"
+              )}
+              style={{
+                transform: "scale(calc(var(--voice-scale, 1) * 1.12))",
+              }}
+            />
+
+            {/* Primary Interactive Orb */}
+            <button
+              type="button"
+              onPointerDown={noisyPlace ? startHoldToTalk : undefined}
+              onPointerUp={noisyPlace ? stopHoldToTalk : undefined}
+              onPointerCancel={noisyPlace ? stopHoldToTalk : undefined}
+              onPointerLeave={noisyPlace ? stopHoldToTalk : undefined}
+              onClick={!noisyPlace ? toggleMute : undefined}
+              className={cn(
+                "relative z-10 flex size-32 cursor-pointer select-none items-center justify-center rounded-full border-2 border-[color:var(--ink)] shadow-[0_0_40px_rgba(255,76,0,0.18)] transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--orange)] motion-reduce:transform-none",
+                status === "speaking"
+                  ? "bg-[color:var(--mint)] text-[color:var(--ink)]"
+                  : status === "connecting" || status === "reconnecting"
+                  ? "bg-[color:var(--cream)] text-[color:var(--ink)]"
+                  : isMuted
+                  ? "bg-white/10 text-[color:var(--cream)]/60 border-white/20"
+                  : isHoldToTalkActive
+                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] ring-4 ring-[color:var(--orange)]/40"
+                  : "bg-[color:var(--orange)] text-[color:var(--ink)]"
+              )}
+              style={{
+                transform: "scale(var(--voice-scale, 1))",
+              }}
+              aria-label={
+                noisyPlace
+                  ? "Hold to speak"
+                  : isMuted
+                  ? "Unmute microphone"
+                  : "Mute microphone"
+              }
+            >
+              {status === "connecting" || status === "reconnecting" ? (
+                <RefreshCw className="size-9 animate-spin motion-reduce:animate-none" />
+              ) : isMuted ? (
+                <MicOff className="size-9" />
+              ) : (
+                <Mic className="size-9" />
+              )}
+            </button>
+          </div>
+
+          {/* Helper hint for Noisy Place */}
+          {noisyPlace && isConnected && (
+            <p className="mt-4 text-[11px] font-semibold tracking-wide text-[color:var(--cream)]/65">
+              {isHoldToTalkActive
+                ? language === "ar"
+                  ? "اترك الزر عند الانتهاء"
+                  : "Release when done"
+                : language === "ar"
+                ? "اضغط مطولاً على الدائرة أو زر المسافة للتحدث"
+                : "Hold orb or Spacebar to speak"}
+            </p>
+          )}
+
+          {/* Single Live Mentor Caption Line */}
+          {showCaptions && latestCaption && (
+            <button
+              type="button"
+              onClick={() => setShowTranscriptSheet(true)}
+              dir="auto"
+              className="mt-6 max-w-[42ch] cursor-pointer rounded-2xl px-4 py-2 text-center text-sm font-medium leading-relaxed text-[color:var(--cream)]/90 transition-colors hover:bg-white/5 line-clamp-3"
+              title="Tap to view full mentor transcript"
+            >
+              {latestCaption}
+            </button>
+          )}
+        </div>
+
+        {/* Bottom 4-Button Dock */}
+        <div className="flex items-center justify-center gap-4 px-4 pb-6 pt-2">
+          {/* 1. Mute / Unmute */}
+          <button
+            type="button"
+            onClick={toggleMute}
+            className={cn(
+              "flex size-12 cursor-pointer items-center justify-center rounded-full border-2 transition-all duration-150",
+              isMuted
+                ? "border-red-400/70 bg-red-500/20 text-red-200 hover:bg-red-500/30"
+                : "border-white/15 bg-white/10 text-[color:var(--cream)] hover:bg-white/20"
+            )}
+            title={isMuted ? "Unmute microphone" : "Mute microphone"}
+            aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
+          >
+            {isMuted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
+          </button>
+
+          {/* 2. Noisy Place (Hold-to-Talk) */}
+          <button
+            type="button"
+            onClick={() => setNoisyPlace(!noisyPlace)}
+            className={cn(
+              "flex size-12 cursor-pointer items-center justify-center rounded-full border-2 transition-all duration-150",
+              noisyPlace
+                ? "border-[color:var(--orange)] bg-[color:var(--orange)] text-[color:var(--ink)]"
+                : "border-white/15 bg-white/10 text-[color:var(--cream)] hover:bg-white/20"
+            )}
+            title={
+              noisyPlace
+                ? "Noisy Place ON (Hold-to-talk) — tap for hands-free"
+                : "Hands-free — tap to switch to Noisy Place (Hold-to-talk)"
+            }
+            aria-label="Toggle Noisy Place hold-to-talk"
+            aria-pressed={noisyPlace}
+          >
+            <ShieldAlert className="size-5" />
+          </button>
+
+          {/* 3. Captions / Transcript Sheet */}
+          <button
+            type="button"
+            onClick={() => setShowTranscriptSheet((s) => !s)}
+            className={cn(
+              "flex size-12 cursor-pointer items-center justify-center rounded-full border-2 transition-all duration-150",
+              showTranscriptSheet
+                ? "border-[color:var(--mint)] bg-[color:var(--mint)] text-[color:var(--ink)]"
+                : "border-white/15 bg-white/10 text-[color:var(--cream)] hover:bg-white/20"
+            )}
+            title="View mentor transcript"
+            aria-label="View mentor transcript"
+          >
+            <Captions className="size-5" />
+          </button>
+
+          {/* 4. End Session */}
+          <button
+            type="button"
+            onClick={disconnect}
+            className="flex size-12 cursor-pointer items-center justify-center rounded-full border-2 border-red-500 bg-red-600 text-white transition-all duration-150 hover:bg-red-500"
+            title="End live session"
+            aria-label="End live session"
+          >
+            <PhoneOff className="size-5" />
+          </button>
+        </div>
+
+        {/* Slide-up Mentor Transcript Sheet */}
+        {showTranscriptSheet && (
+          <div className="absolute inset-x-0 bottom-0 top-14 z-20 flex flex-col rounded-t-2xl border-t-2 border-[color:var(--ink)] bg-[color:var(--panel)] text-[color:var(--ink)] shadow-lg">
+            <div className="flex items-center justify-between border-b border-[color:var(--ink)]/10 px-4 py-3">
+              <span className="text-xs font-black uppercase tracking-wider">
+                Mentor Transcript
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowTranscriptSheet(false)}
+                className="cursor-pointer rounded-full p-1 hover:bg-[color:var(--ink)]/10"
+                aria-label="Close transcript"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div ref={transcriptScrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
+              {messages.length === 0 && !currentCaption && (
+                <p className="py-8 text-center text-xs font-medium text-[color:var(--ink)]/55">
+                  Mentor captions will appear here as the session progresses.
+                </p>
+              )}
+              {messages.map((m) => (
+                <div
+                  key={m.id}
+                  dir="auto"
+                  className="ascleon-bidi rounded-xl border border-[color:var(--ink)]/15 bg-white p-3 text-xs leading-relaxed text-[color:var(--ink)]"
+                >
+                  <div className="mb-1 flex items-center justify-between text-[10px] font-bold text-[color:var(--ink)]/55">
+                    <span>ASCLEON MENTOR</span>
+                    <div className="flex items-center gap-1.5">
+                      {m.interrupted && (
+                        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-800">
+                          Interrupted
+                        </span>
+                      )}
+                      <span>{m.time}</span>
+                    </div>
+                  </div>
+                  <p className="whitespace-pre-wrap">{m.text}</p>
+                </div>
+              ))}
+              {currentCaption && (
+                <div
+                  dir="auto"
+                  className="ascleon-bidi rounded-xl border border-[color:var(--orange)]/40 bg-[color:var(--cream)]/50 p-3 text-xs leading-relaxed text-[color:var(--ink)]"
+                >
+                  <p className="whitespace-pre-wrap">{currentCaption}</p>
+                </div>
+              )}
+            </div>
+
+            <form
+              onSubmit={handleSendText}
+              className="flex items-center gap-2 border-t border-[color:var(--ink)]/10 bg-white p-3"
+            >
+              <input
+                type="text"
+                dir="auto"
+                value={typedInput}
+                onChange={(e) => setTypedInput(e.target.value)}
+                placeholder="Type a question silently…"
+                className="ascleon-bidi flex-1 rounded-xl border border-[color:var(--ink)]/20 bg-[color:var(--panel)] px-3 py-2 text-xs font-medium text-[color:var(--ink)] focus:border-[color:var(--orange)] focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={!typedInput.trim()}
+                className="flex size-9 cursor-pointer items-center justify-center rounded-xl bg-[color:var(--orange)] text-[color:var(--ink)] disabled:opacity-40"
+                aria-label="Send"
+              >
+                <Send className="size-4" />
+              </button>
+            </form>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // 2. IDLE / POST-CALL VIEW
+  // =========================================================================
+  return (
+    <div className="relative flex h-full flex-col bg-[color:var(--ink-soft)] text-[color:var(--cream)]">
+      {/* Clean Header */}
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-black uppercase tracking-wider text-[color:var(--cream)]">
+            Ascleon Voice
+          </span>
+          <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--cream)]/75">
+            Page {currentPageNumber}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={resetSession}
+              className="flex cursor-pointer items-center gap-1 rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] font-bold text-[color:var(--cream)] hover:bg-white/10"
+              title="Clear history and start a new session"
+            >
+              <RotateCcw className="size-3" />
+              <span>New</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowSettings((s) => !s)}
+            className={cn(
+              "flex size-8 cursor-pointer items-center justify-center rounded-full border transition-colors",
+              showSettings
+                ? "border-[color:var(--orange)] bg-[color:var(--orange)] text-[color:var(--ink)]"
+                : "border-white/15 bg-white/5 text-[color:var(--cream)]/80 hover:bg-white/10"
+            )}
+            title="Voice settings"
+            aria-label="Voice settings"
+          >
+            <Settings2 className="size-4" />
+          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex size-8 cursor-pointer items-center justify-center rounded-full border border-white/15 bg-white/5 text-[color:var(--cream)]/80 hover:bg-white/10"
+              aria-label="Close"
+            >
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {renderSettingsPanel()}
+
+      {/* Error Notice */}
       {errorMessage && (
-        <div className="mx-3 mt-3 flex items-center justify-between rounded-[14px] border-2 border-[color:var(--ink)] bg-red-100 px-3 py-2 text-xs text-red-900 shadow-chip">
+        <div className="mx-4 mt-3 flex items-center justify-between gap-2 rounded-xl border border-red-400/50 bg-red-500/15 px-3 py-2 text-xs text-red-100">
           <div className="flex items-center gap-2">
-            <AlertCircle className="size-4 shrink-0 text-red-700" />
-            <span className="font-bold">{errorMessage}</span>
+            <AlertCircle className="size-4 shrink-0 text-red-300" />
+            <span className="font-medium">{errorMessage}</span>
           </div>
           <button
             type="button"
             onClick={connect}
-            className="flex items-center gap-1 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] px-2.5 py-1 text-[10px] font-black uppercase shadow-[1px_1px_0px_#0f0e10] hover:bg-[color:var(--orange)]"
+            className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full bg-red-500 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-red-400"
           >
-            <RefreshCw className="size-3 stroke-[2.5]" />
+            <RefreshCw className="size-3" />
             Retry
           </button>
         </div>
       )}
 
-      {/* 2. ORAL VIVA & VOICE STAGE */}
-      <div className="flex flex-1 flex-col overflow-hidden p-3 gap-3">
-        {/* INTERACTIVE LIVE ORB HERO CARD */}
-        <div className="flex flex-col items-center justify-center rounded-[18px] border-2 border-[color:var(--ink)] bg-[color:var(--cream)] p-4 shadow-chip">
-          <div className="relative flex items-center justify-center">
-            {/* Outer reactive pulse rings */}
-            <div
-              className="absolute size-32 rounded-full border-2 border-[color:var(--ink)] transition-all duration-100"
-              style={{
-                transform: `scale(${orbScale * 1.15})`,
-                opacity: isConnected ? 0.35 : 0,
-              }}
-            />
-            <div
-              className="absolute size-28 rounded-full border-2 border-[color:var(--orange)] transition-all duration-75"
-              style={{
-                transform: `scale(${orbScale * 1.08})`,
-                opacity: isConnected ? 0.6 : 0,
-              }}
-            />
+      {/* Main Content: Empty Hero vs Post-Call Review */}
+      {messages.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+          <button
+            type="button"
+            onPointerEnter={prefetchToken}
+            onFocus={prefetchToken}
+            onClick={connect}
+            className="flex size-28 cursor-pointer items-center justify-center rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-[0_0_40px_rgba(255,76,0,0.22)] transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--orange)]"
+            aria-label="Start live voice session"
+          >
+            <Mic className="size-10" />
+          </button>
 
-            {/* Central Orb Button */}
-            <button
-              type="button"
-              onClick={isConnected ? disconnect : connect}
-              className={cn(
-                "relative z-10 flex size-24 cursor-pointer items-center justify-center rounded-full border-2 border-[color:var(--ink)] transition-all duration-150 shadow-chip",
-                isConnected
-                  ? status === "mentor_speaking"
-                    ? "bg-[color:var(--mint)] text-[color:var(--ink)]"
-                    : status === "interrupted"
-                    ? "bg-amber-300 text-[color:var(--ink)]"
-                    : "bg-[color:var(--orange)] text-[color:var(--ink)]"
-                  : status === "connecting"
-                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] animate-spin"
-                  : "bg-[color:var(--panel)] text-[color:var(--ink)] hover:bg-[color:var(--orange)]"
-              )}
-              style={{ transform: `scale(${orbScale})` }}
-              title={isConnected ? "Tap to End Oral Session" : "Tap to Start Live Voice Mentor"}
-            >
-              {status === "connecting" ? (
-                <Activity className="size-8 stroke-[2.5] animate-pulse" />
-              ) : isConnected ? (
-                status === "mentor_speaking" ? (
-                  <Volume2 className="size-8 stroke-[2.5]" />
-                ) : (
-                  <Mic className="size-8 stroke-[2.5] animate-pulse" />
-                )
-              ) : (
-                <Mic className="size-8 stroke-[2.5]" />
-              )}
-            </button>
+          <h3 className="mt-5 text-sm font-bold text-[color:var(--cream)]">
+            {language === "ar"
+              ? "ابدأ جلسة صوتية حية"
+              : "Tap to start a live voice session"}
+          </h3>
+          <p className="mt-1.5 max-w-[34ch] text-xs leading-relaxed text-[color:var(--cream)]/65">
+            {language === "ar"
+              ? "اتكلم بشكل طبيعي وقاطع الشرح في أي وقت للسؤال."
+              : "Speak naturally about this page and interrupt anytime to ask a question."}
+          </p>
+
+          {/* Starter Chips */}
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
+            {[
+              language === "ar"
+                ? "اشرح لي الصفحة دي ببساطة"
+                : language === "mixed"
+                ? "اشرح لي الـ mechanism هنا"
+                : "Explain this page clearly",
+              language === "ar"
+                ? "اسألني سؤال شفوي سريع"
+                : language === "mixed"
+                ? "Quiz me على النقطة دي"
+                : "Quiz me orally on this",
+              language === "ar"
+                ? "أهم نقاط الامتحان هنا"
+                : language === "mixed"
+                ? "إيه الـ high-yield pearls هنا؟"
+                : "High-yield exam pearls",
+            ].map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                dir="auto"
+                onClick={() => handleStarterChip(chip)}
+                className="ascleon-bidi cursor-pointer rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-medium text-[color:var(--cream)]/90 transition-colors hover:border-[color:var(--orange)] hover:bg-white/10"
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <div ref={transcriptScrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
+            {messages.map((m) => (
+              <div
+                key={m.id}
+                dir="auto"
+                className="ascleon-bidi rounded-xl border border-white/10 bg-white/5 p-3 text-xs leading-relaxed text-[color:var(--cream)]/90"
+              >
+                <div className="mb-1 flex items-center justify-between text-[10px] font-bold text-[color:var(--cream)]/50">
+                  <span>ASCLEON MENTOR</span>
+                  <span>{m.time}</span>
+                </div>
+                <p className="whitespace-pre-wrap">{m.text}</p>
+              </div>
+            ))}
           </div>
 
-          {/* STATUS LABEL & LIVE MIC ENERGY */}
-          <div className="mt-3 flex flex-col items-center gap-1.5">
-            <span className="font-mono text-[11px] font-black uppercase tracking-wider text-[color:var(--ink)] text-center">
-              {status === "connecting" && "SETTING UP ASCLEON VOICE AGENT..."}
-              {status === "listening" && (isMuted ? "MIC MUTED (LISTENING PAUSED)" : "READY — SPEAK NATURALLY")}
-              {status === "mentor_speaking" &&
-                (bargeInMode === "shield"
-                  ? (activeLang === "ar" ? "دكتور وائل يشرح (درع الضوضاء مفعل)" : "ASCLEON MENTOR SPEAKING (NOISE SHIELD)")
-                  : bargeInMode === "smart"
-                  ? (activeLang === "ar" ? "دكتور وائل يشرح (تركيز صوتي ذكي)" : "ASCLEON MENTOR SPEAKING (SMART FOCUS)")
-                  : (activeLang === "ar" ? "دكتور وائل يشرح (حساسية عالية)" : "ASCLEON MENTOR SPEAKING (QUICK BARGE-IN)"))}
-              {status === "interrupted" && "INTERRUPTED! LISTENING TO YOUR QUESTION..."}
-              {status === "disconnected" &&
-                (messages.length > 0
-                  ? "SESSION PAUSED — TAP MIC TO RESUME"
-                  : "TAP MIC TO BEGIN LIVE VOICE SESSION")}
-              {status === "error" && "DISCONNECTED"}
-            </span>
+          {/* Resume & Continue Actions */}
+          <div className="flex items-center gap-2 border-t border-white/10 p-3">
+            <button
+              type="button"
+              onClick={connect}
+              className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-2.5 text-xs font-black text-[color:var(--ink)] transition-opacity hover:opacity-95"
+            >
+              <Mic className="size-4" />
+              <span>{language === "ar" ? "استكمال الجلسة" : "Resume Voice"}</span>
+            </button>
 
-            {/* Waveform indicator */}
-            {isConnected && (
-              <div className="flex items-center gap-1 py-0.5">
-                {Array.from({ length: 9 }).map((_, i) => {
-                  const factor = Math.sin((i / 8) * Math.PI);
-                  const barHeight = Math.max(5, Math.round(activeLevel * 22 * factor));
-                  return (
-                    <div
-                      key={i}
-                      className="w-1.5 rounded-full border border-[color:var(--ink)] bg-[color:var(--ink)] transition-all duration-75"
-                      style={{ height: `${barHeight}px` }}
-                    />
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Interactive "Interrupt & Speak" button when mentor is actively speaking */}
-            {status === "mentor_speaking" && (
+            {onContinueInChat && (
               <button
                 type="button"
-                onClick={interrupt}
-                className="mt-1.5 flex items-center gap-1.5 cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-4 py-1.5 font-sans text-xs font-black uppercase text-[color:var(--ink)] shadow-[2px_2px_0px_#0f0e10] hover:scale-105 active:translate-y-0.5 transition-all animate-pulse"
-                title={activeLang === "ar" ? "قاطع الشرح واسأل فوراً (أو اضغط زر المسافة)" : "Interrupt mentor immediately (or press Spacebar)"}
+                onClick={() => {
+                  const summary = messages.map((m) => m.text).join("\n\n");
+                  onContinueInChat(summary);
+                }}
+                className="flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-white/20 bg-white/5 px-3.5 py-2.5 text-xs font-bold text-[color:var(--cream)] hover:bg-white/10"
               >
-                <Hand className="size-3.5 stroke-[2.5]" />
-                <span>{activeLang === "ar" ? "قاطع واسأل الآن" : "Interrupt & Ask"}</span>
-                <kbd className="rounded border border-[color:var(--ink)] bg-[color:var(--cream)] px-1.5 py-0.5 font-mono text-[9px] font-black uppercase text-[color:var(--ink)] shadow-[1px_1px_0px_#0f0e10]">
-                  Space
-                </kbd>
+                <MessageSquare className="size-4" />
+                <span>{language === "ar" ? "متابعة في الشات" : "AI Chat"}</span>
               </button>
             )}
           </div>
         </div>
-
-        {/* 3. LIVE TRANSCRIPT CARDS (BiDi safe with .ascleon-bidi & dir="auto") */}
-        <div
-          ref={scrollRef}
-          className="custom-scrollbar-dark flex-1 space-y-3 overflow-y-auto rounded-[18px] border-2 border-[color:var(--ink)] bg-[color:var(--ink)]/40 p-3"
-        >
-          {messages.length === 0 && !currentInputTranscript && !currentOutputTranscript && (
-            <div className="flex h-full flex-col items-center justify-center p-4 text-center">
-              <Sparkles className="size-7 mb-2 text-[color:var(--orange)]" />
-              <p className="font-bold text-xs text-[color:var(--cream)] max-w-xs leading-relaxed">
-                {activeLang === "ar"
-                  ? "تكلم بحرية باللهجة المصرية، اسأل أي سؤال إكلينيكي في الصفحة وقاطع دكتور وائل في أي لحظة زي الراوند الحقيقي!"
-                  : activeLang === "mixed"
-                  ? "تكلم براحتك مكس مصري + English Medical Terms، وقاطع الـ AI في أي وقت!"
-                  : "Speak naturally in English grounded in this book. Interrupt at any time just like a real medical round!"}
-              </p>
-            </div>
-          )}
-
-          {messages.map((m) => (
-            <div
-              key={m.id}
-              dir="auto"
-              className={cn(
-                "ascleon-bidi rounded-[18px] border-2 border-[color:var(--ink)] p-3 text-xs shadow-chip",
-                m.role === "user"
-                  ? "ml-6 bg-[color:var(--orange)] text-[color:var(--ink)] font-bold"
-                  : "mr-6 bg-[color:var(--cream)] text-[color:var(--ink)]"
-              )}
-            >
-              <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-[color:var(--ink)]/20">
-                <span className="font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]">
-                  {m.role === "user" ? "YOU · VOICE" : `ASCLEON MENTOR (${selectedVoice})`}
-                </span>
-                <div className="flex items-center gap-1.5 font-mono text-[9px] text-[color:var(--ink)]/70">
-                  {m.interrupted && (
-                    <span className="rounded bg-red-500 text-white px-1 py-0.2 font-bold uppercase">
-                      Interrupted
-                    </span>
-                  )}
-                  <span>{m.time}</span>
-                </div>
-              </div>
-              <p className="whitespace-pre-wrap">{m.text}</p>
-            </div>
-          ))}
-
-          {/* Real-time Interim User Transcript */}
-          {currentInputTranscript && (
-            <div
-              dir="auto"
-              className="ascleon-bidi ml-6 rounded-[18px] border-2 border-[color:var(--ink)] bg-[color:var(--orange)]/90 p-3 text-xs text-[color:var(--ink)] font-bold shadow-chip animate-pulse"
-            >
-              <div className="mb-1 font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]">
-                YOU (SPEAKING...)
-              </div>
-              <p className="whitespace-pre-wrap">{currentInputTranscript}</p>
-            </div>
-          )}
-
-          {/* Real-time Interim Mentor Transcript */}
-          {currentOutputTranscript && (
-            <div
-              dir="auto"
-              className="ascleon-bidi mr-6 rounded-[18px] border-2 border-[color:var(--ink)] bg-[color:var(--cream)] p-3 text-xs text-[color:var(--ink)] shadow-chip animate-pulse"
-            >
-              <div className="mb-1 font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]">
-                ASCLEON MENTOR (SPEAKING...)
-              </div>
-              <p className="whitespace-pre-wrap">{currentOutputTranscript}</p>
-            </div>
-          )}
-        </div>
-
-        {/* 4. SOCRATIC QUESTION SUGGESTION CHIPS */}
-        <div className="flex flex-wrap gap-1.5">
-          {[
-            activeLang === "ar"
-              ? "اشرح لي فكرة الصفحة دي ببساطة"
-              : activeLang === "mixed"
-              ? "إيه الـ mechanism بتاع الـ onset والـ course هنا؟"
-              : "Explain the core mechanism on this page",
-            activeLang === "ar"
-              ? "اسألني سؤال شفوي سريع"
-              : activeLang === "mixed"
-              ? "Quiz me على الـ differential diagnosis"
-              : "Quiz me on differential diagnosis",
-            activeLang === "ar"
-              ? "إيه أهم التريكات اللي بتيجي في الامتحان؟"
-              : activeLang === "mixed"
-              ? "إيه الـ high-yield exam pearls هنا؟"
-              : "What are the high-yield exam pearls?",
-          ].map((chip, idx) => (
-            <button
-              key={idx}
-              type="button"
-              dir="auto"
-              onClick={() => handleChipClick(chip)}
-              className="ascleon-bidi cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] px-3 py-1 font-sans text-[11px] font-bold text-[color:var(--ink)] shadow-chip transition-all hover:bg-[color:var(--orange)]"
-            >
-              {chip}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* 5. FOOTER CONTROLS & TEXT INPUT (Matches AI Chat composer in LivingReader) */}
-      <div className="border-t-2 border-[color:var(--ink)] bg-[color:var(--ink-soft)] p-3">
-        <form onSubmit={handleSendText} className="flex items-center gap-2">
-          {/* Mute Mic Toggle */}
-          <button
-            type="button"
-            onClick={toggleMute}
-            disabled={!isConnected}
-            className={cn(
-              "flex size-10 cursor-pointer items-center justify-center rounded-[14px] border-2 border-[color:var(--ink)] shadow-chip transition-all disabled:opacity-40",
-              isMuted
-                ? "bg-red-400 text-[color:var(--ink)]"
-                : "bg-[color:var(--cream)] text-[color:var(--ink)] hover:bg-[color:var(--orange)]"
-            )}
-            title={isMuted ? "Unmute Microphone" : "Mute Microphone"}
-          >
-            {isMuted ? <MicOff className="size-4 stroke-[2.5]" /> : <Mic className="size-4 stroke-[2.5]" />}
-          </button>
-
-          {/* Text Input Field */}
-          <input
-            type="text"
-            dir="auto"
-            value={typedInput}
-            onChange={(e) => setTypedInput(e.target.value)}
-            onFocus={(e) => {
-              setTimeout(() => {
-                e.target.scrollIntoView({ behavior: "smooth", block: "nearest" });
-              }, 250);
-            }}
-            placeholder={
-              isConnected
-                ? activeLang === "ar"
-                  ? "اكتب أو اتكلم مع دكتور وائل في الراوند الشفوي..."
-                  : activeLang === "mixed"
-                  ? "Type your clinical question or speak..."
-                  : "Type your clinical question into oral session..."
-                : "Type question or tap mic above..."
-            }
-            className="ascleon-bidi flex-1 rounded-[14px] border-2 border-[color:var(--ink)] bg-[color:var(--panel)] px-3 py-2 text-xs font-bold text-[color:var(--ink)] placeholder-[color:var(--ink)]/50 shadow-chip focus:outline-none focus:ring-2 focus:ring-[color:var(--orange)]"
-          />
-
-          {/* Send Button */}
-          <button
-            type="submit"
-            disabled={!typedInput.trim()}
-            className="flex size-10 cursor-pointer items-center justify-center rounded-[14px] border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] font-bold shadow-chip transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-            title="Send into session"
-          >
-            <Send className="size-4 stroke-[2.5]" />
-          </button>
-        </form>
-      </div>
+      )}
     </div>
   );
 }
