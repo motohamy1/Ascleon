@@ -2,6 +2,11 @@ import { connectToDatabase } from "@/database/mongoose";
 import Book from "@/database/models/book.model";
 import BookSegment from "@/database/models/book-segment.model";
 import { StudyScope } from "@/components/reader/StudyScopeBar";
+import {
+  isGenericTopicTitle,
+  sanitizeStudyScope,
+  sanitizeTopicCandidates,
+} from "@/lib/ai/rag/topic-resolution";
 
 export interface RetrievedSegmentResult {
   pageNumber: number;
@@ -47,28 +52,23 @@ export async function retrieveFromBookRAG(params: {
   const primaryField = book?.domain || book?.blueprint?.primaryField || "General Academic";
   const subField = book?.subspecialty || book?.blueprint?.subField || primaryField;
 
-  // 1. Resolve Range Constraints from Scope
-  let startPageConstraint = 1;
-  let endPageConstraint = 999999;
-  let targetTopicTitle: string | undefined = undefined;
+  // 1. Resolve Range Constraints from Scope (always normalized startPage <= endPage)
+  const safeScope = sanitizeStudyScope(scope, activePage);
+  let startPageConstraint = safeScope.startPage;
+  let endPageConstraint = safeScope.endPage;
+  let targetTopicTitle: string | undefined =
+    safeScope.topicTitle && !isGenericTopicTitle(safeScope.topicTitle)
+      ? safeScope.topicTitle
+      : undefined;
 
-  if (scope) {
-    if (scope.type === "page") {
-      startPageConstraint = scope.startPage;
-      endPageConstraint = scope.endPage;
-    } else if (scope.type === "range" || scope.type === "topic") {
-      startPageConstraint = scope.startPage;
-      endPageConstraint = scope.endPage;
-      targetTopicTitle = scope.topicTitle;
-    }
-  }
-
-  // If a topic title is requested or detected in blueprint topicMap
-  const topicMapTopics = book?.blueprint?.topicMap?.topics || [];
-  if (!targetTopicTitle && query) {
+  // If a topic title is requested or detected in blueprint topicMap (only when not locked to a specific single page)
+  const topicMapTopics = sanitizeTopicCandidates(book?.blueprint?.topicMap?.topics);
+  if (!targetTopicTitle && safeScope.type !== "page" && query) {
     const qLower = query.toLowerCase();
-    const matchedTopic = topicMapTopics.find((t: any) =>
-      qLower.includes(t.title.toLowerCase()) || (t.keyConcepts && t.keyConcepts.some((k: string) => qLower.includes(k.toLowerCase())))
+    const matchedTopic = topicMapTopics.find(
+      (t) =>
+        qLower.includes(t.title.toLowerCase()) ||
+        (t.keyConcepts && t.keyConcepts.some((k) => qLower.includes(k.toLowerCase())))
     );
     if (matchedTopic) {
       targetTopicTitle = matchedTopic.title;
@@ -85,15 +85,17 @@ export async function retrieveFromBookRAG(params: {
     .sort({ pageNumber: 1 })
     .lean();
 
-  // If scoped to single page, strictly honor the active page
-  const isStrictSinglePage = scope?.type === "page" || (!scope && !targetTopicTitle);
+  const isStrictSinglePage =
+    !scope ||
+    safeScope.type === "page" ||
+    (scope.type === "topic" && isGenericTopicTitle(scope.topicTitle));
 
-  // If scoped fetch returned nothing or was limited to 1 page but query explicitly requests whole-book search
-  if (!isStrictSinglePage && candidateSegments.length <= 1 && query.trim().length > 3) {
+  // Only fall back to broad book search if a multi-page topic/range had ZERO segments in range
+  if (!isStrictSinglePage && candidateSegments.length === 0 && query.trim().length > 3) {
     const broadSearch = await BookSegment.find({ bookId })
       .sort({ pageNumber: 1 })
       .lean();
-    if (broadSearch.length > candidateSegments.length) {
+    if (broadSearch.length > 0) {
       candidateSegments = broadSearch;
     }
   }
@@ -111,9 +113,9 @@ export async function retrieveFromBookRAG(params: {
     const textLower = seg.content.toLowerCase();
     const pNum = seg.pageNumber || seg.segmentIndex + 1;
 
-    // Active page bonus
+    // Active page bonus: always anchor the page the user is actively reading
     if (pNum === activePage) {
-      score += 35;
+      score += 100;
       reasons.push("active_page");
     }
 

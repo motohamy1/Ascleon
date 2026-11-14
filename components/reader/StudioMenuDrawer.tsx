@@ -94,11 +94,12 @@ const STUDIO_MODES: Array<{
   label: string;
   subtitle: string;
   icon: React.ComponentType<{ className?: string }>;
+  soon?: boolean;
 }> = [
   { id: "voice", label: "Ascleon Voice", subtitle: "Live oral mentor", icon: Mic },
   { id: "chat", label: "AI Chat", subtitle: "Grounded Q&A", icon: MessageSquare },
   { id: "morph", label: "Morph", subtitle: "Interactive map", icon: Sparkles },
-  { id: "whiteboard", label: "Whiteboard", subtitle: "Visual lesson", icon: Tv },
+  { id: "whiteboard", label: "Whiteboard", subtitle: "Visual lesson", icon: Tv, soon: true },
   { id: "quiz", label: "Qbanks", subtitle: "Board practice", icon: HelpCircle },
   { id: "summary", label: "Summary", subtitle: "Pearls & mnemonics", icon: FileText },
 ];
@@ -324,17 +325,18 @@ export function StudioMenuDrawer({
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        onWhiteboardSelection();
-                        onClose();
-                      }}
+                      disabled
+                      title="Whiteboard — Coming Soon"
                       className={cn(
                         GLASS_BUTTON_BASE,
-                        "flex items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] font-bold"
+                        "flex items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] font-bold opacity-55 cursor-not-allowed hover:bg-white/[0.06] hover:border-white/15 hover:text-[color:var(--cream)]/90 active:scale-100"
                       )}
                     >
                       <Tv className="size-3 text-[color:var(--orange)]" />
                       <span>Whiteboard</span>
+                      <span className="rounded-full border border-white/20 bg-white/10 px-1.5 py-0.2 text-[8.5px] font-black uppercase tracking-wider text-[color:var(--cream)]/85">
+                        Soon
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -541,13 +543,18 @@ export function StudioMenuDrawer({
                   <button
                     key={mode.id}
                     type="button"
+                    disabled={mode.soon}
+                    title={mode.soon ? `${mode.label} — Coming Soon` : mode.subtitle}
                     onClick={() => {
+                      if (mode.soon) return;
                       onSelectIntent(mode.id);
                       onClose();
                     }}
                     className={cn(
                       isActive ? activeClass : GLASS_BUTTON_BASE,
-                      "flex flex-col items-start gap-1 rounded-2xl p-2.5 text-left"
+                      "flex flex-col items-start gap-1 rounded-2xl p-2.5 text-left",
+                      mode.soon &&
+                        "opacity-55 cursor-not-allowed hover:bg-white/[0.06] hover:border-white/15 hover:text-[color:var(--cream)]/90 active:scale-100"
                     )}
                   >
                     <div className="flex w-full items-center justify-between">
@@ -561,12 +568,18 @@ export function StudioMenuDrawer({
                             : "text-[color:var(--orange)]"
                         )}
                       />
-                      {isActive && (
+                      {mode.soon ? (
+                        <span className="rounded-full border border-white/20 bg-white/10 px-1.5 py-0.5 text-[8.5px] font-black uppercase tracking-wider text-[color:var(--cream)]/90">
+                          Soon
+                        </span>
+                      ) : isActive ? (
                         <span className="size-1.5 rounded-full bg-white shadow-[0_0_8px_#fff]" />
-                      )}
+                      ) : null}
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-xs font-extrabold leading-tight">{mode.label}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-extrabold leading-tight">{mode.label}</span>
+                      </div>
                       <span className="text-[10px] opacity-65 leading-tight">{mode.subtitle}</span>
                     </div>
                   </button>

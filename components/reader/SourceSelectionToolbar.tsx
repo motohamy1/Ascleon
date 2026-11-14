@@ -102,15 +102,19 @@ export function SourceSelectionToolbar({
           <span>Morph Passage</span>
         </button>
 
-        {/* 1b. Whiteboard Video on Selection */}
+        {/* 1b. Whiteboard Video on Selection (Locked — Soon) */}
         {onWhiteboardSelection && (
           <button
             type="button"
-            onClick={onWhiteboardSelection}
-            className="flex cursor-pointer items-center gap-1 rounded-xl border border-[color:var(--ink)] bg-[color:var(--cream)] px-2.5 py-1.5 text-[11px] font-black text-[color:var(--ink)] shadow-sm transition-transform hover:-translate-y-0.5 hover:bg-[color:var(--mint)]"
+            disabled
+            title="Whiteboard — Coming Soon"
+            className="flex cursor-not-allowed items-center gap-1 rounded-xl border border-white/15 bg-white/10 px-2.5 py-1.5 text-[11px] font-bold text-[color:var(--cream)]/65 opacity-70"
           >
             <Tv className="size-3" />
             <span>Whiteboard</span>
+            <span className="rounded-full border border-white/20 bg-white/10 px-1.5 py-0.5 text-[8.5px] font-black uppercase tracking-wider text-[color:var(--cream)]/90">
+              Soon
+            </span>
           </button>
         )}
 

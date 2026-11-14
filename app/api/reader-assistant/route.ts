@@ -4,14 +4,38 @@ import { runStudyAgent } from "@/lib/ai/agent-harness";
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
 import { AI_CREDIT_COSTS } from "@/lib/subscription-constants";
 import { requireAuthAndCredits } from "@/lib/usage.server";
+import {
+  isGenericTopicTitle,
+  resolveActivePageTopic,
+  sanitizeStudyScope,
+} from "@/lib/ai/rag/topic-resolution";
+
+import type { StudyScope } from "@/components/reader/StudyScopeBar";
+
+interface ReaderAssistantRequestBody {
+  bookId?: string;
+  bookTitle?: string;
+  bookTopic?: string;
+  bookReferences?: unknown[];
+  query?: string;
+  currentSegmentIndex?: number;
+  currentPageNumber?: number;
+  currentSegmentContent?: string;
+  selectedText?: string;
+  selectedImage?: string;
+  language?: string;
+  history?: Array<{ sender?: string; role?: string; text?: string; content?: string }>;
+  studyScope?: StudyScope;
+  topicMap?: { topics?: unknown[] };
+}
 
 export async function POST(request: Request) {
   const authCheck = await requireAuthAndCredits(AI_CREDIT_COSTS.READER_ASSISTANT);
   if (!authCheck.ok) return authCheck.response;
 
-  let body: any = {};
+  let body: ReaderAssistantRequestBody = {};
   try {
-    body = await request.json();
+    body = (await request.json()) as ReaderAssistantRequestBody;
   } catch {
     body = {};
   }
@@ -42,98 +66,153 @@ export async function POST(request: Request) {
 
   const cleanQuery = query.trim();
   const historyArray = Array.isArray(history)
-    ? history.map((item: any) => ({
+    ? history.map((item: { sender?: string; role?: string; text?: string; content?: string }) => ({
         sender: (item?.sender === "ai" || item?.role === "assistant" ? "ai" : "user") as "user" | "ai",
         text: String(item?.text || item?.content || ""),
       }))
     : [];
 
-  let effectiveContent = String(currentSegmentContent || "");
-  let effectiveTopicLocation: any = null;
+  const activePageNum = currentPageNumber
+    ? Number(currentPageNumber)
+    : Number(currentSegmentIndex) + 1;
+  const livePageText = String(currentSegmentContent || "").trim();
+  let effectiveScope = sanitizeStudyScope(studyScope as never, activePageNum);
+  let effectiveContent = livePageText;
+  let effectiveTopicLocation: {
+    title: string;
+    startPage: number;
+    endPage: number;
+    isAmbiguous?: boolean;
+    candidates?: unknown[];
+  } | null = null;
 
-  // 1. UNIVERSAL BOOK RAG RETRIEVAL: Search across all book segments in MongoDB
-  let ragGoldStandards: string[] = [];
+  // 1. ACTIVE TOPIC AWARENESS & AMBIGUITY CHECK (before generating any response)
+  const isTopicSummaryIntent =
+    /\b(executive\s+(topic|page|range)\s+summary|summarize\s+(this\s+)?topic|explain\s+(this\s+)?topic|what\s+topic\s+is\s+this)\b/i.test(
+      cleanQuery
+    ) ||
+    (studyScope?.type === "topic" && isGenericTopicTitle(studyScope?.topicTitle));
+
+  if (isTopicSummaryIntent && effectiveScope.type !== "topic") {
+    let nearbySegments: Array<{ pageNumber: number; headings?: string[]; content?: string }> = [];
+    if (bookId) {
+      try {
+        const nearbyRes = await getBookSegmentsByRange(
+          bookId,
+          Math.max(1, activePageNum - 3),
+          activePageNum
+        );
+        if (nearbyRes.success && nearbyRes.data) {
+          nearbySegments = nearbyRes.data.map((s) => ({
+            pageNumber: s.pageNumber || s.segmentIndex + 1,
+            headings: s.headings || [],
+            content: s.content,
+          }));
+        }
+      } catch {}
+    }
+
+    const resolution = resolveActivePageTopic({
+      activePage: activePageNum,
+      activePageText: livePageText,
+      topicMapTopics: topicMap?.topics,
+      nearbySegments,
+      query: cleanQuery,
+    });
+
+    if (resolution.status === "ambiguous" && resolution.candidates.length > 1) {
+      const candidateList = resolution.candidates
+        .map((c) => `• **${c.title}** (pp. ${c.startPage}–${c.endPage})`)
+        .join("\n");
+      return NextResponse.json({
+        success: true,
+        answer: `I found multiple overlapping topics around **Page ${activePageNum}**. Please choose which topic you want me to summarize so I stay 100% focused on the right section:\n\n${candidateList}`,
+        toolsUsed: ["topic_disambiguation"],
+        citations: [`Page ${activePageNum}`],
+        topicLocation: {
+          title: resolution.candidates[0].title,
+          startPage: resolution.candidates[0].startPage,
+          endPage: resolution.candidates[0].endPage,
+          isAmbiguous: true,
+          candidates: resolution.candidates,
+        },
+      });
+    }
+
+    if (resolution.status === "resolved") {
+      effectiveScope = {
+        type: "topic",
+        topicTitle: resolution.topic.title,
+        startPage: resolution.topic.startPage,
+        endPage: resolution.topic.endPage,
+        topicId: resolution.topic.id,
+      };
+      effectiveTopicLocation = {
+        title: resolution.topic.title,
+        startPage: resolution.topic.startPage,
+        endPage: resolution.topic.endPage,
+      };
+    }
+  }
+
+  // 2. UNIVERSAL BOOK RAG RETRIEVAL: Search across bounded book segments in MongoDB
   let ragCitedPages: number[] = [];
 
   if (bookId) {
     try {
       const { retrieveFromBookRAG } = await import("@/lib/ai/rag/book-rag-retriever");
       const ragRes = await retrieveFromBookRAG({
-        bookId,
+        bookId: String(bookId),
         query: cleanQuery,
-        scope: studyScope,
-        activePage: currentPageNumber ? Number(currentPageNumber) : currentSegmentIndex + 1,
-        topK: 4,
+        scope: effectiveScope,
+        activePage: activePageNum,
+        topK: effectiveScope.type === "page" ? 2 : 6,
       });
 
       if (ragRes.combinedContext) {
-        effectiveContent = ragRes.combinedContext;
-        ragGoldStandards = ragRes.goldStandardsFound;
         ragCitedPages = ragRes.citedPages;
+
+        // Always anchor the live active page text if RAG didn't include activePageNum
+        const includesActivePage = ragCitedPages.includes(activePageNum);
+        if (!includesActivePage && livePageText) {
+          effectiveContent = `--- [ACTIVE PAGE ${activePageNum} — LIVE READER TEXT] ---\n${livePageText}\n\n${ragRes.combinedContext}`;
+          ragCitedPages = Array.from(new Set([activePageNum, ...ragCitedPages]));
+        } else {
+          effectiveContent = ragRes.combinedContext;
+        }
       }
-      if (ragRes.detectedTopic) {
-        effectiveTopicLocation = {
-          title: ragRes.detectedTopic,
-          startPage: ragRes.citedPages[0] || 1,
-          endPage: ragRes.citedPages[ragRes.citedPages.length - 1] || 1,
-        };
+
+      if (
+        ragRes.detectedTopic &&
+        !isGenericTopicTitle(ragRes.detectedTopic) &&
+        effectiveScope.type !== "page"
+      ) {
+        const topicStart = effectiveScope.startPage || ragRes.citedPages[0] || activePageNum;
+        const topicEnd =
+          effectiveScope.endPage ||
+          ragRes.citedPages[ragRes.citedPages.length - 1] ||
+          activePageNum;
+        if (!effectiveTopicLocation) {
+          effectiveTopicLocation = {
+            title: ragRes.detectedTopic,
+            startPage: Math.min(topicStart, topicEnd),
+            endPage: Math.max(topicStart, topicEnd),
+          };
+        }
       }
     } catch (ragErr) {
       console.warn("[reader-assistant] Book RAG retrieval fallback:", ragErr);
     }
-  } else if (studyScope && studyScope.startPage && studyScope.endPage && bookId) {
-    if (studyScope.startPage !== studyScope.endPage || studyScope.type === "topic" || studyScope.type === "range") {
-      const segRes = await getBookSegmentsByRange(bookId, studyScope.startPage, studyScope.endPage);
-      if (segRes.success && segRes.data && segRes.data.length > 0) {
-        effectiveContent = segRes.data
-          .map((s) => `--- PAGE ${s.pageNumber || "?"} ---\n${s.content}`)
-          .join("\n\n");
-      }
-      effectiveTopicLocation = {
-        title: studyScope.topicTitle || `Pages ${studyScope.startPage}–${studyScope.endPage}`,
-        startPage: studyScope.startPage,
-        endPage: studyScope.endPage,
-      };
-    }
-  } else if (topicMap?.topics && Array.isArray(topicMap.topics) && topicMap.topics.length > 0) {
-    // 2. Option B Smart Topic Detection: Check if user query matches any topic in the book's topicMap
-    const qLower = cleanQuery.toLowerCase();
-    const matchingTopics = topicMap.topics.filter((t: any) => {
-      const tLower = (t.title || "").toLowerCase();
-      const words = tLower.split(/\s+/).filter((w: string) => w.length > 3);
-      return words.some((w: string) => qLower.includes(w)) || qLower.includes(tLower);
-    });
-
-    if (matchingTopics.length === 1) {
-      // Unambiguous topic found -> immediately fetch all pages for this topic
-      const matched = matchingTopics[0];
-      if (bookId && matched.startPage && matched.endPage) {
-        const segRes = await getBookSegmentsByRange(bookId, matched.startPage, matched.endPage);
-        if (segRes.success && segRes.data && segRes.data.length > 0) {
-          effectiveContent = segRes.data
-            .map((s) => `--- PAGE ${s.pageNumber || "?"} ---\n${s.content}`)
-            .join("\n\n");
-        }
-      }
-      effectiveTopicLocation = {
-        title: matched.title,
-        startPage: matched.startPage,
-        endPage: matched.endPage,
-      };
-    } else if (matchingTopics.length > 1) {
-      // Ambiguous: multiple matching sections found
-      effectiveTopicLocation = {
-        title: matchingTopics[0].title,
-        startPage: matchingTopics[0].startPage,
-        endPage: matchingTopics[0].endPage,
-        isAmbiguous: true,
-        candidates: matchingTopics.map((m: any) => ({
-          title: m.title,
-          startPage: m.startPage,
-          endPage: m.endPage,
-        })),
-      };
-    }
+  } else if (
+    effectiveScope.startPage &&
+    effectiveScope.endPage &&
+    effectiveScope.type !== "page"
+  ) {
+    effectiveTopicLocation = {
+      title: effectiveScope.topicTitle || `Pages ${effectiveScope.startPage}–${effectiveScope.endPage}`,
+      startPage: effectiveScope.startPage,
+      endPage: effectiveScope.endPage,
+    };
   }
 
   const context = {
@@ -142,13 +221,13 @@ export async function POST(request: Request) {
     bookTopic: String(bookTopic || ""),
     bookReferences: Array.isArray(bookReferences) ? bookReferences.map(String).filter(Boolean) : [],
     currentSegmentIndex: Number(currentSegmentIndex) || 0,
-    currentPageNumber: currentPageNumber ? Number(currentPageNumber) : undefined,
+    currentPageNumber: activePageNum,
     currentSegmentContent: effectiveContent,
     selectedText: String(selectedText || ""),
     selectedImage: typeof selectedImage === "string" && selectedImage ? selectedImage : undefined,
     language: String(language || "en") as "en" | "ar" | "mixed",
     history: historyArray,
-    studyScope,
+    studyScope: effectiveScope,
     topicMap,
   };
 
@@ -174,9 +253,32 @@ export async function POST(request: Request) {
     console.error("Reader assistant agent error, falling back gracefully:", error);
 
     // Attempt to invoke runDeterministicFallback if exported by agent-harness
-    if (typeof (agentHarness as any).runDeterministicFallback === "function") {
+    type DeterministicFn = (
+      q: string,
+      ctx: typeof context,
+      opts: {
+        groundingSnippet: string;
+        authoritativeReferences: unknown[];
+        qbankVignettes: unknown[];
+        mnemonics: unknown[];
+      }
+    ) => {
+      text?: string;
+      provider?: string;
+      model?: string;
+      toolsUsed?: string[];
+      citations?: string[];
+      generatedMorph?: unknown;
+      generatedQuiz?: unknown;
+      authoritativeReferences?: unknown[];
+      qbankVignettes?: unknown[];
+      mnemonics?: unknown[];
+    };
+    const deterministicFn = (agentHarness as unknown as { runDeterministicFallback?: DeterministicFn })
+      .runDeterministicFallback;
+    if (typeof deterministicFn === "function") {
       try {
-        const fallbackOutput = (agentHarness as any).runDeterministicFallback(
+        const fallbackOutput = deterministicFn(
           cleanQuery,
           context,
           {

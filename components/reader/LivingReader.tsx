@@ -10,6 +10,11 @@ import {
 } from "@/lib/ai/knowledge/sample-book-data";
 import { MorphCanvas } from "@/components/reader/MorphCanvas";
 import { AscleonVoiceStudio } from "@/components/reader/AscleonVoiceStudio";
+import {
+  VoiceSessionProvider,
+  NoisyPlaceQuickToggle,
+  ActiveVoiceMiniBar,
+} from "@/components/reader/VoiceSessionContext";
 import { WhiteboardVideoStudio } from "@/components/whiteboard/WhiteboardVideoStudio";
 import {
   StudioMenuDrawer,
@@ -17,7 +22,16 @@ import {
   GLASS_BUTTON_ACTIVE,
   GLASS_BUTTON_VOICE_ACTIVE,
 } from "@/components/reader/StudioMenuDrawer";
-import { StudyLanguage, DEFAULT_STUDY_LANGUAGE } from "@/lib/language";
+import { StudyLanguage, DEFAULT_STUDY_LANGUAGE, STUDY_LANGUAGES } from "@/lib/language";
+import {
+  AVAILABLE_LIVE_VOICES,
+  DEFAULT_LIVE_VOICE,
+} from "@/lib/voice-config";
+import {
+  isGenericTopicTitle,
+  sanitizeStudyScope,
+  sanitizeTopicCandidates,
+} from "@/lib/ai/rag/topic-resolution";
 import {
   SourceSelectionToolbar,
   ScannedPinItem,
@@ -31,6 +45,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
   Sparkles,
   Menu,
   MessageSquare,
@@ -278,26 +295,27 @@ export default function LivingReader({
     pageNumber: number;
   } | null>(null);
 
-  // Universal Multi-Page / Topic Study Scope State
+  // Universal Multi-Page / Topic Study Scope State (never keep generic "General" as a topic)
   const [studyScope, setStudyScope] = useState<StudyScope>(() => {
-    if (initialProgress?.studioState?.studyScope) {
-      return initialProgress.studioState.studyScope as StudyScope;
-    }
     const initialPage = initialProgress?.lastStudiedPage || 1;
-    return {
-      type: "page",
-      startPage: initialPage,
-      endPage: initialPage,
-    };
+    const savedScope = initialProgress?.studioState?.studyScope as StudyScope | undefined;
+    return sanitizeStudyScope(savedScope, initialPage);
   });
 
   // Right Panel: All Controls & Study Studio (Default: AI Chat)
   const [activeIntent, setActiveIntent] = useState<StudyIntent>(() => {
-    return (initialProgress?.studioState?.activeIntent as StudyIntent) || "chat";
+    const saved = initialProgress?.studioState?.activeIntent as StudyIntent | undefined;
+    return saved && saved !== "whiteboard" ? saved : "chat";
   });
   const [isStudioMenuOpen, setIsStudioMenuOpen] = useState(false);
+  const [isQuickControlsOpen, setIsQuickControlsOpen] = useState(false);
   const [showFeatureBar, setShowFeatureBar] = useState(true);
   const studioMenuToggleRef = useRef<HTMLButtonElement>(null);
+  const quickControlsRef = useRef<HTMLDivElement>(null);
+  const quickControlsToggleRef = useRef<HTMLButtonElement>(null);
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [isAgentSoundMuted, setIsAgentSoundMuted] = useState(false);
+  const [liveVoiceName, setLiveVoiceName] = useState<string>(DEFAULT_LIVE_VOICE);
   const [language, setLanguage] = useState<VoiceLanguage>(
     (book.language as VoiceLanguage) || DEFAULT_VOICE_LANGUAGE,
   );
@@ -348,6 +366,27 @@ export default function LivingReader({
   const [activeMnemonics, setActiveMnemonics] = useState<HighYieldMnemonic[]>(
     () => initialDomainContext.mnemonics
   );
+
+  // Close quick glassmorphism controls popover on outside click or Escape
+  useEffect(() => {
+    if (!isQuickControlsOpen) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (quickControlsRef.current?.contains(target)) return;
+      if (quickControlsToggleRef.current?.contains(target)) return;
+      setIsQuickControlsOpen(false);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsQuickControlsOpen(false);
+    };
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isQuickControlsOpen]);
 
   // Synchronize domain context when book changes
   useEffect(() => {
@@ -498,14 +537,16 @@ export default function LivingReader({
           if (saved.studioState.zoomLevel) {
             setZoomLevel(saved.studioState.zoomLevel);
           }
-          if (saved.studioState.activeIntent) {
+          if (saved.studioState.activeIntent && saved.studioState.activeIntent !== "whiteboard") {
             setActiveIntent(saved.studioState.activeIntent as StudyIntent);
           }
           if (saved.studioState.studyLanguage) {
             setStudyLanguage(saved.studioState.studyLanguage as StudyLanguage);
           }
           if (saved.studioState.studyScope) {
-            setStudyScope(saved.studioState.studyScope as StudyScope);
+            const restoredScope = saved.studioState.studyScope as StudyScope;
+            const p = saved.lastStudiedPage || 1;
+            setStudyScope(sanitizeStudyScope(restoredScope, p));
           }
           if (saved.studioState.morphActiveTopic) {
             setMorphActiveTopic(saved.studioState.morphActiveTopic);
@@ -1776,16 +1817,15 @@ export default function LivingReader({
 
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setSelectedText(para);
-                                    setWhiteboardSelectionSeq((n) => n + 1);
-                                    setActiveIntent("whiteboard");
-                                  }}
-                                  className="flex cursor-pointer items-center gap-1 rounded-full border border-current/20 bg-current/5 px-2 py-0.5 font-bold hover:bg-current/15"
-                                  title="Generate Whiteboard Video on this paragraph"
+                                  disabled
+                                  className="flex cursor-not-allowed items-center gap-1 rounded-full border border-current/20 bg-current/5 px-2 py-0.5 font-bold opacity-55"
+                                  title="Whiteboard — Coming Soon"
                                 >
                                   <Tv className="size-2.5" />
                                   <span>Whiteboard</span>
+                                  <span className="rounded-full border border-current/25 px-1 text-[8px] font-black uppercase">
+                                    Soon
+                                  </span>
                                 </button>
 
                                 <button
@@ -1933,6 +1973,27 @@ export default function LivingReader({
           {/* ============================================================== */}
           {/* RIGHT PANEL: ALL CONTROLS, LIVE VOICE & INTERACTIVE WORKSPACE    */}
           {/* ============================================================== */}
+          <VoiceSessionProvider
+            bookTitle={book.title}
+            currentPageNumber={book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
+            currentSectionText={
+              (book.fileURL && activePageLiveText)
+                ? activePageLiveText
+                : (currentSegment?.content || "")
+            }
+            selectedText={selectedText || undefined}
+            authoritativeReferences={activeReferences}
+            studyLanguage={studyLanguage}
+            voiceName={liveVoiceName}
+            onVoiceNameChange={setLiveVoiceName}
+            isMicMuted={isMicMuted}
+            onMicMutedChange={setIsMicMuted}
+            isAgentSoundMuted={isAgentSoundMuted}
+            onTriggerMorph={() => {
+              setActiveIntent("morph");
+              handleRunMorph();
+            }}
+          >
           <div
             className={cn(
               "relative h-full flex-col overflow-hidden rounded-[20px] bg-[color:var(--ink-soft)]",
@@ -1986,27 +2047,181 @@ export default function LivingReader({
                   </span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => setIsStudioMenuOpen(true)}
-                  className={cn(
-                    GLASS_BUTTON_BASE,
-                    "hidden sm:inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10.5px] font-bold truncate max-w-[200px]"
+                <div className="relative">
+                  <button
+                    ref={quickControlsToggleRef}
+                    type="button"
+                    aria-expanded={isQuickControlsOpen}
+                    onClick={() => setIsQuickControlsOpen((prev) => !prev)}
+                    className={cn(
+                      isQuickControlsOpen ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
+                      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10.5px] font-bold max-w-[260px]"
+                    )}
+                    title="Tap to quickly adjust Language, Mic, Voice Sound & Scope"
+                  >
+                    <span className="truncate">
+                      {studyScope.type === "topic" &&
+                      studyScope.topicTitle &&
+                      studyScope.topicTitle.trim().toLowerCase() !== "general"
+                        ? studyScope.topicTitle
+                        : studyScope.type === "range"
+                        ? `P.${studyScope.startPage}–${studyScope.endPage}`
+                        : `P.${book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}`}
+                    </span>
+                    <span className="opacity-35">·</span>
+                    <span className="uppercase font-mono text-[10px] text-[color:var(--orange)]">
+                      {studyLanguage === "ar" ? "عربي" : studyLanguage === "mixed" ? "Mix" : "EN"}
+                    </span>
+                    <span className="opacity-35 hidden sm:inline">·</span>
+                    <span className="hidden sm:inline-flex items-center gap-1 text-[10px]">
+                      {isMicMuted ? (
+                        <MicOff className="size-3 text-red-400" />
+                      ) : (
+                        <Mic className="size-3 text-[#7fd8c9]" />
+                      )}
+                      {isAgentSoundMuted ? (
+                        <VolumeX className="size-3 text-amber-400" />
+                      ) : (
+                        <Volume2 className="size-3 text-[#7fd8c9]" />
+                      )}
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        "size-3 opacity-65 transition-transform duration-150",
+                        isQuickControlsOpen && "rotate-180"
+                      )}
+                    />
+                  </button>
+
+                  {/* Compact Glassmorphism Quick-Control Toggle Menu */}
+                  {isQuickControlsOpen && (
+                    <div
+                      ref={quickControlsRef}
+                      className="absolute left-0 top-full mt-2 z-50 w-[285px] sm:w-[310px] rounded-2xl border border-white/15 bg-[#141318]/90 backdrop-blur-xl p-3 shadow-[0_16px_48px_rgba(0,0,0,0.7)] flex flex-col gap-2.5 animate-in fade-in slide-in-from-top-1 duration-150"
+                    >
+                      {/* 1. Language Switch */}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-[color:var(--cream)]/60">
+                          Language
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {STUDY_LANGUAGES.map((lang) => {
+                            const isSelected = studyLanguage === lang.id;
+                            return (
+                              <button
+                                key={lang.id}
+                                type="button"
+                                onClick={() => setStudyLanguage(lang.id)}
+                                className={cn(
+                                  isSelected ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
+                                  "rounded-full px-2.5 py-0.5 text-[10px] font-black"
+                                )}
+                              >
+                                {lang.id === "mixed" ? "Mix" : lang.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* 2. Mic Control & Noise Filter */}
+                      <div className="flex flex-col gap-1.5 border-t border-white/10 pt-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-[color:var(--cream)]/60">
+                            Microphone
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setIsMicMuted((prev) => !prev)}
+                            className={cn(
+                              isMicMuted
+                                ? "backdrop-blur-md bg-red-500/25 border border-red-400/60 text-red-200 cursor-pointer"
+                                : GLASS_BUTTON_VOICE_ACTIVE,
+                              "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-black"
+                            )}
+                          >
+                            {isMicMuted ? <MicOff className="size-3" /> : <Mic className="size-3" />}
+                            <span>{isMicMuted ? "Muted" : "Mic On"}</span>
+                          </button>
+                        </div>
+
+                        <NoisyPlaceQuickToggle />
+                      </div>
+
+                      {/* 3. Voice Agent Sound & Persona */}
+                      <div className="flex flex-col gap-1.5 border-t border-white/10 pt-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-[color:var(--cream)]/60">
+                            Voice Agent Sound
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setIsAgentSoundMuted((prev) => !prev)}
+                            className={cn(
+                              isAgentSoundMuted
+                                ? "backdrop-blur-md bg-amber-500/20 border border-amber-400/60 text-amber-200 cursor-pointer"
+                                : GLASS_BUTTON_VOICE_ACTIVE,
+                              "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-black"
+                            )}
+                          >
+                            {isAgentSoundMuted ? <VolumeX className="size-3" /> : <Volume2 className="size-3" />}
+                            <span>{isAgentSoundMuted ? "Sound Off" : "Sound On"}</span>
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1">
+                          {AVAILABLE_LIVE_VOICES.map((v) => (
+                            <button
+                              key={v.id}
+                              type="button"
+                              onClick={() => setLiveVoiceName(v.id)}
+                              className={cn(
+                                liveVoiceName === v.id ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
+                                "rounded-full px-2 py-0.5 text-[9.5px] font-bold"
+                              )}
+                              title={`${v.name} (${v.gender}) — ${v.tone}`}
+                            >
+                              {v.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 4. Footer: Scope Reset & Full Controls */}
+                      <div className="flex items-center justify-between gap-2 border-t border-white/10 pt-2">
+                        {studyScope.type !== "page" ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const p = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+                              setStudyScope({ type: "page", startPage: p, endPage: p });
+                            }}
+                            className={cn(
+                              GLASS_BUTTON_BASE,
+                              "rounded-full px-2.5 py-1 text-[10px] font-bold"
+                            )}
+                          >
+                            Reset to Page {book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-[color:var(--cream)]/50 font-medium">
+                            Scoped to Page {book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsQuickControlsOpen(false);
+                            setIsStudioMenuOpen(true);
+                          }}
+                          className="text-[10px] font-black text-[color:var(--orange)] hover:underline cursor-pointer"
+                        >
+                          All Controls →
+                        </button>
+                      </div>
+                    </div>
                   )}
-                  title="Open controls to change scope, language, or view settings"
-                >
-                  <span className="truncate">
-                    {studyScope.type === "topic" && studyScope.topicTitle
-                      ? studyScope.topicTitle
-                      : studyScope.type === "range"
-                      ? `P.${studyScope.startPage}–${studyScope.endPage}`
-                      : `P.${book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}`}
-                  </span>
-                  <span className="opacity-40">·</span>
-                  <span className="uppercase font-mono text-[10px] text-[color:var(--orange)]">
-                    {studyLanguage === "ar" ? "عربي" : studyLanguage === "mixed" ? "Mix" : "EN"}
-                  </span>
-                </button>
+                </div>
               </div>
 
               {/* Right: Features Toggle + Hamburger Drawer Button */}
@@ -2097,17 +2312,18 @@ export default function LivingReader({
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setActiveIntent("whiteboard");
-                    setIsWhiteboardExpanded(true);
-                  }}
+                  disabled
+                  title="Whiteboard — Coming Soon"
                   className={cn(
-                    activeIntent === "whiteboard" ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
-                    "flex items-center justify-center gap-1 rounded-full py-1.5 px-1.5 font-bold whitespace-nowrap"
+                    GLASS_BUTTON_BASE,
+                    "flex items-center justify-center gap-1 rounded-full py-1.5 px-1.5 font-bold whitespace-nowrap opacity-55 cursor-not-allowed hover:bg-white/[0.06] hover:border-white/15 hover:text-[color:var(--cream)]/90 active:scale-100"
                   )}
                 >
                   <Tv className="size-3 shrink-0" />
                   <span className="truncate">Whiteboard</span>
+                  <span className="rounded-full border border-white/20 bg-white/10 px-1.5 py-0.2 text-[8.5px] font-black uppercase tracking-wider text-[color:var(--cream)]/90">
+                    Soon
+                  </span>
                 </button>
 
                 <button
@@ -2128,6 +2344,9 @@ export default function LivingReader({
             )}
 
             {/* HORIZONTAL SLIDE-OVER STUDIO DRAWER (Right Edge) */}
+            {activeIntent !== "voice" && (
+              <ActiveVoiceMiniBar onReturnToVoice={() => setActiveIntent("voice")} />
+            )}
             <StudioMenuDrawer
               isOpen={isStudioMenuOpen}
               onClose={() => setIsStudioMenuOpen(false)}
@@ -2138,8 +2357,7 @@ export default function LivingReader({
                   setActiveIntent("morph");
                   handleRunMorph();
                 } else if (intent === "whiteboard") {
-                  setActiveIntent("whiteboard");
-                  setIsWhiteboardExpanded(true);
+                  return;
                 } else if (intent === "quiz") {
                   setActiveIntent("quiz");
                   loadDynamicQBank();
@@ -2167,12 +2385,14 @@ export default function LivingReader({
               onToggleDeepReferences={() => setShowDeepReferences((prev) => !prev)}
               onRunExecutiveSummary={() => {
                 setActiveIntent("chat");
+                const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+                const safeScope = sanitizeStudyScope(studyScope, activePage);
                 const scopeLabel =
-                  studyScope.type === "topic" && studyScope.topicTitle
-                    ? `Topic "${studyScope.topicTitle}" (pp. ${studyScope.startPage}–${studyScope.endPage})`
-                    : studyScope.type === "range"
-                    ? `Pages ${studyScope.startPage}–${studyScope.endPage}`
-                    : `Page ${book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}`;
+                  safeScope.type === "topic" && safeScope.topicTitle && !isGenericTopicTitle(safeScope.topicTitle)
+                    ? `Topic "${safeScope.topicTitle}" (pp. ${safeScope.startPage}–${safeScope.endPage})`
+                    : safeScope.type === "range"
+                    ? `Pages ${safeScope.startPage}–${safeScope.endPage}`
+                    : `Page ${activePage}`;
                 triggerDirectAIQuery(
                   `Generate a high-yield executive summary, core mechanism breakdown, and clinical exam pearls for ${scopeLabel} of "${book.title}".`
                 );
@@ -2192,7 +2412,14 @@ export default function LivingReader({
               onRefreshSummary={() => loadDynamicSummary(true)}
               currentPage={book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
               totalPages={book.fileURL ? totalPdfPages : segments.length}
-              topics={book.blueprint?.topicMap?.topics || []}
+              topics={sanitizeTopicCandidates(book.blueprint?.topicMap?.topics).map((t, idx) => ({
+                id: t.id || `topic-${idx}`,
+                title: t.title,
+                startPage: t.startPage,
+                endPage: t.endPage,
+                keyConcepts: t.keyConcepts || [],
+                subtopics: [],
+              }))}
               studyScope={studyScope}
               onScopeChange={setStudyScope}
               onNavigateToPage={(p) => {
@@ -2692,8 +2919,11 @@ export default function LivingReader({
                           </div>
                         )}
 
-                        {/* Direct Topic Navigation Banner (Single Identified Topic) */}
-                        {m.topicLocation && !m.topicLocation.isAmbiguous && (
+                        {/* Direct Topic Navigation Banner (Single Identified Topic, hidden for generic "General" or current page) */}
+                        {m.topicLocation &&
+                          !m.topicLocation.isAmbiguous &&
+                          m.topicLocation.title?.trim().toLowerCase() !== "general" &&
+                          m.topicLocation.startPage !== (book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)) && (
                           <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[color:var(--ink)]/30 bg-[#2e6f68]/15 p-2.5 text-[11px] text-[color:var(--ink)]">
                             <div className="flex items-center gap-1.5 min-w-0">
                               <BookOpen className="size-4 shrink-0 text-[#2e6f68]" />
@@ -2741,11 +2971,14 @@ export default function LivingReader({
                         type="button"
                         disabled={isAiLoading}
                         onClick={() => {
-                          const scopeLabel = studyScope.type === "topic" && studyScope.topicTitle
-                            ? `Topic "${studyScope.topicTitle}" (pp. ${studyScope.startPage}–${studyScope.endPage})`
-                            : studyScope.type === "range"
-                            ? `Pages ${studyScope.startPage}–${studyScope.endPage}`
-                            : `Page ${book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}`;
+                          const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
+                          const safeScope = sanitizeStudyScope(studyScope, activePage);
+                          const scopeLabel =
+                            safeScope.type === "topic" && safeScope.topicTitle && !isGenericTopicTitle(safeScope.topicTitle)
+                              ? `Topic "${safeScope.topicTitle}" (pp. ${safeScope.startPage}–${safeScope.endPage})`
+                              : safeScope.type === "range"
+                              ? `Pages ${safeScope.startPage}–${safeScope.endPage}`
+                              : `Page ${activePage}`;
                           const prompt = `Generate a high-yield executive summary, core mechanism breakdown, and clinical exam pearls for ${scopeLabel} of "${book.title}".`;
                           triggerDirectAIQuery(prompt);
                         }}
@@ -2820,20 +3053,17 @@ export default function LivingReader({
               {activeIntent === "voice" && (
                 <div className="flex animate-in fade-in flex-col h-full duration-150">
                   <AscleonVoiceStudio
-                    bookTitle={book.title}
                     currentPageNumber={book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
-                    currentSectionText={
-                      (book.fileURL && activePageLiveText)
-                        ? activePageLiveText
-                        : (currentSegment?.content || "")
-                    }
-                    selectedText={selectedText || undefined}
-                    authoritativeReferences={activeReferences}
-                    studyLanguage={studyLanguage}
                     onStudyLanguageChange={setStudyLanguage}
                     onTriggerMorph={() => {
                       setActiveIntent("morph");
                       handleRunMorph();
+                    }}
+                    onContinueInChat={(summaryText) => {
+                      setActiveIntent("chat");
+                      triggerDirectAIQuery(
+                        `Continue from my live voice session. Here is what we just covered:\n\n${summaryText.slice(0, 2000)}\n\nSummarize the key takeaways and ask what I want to explore next.`
+                      );
                     }}
                   />
                 </div>
@@ -3171,6 +3401,7 @@ export default function LivingReader({
               </div>
             )}
           </div>
+          </VoiceSessionProvider>
         </div>
       </div>
 
