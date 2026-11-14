@@ -214,12 +214,14 @@ export function WhiteboardVideoStudio({
       .split("\n")[0]
       ?.replace(/^#+\s*/, "")
       .trim();
+    const cleanBookTopic =
+      book.topic && book.topic.trim().toLowerCase() !== "general" ? book.topic : "";
     return {
       id: `page-topic-${currentPageNumber}`,
       title:
         firstLine && firstLine.length > 4 && firstLine.length < 72
           ? firstLine
-          : book.topic || book.title || `Page ${currentPageNumber}`,
+          : cleanBookTopic || book.title || `Page ${currentPageNumber}`,
       startPage: currentPageNumber,
       endPage: Math.min(totalBookPages, currentPageNumber + 2),
       summary: `Covers Pages ${currentPageNumber}–${Math.min(

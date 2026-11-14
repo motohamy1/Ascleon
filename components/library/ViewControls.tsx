@@ -13,6 +13,8 @@ import {
   FileText,
   FileCheck2,
   Award,
+  Folder,
+  FolderPlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +45,8 @@ interface ViewControlsProps {
   activeFilter: FilterType;
   onFilterChange: (filter: FilterType) => void;
   topics: { name: string; count: number }[];
+  customCategories?: { name: string; count: number }[];
+  onOpenNewCategory?: () => void;
   totalCount: number;
   favoritesCount: number;
   inProgressCount: number;
@@ -56,6 +60,8 @@ export default function ViewControls({
   activeFilter,
   onFilterChange,
   topics,
+  customCategories = [],
+  onOpenNewCategory,
   totalCount,
   favoritesCount,
   inProgressCount,
@@ -103,13 +109,26 @@ export default function ViewControls({
           </button>
         </div>
 
-        {/* Keyboard navigation hint (visible in shelf mode) */}
-        {viewMode === "shelf" && (
-          <div className="hidden md:flex items-center gap-2 text-xs text-[#7A7267] italic font-serif">
-            <Sparkles className="w-3 h-3 text-[#ff4c00]" />
-            <span>Structured into architectural wooden bays by Source Type. Arrow keys navigate.</span>
-          </div>
-        )}
+        {/* Right: Keyboard hint + New Category action */}
+        <div className="flex items-center gap-3">
+          {viewMode === "shelf" && (
+            <div className="hidden md:flex items-center gap-2 text-xs text-[#7A7267] italic font-serif">
+              <Sparkles className="w-3 h-3 text-[#ff4c00]" />
+              <span>Structured into architectural wooden bays by Source Type. Arrow keys navigate.</span>
+            </div>
+          )}
+          {onOpenNewCategory && (
+            <button
+              type="button"
+              onClick={onOpenNewCategory}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#212A3B] text-white hover:bg-[#2f3b52] transition-colors cursor-pointer shadow-xs"
+              title="Create a custom category to organize your books and lectures"
+            >
+              <FolderPlus className="w-3.5 h-3.5 text-[#ff4c00]" />
+              <span>+ New Category</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filter Pills scrollable bar */}
@@ -272,6 +291,28 @@ export default function ViewControls({
             <span className="opacity-70 text-[10px]">({quickReadsCount})</span>
           </button>
         )}
+
+        {/* User-Created Custom Categories */}
+        {customCategories.map((cat) => {
+          const filterKey = `custom_${cat.name}`;
+          return (
+            <button
+              key={filterKey}
+              type="button"
+              onClick={() => onFilterChange(filterKey)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer border",
+                activeFilter === filterKey
+                  ? "bg-[#533017] text-[#f5ebd7] border-[#533017]"
+                  : "bg-[#FAF4EB] text-[#533017] border-[#D8CBB8] hover:bg-[#EFE8DD]",
+              )}
+            >
+              <Folder className="w-3 h-3 text-[#d4af37]" />
+              <span>{cat.name}</span>
+              <span className="opacity-70 text-[10px]">({cat.count})</span>
+            </button>
+          );
+        })}
 
         {/* Dynamic Topics */}
         {topics.map((topic) => (

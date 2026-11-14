@@ -48,6 +48,20 @@ Core Guidelines:
    - Format physiological cascades with clean arrows: e.g.,
      LV Failure → ↑ LVEDP → ↑ LA Pressure → ↑ Pulmonary Venous Pressure → Pulmonary Edema.`;
 
+function filterCitationSources(refs: Array<{ source: string }>): string[] {
+  return refs
+    .map((r) => r.source)
+    .filter((s) => {
+      const low = (s || "").trim().toLowerCase();
+      return (
+        Boolean(low) &&
+        !low.startsWith("authoritative literature on") &&
+        !low.startsWith("standard reference corpus") &&
+        !low.startsWith("authoritative canon for")
+      );
+    });
+}
+
 /**
  * Executes a call to Google Gemini with tools and deep background references
  */
@@ -221,10 +235,12 @@ async function callGeminiAgent(
         provider: "gemini",
         model: modelName,
         toolsUsed,
-        citations: [
-          `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
-          ...enriched.authoritativeReferences.map((r) => r.source),
-        ],
+        citations: Array.from(
+          new Set([
+            `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
+            ...filterCitationSources(enriched.authoritativeReferences),
+          ])
+        ),
         generatedMorph,
         generatedQuiz,
         authoritativeReferences: enriched.authoritativeReferences,
@@ -241,10 +257,12 @@ async function callGeminiAgent(
       provider: "gemini",
       model: modelName,
       toolsUsed,
-      citations: [
-        `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
-        ...enriched.authoritativeReferences.map((r) => r.source),
-      ],
+      citations: Array.from(
+        new Set([
+          `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
+          ...filterCitationSources(enriched.authoritativeReferences),
+        ])
+      ),
       generatedMorph,
       generatedQuiz,
       authoritativeReferences: enriched.authoritativeReferences,
@@ -413,10 +431,12 @@ async function callOpenAICompatibleAgent(
         provider,
         model: effectiveModel,
         toolsUsed,
-        citations: [
-          `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
-          ...enriched.authoritativeReferences.map((r) => r.source),
-        ],
+        citations: Array.from(
+          new Set([
+            `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
+            ...filterCitationSources(enriched.authoritativeReferences),
+          ])
+        ),
         generatedMorph,
         generatedQuiz,
         authoritativeReferences: enriched.authoritativeReferences,
@@ -433,10 +453,12 @@ async function callOpenAICompatibleAgent(
     provider,
     model: effectiveModel,
     toolsUsed,
-    citations: [
-      `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
-      ...enriched.authoritativeReferences.map((r) => r.source),
-    ],
+    citations: Array.from(
+      new Set([
+        `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
+        ...filterCitationSources(enriched.authoritativeReferences),
+      ])
+    ),
     generatedMorph,
     generatedQuiz,
     authoritativeReferences: enriched.authoritativeReferences,
@@ -493,10 +515,12 @@ export function runDeterministicFallback(
     provider: "deterministic",
     model: "ascleon-grounded-mentor-v1",
     toolsUsed: ["deep_reference_retriever"],
-    citations: [
-      `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
-      ...(enriched.authoritativeReferences.map((r) => r.source) || []),
-    ],
+    citations: Array.from(
+      new Set([
+        `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
+        ...filterCitationSources(enriched.authoritativeReferences || []),
+      ])
+    ),
     authoritativeReferences: enriched.authoritativeReferences,
     qbankVignettes: enriched.qbankVignettes,
     mnemonics: enriched.mnemonics,

@@ -29,6 +29,7 @@ interface BookshelfProps {
   selectedBook: IBook | null;
   onSelectBook: (book: IBook | null) => void;
   onBookUpdated?: (updatedBook: IBook) => void;
+  onOpenNewCategory?: () => void;
   activeFilter?: string;
 }
 
@@ -73,6 +74,7 @@ export default function Bookshelf({
   selectedBook,
   onSelectBook,
   onBookUpdated,
+  onOpenNewCategory,
 }: BookshelfProps) {
   const shelfRef = useRef<HTMLDivElement>(null);
   const [groupingMode, setGroupingMode] = useState<ShelfGroupingMode>("smart");
@@ -225,18 +227,22 @@ export default function Bookshelf({
             </button>
           </div>
 
-          {/* New Section Button */}
+          {/* New Category / Section Button */}
           <button
             type="button"
             onClick={() => {
-              setSelectedBookIdsForSection(selectedBook ? [selectedBook._id] : []);
-              setIsNewSectionModalOpen(true);
+              if (onOpenNewCategory) {
+                onOpenNewCategory();
+              } else {
+                setSelectedBookIdsForSection(selectedBook ? [selectedBook._id] : []);
+                setIsNewSectionModalOpen(true);
+              }
             }}
             className="px-2.5 py-1 text-[11px] font-semibold text-[#f5ebd7] bg-[#533017] hover:bg-[#6c401f] border border-[#834f27] rounded-lg transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
-            title="Create a custom shelf section and put books in it"
+            title="Create a custom category and put books or lectures in it"
           >
             <FolderPlus className="w-3.5 h-3.5 text-[#d4af37]" />
-            <span className="hidden sm:inline">+ New Section</span>
+            <span className="hidden sm:inline">+ New Category</span>
           </button>
         </div>
       </div>
@@ -245,7 +251,7 @@ export default function Bookshelf({
       <div
         ref={shelfRef}
         onWheel={handleWheel}
-        className="w-full overflow-x-auto pb-0 px-1 sm:px-2 scrollbar-thin scrollbar-thumb-[#4A3525]/40 scroll-smooth bg-[#1f1007]/40 rounded-b-2xl border-x border-b border-[#52331b]"
+        className="w-full overflow-x-auto pb-0 px-1 sm:px-2 scrollbar-thin scrollbar-thumb-[#4A3525]/40 scroll-smooth bg-transparent rounded-b-2xl border-x border-b border-[#D8CBB8]"
       >
         <div className="min-w-fit flex items-stretch justify-start sm:justify-start pt-14 pb-0 relative">
           {/* Leftmost Outer Framing Bookend Pillar */}
@@ -258,8 +264,8 @@ export default function Bookshelf({
 
               {/* Coordinate-Locked Bay Column: Header Tag + Spines + Ledge Plaque */}
               <div className="flex flex-col items-center justify-between min-w-[240px] px-2 sm:px-4 flex-1">
-                {/* Upper Recessed Bay Title Ribbon */}
-                <div className="w-full flex items-center justify-between mb-3 px-2 py-1 rounded-md bg-[#170c05]/60 border border-[#3f2412]/80 text-[#d8c2a7]">
+                {/* Upper Bay Title Ribbon */}
+                <div className="w-full flex items-center justify-between mb-3 px-2.5 py-1 rounded-md bg-[#F7F1E7]/90 border border-[#D8CBB8] text-[#2c1c06] shadow-2xs">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span
                       className="w-2 h-2 rounded-full shrink-0 shadow-xs"
@@ -267,7 +273,7 @@ export default function Bookshelf({
                     />
                     <span
                       style={{ fontFamily: "'IBM Plex Serif', Georgia, serif" }}
-                      className="text-[11px] font-bold uppercase tracking-wider text-[#f3dfbd] truncate"
+                      className="text-[11px] font-bold uppercase tracking-wider text-[#2c1c06] truncate"
                     >
                       {bay.title}
                     </span>
@@ -275,7 +281,7 @@ export default function Bookshelf({
                   <span
                     className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded shadow-2xs shrink-0 font-mono"
                     style={{
-                      backgroundColor: `${bay.accentColor}25`,
+                      backgroundColor: `${bay.accentColor}20`,
                       color: bay.accentColor,
                     }}
                   >

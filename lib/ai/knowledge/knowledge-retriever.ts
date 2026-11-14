@@ -12,8 +12,106 @@ import {
 import { connectToDatabase } from "@/database/mongoose";
 import KnowledgeNode from "@/database/models/knowledge-node.model";
 
-// In-memory cache for dynamic DB knowledge nodes to eliminate redundant DB lookups on chat turns
+import { GoogleGenAI } from "@google/genai";
+
+// In-memory cache for dynamic DB knowledge nodes and LLM-resolved canonical references
 const knowledgeNodeCache = new Map<string, any[]>();
+const dynamicRefCache = new Map<string, ReferenceResource[]>();
+
+function isGenericReferenceName(name: string): boolean {
+  const low = name.trim().toLowerCase();
+  return (
+    !low ||
+    low.startsWith("standard reference corpus") ||
+    low.startsWith("authoritative literature on") ||
+    low.startsWith("authoritative canon for") ||
+    low === "peer-reviewed academic review literature" ||
+    low === "authoritative society guidelines & textbooks"
+  );
+}
+
+/**
+ * Resolves exact, topic-specific canonical textbooks and guidelines using Gemini
+ * when the book has no pre-digested blueprint references or the static corpus doesn't cover the topic.
+ */
+async function resolveDynamicCanonicalReferences(params: {
+  bookTitle: string;
+  domain: string;
+  text: string;
+  query: string;
+}): Promise<ReferenceResource[]> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === "your_gemini_api_key_here") return [];
+
+  const topicHint = (params.query || params.text.slice(0, 200))
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  const cacheKey = `${params.domain}:${params.bookTitle}:${topicHint.slice(0, 60)}`.toLowerCase();
+  const cached = dynamicRefCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const prompt = `Identify 2-3 REAL, authoritative, world-class textbooks or official clinical/academic guidelines that directly cover the EXACT topic in the study excerpt below.
+Book Title: "${params.bookTitle}"
+Detected Field: "${params.domain}"
+Student Query: "${params.query}"
+Excerpt:
+"""
+${params.text.slice(0, 900)}
+"""
+
+STRICT RULES:
+- Return ONLY references that genuinely match the subject of the Book Title and Excerpt (e.g., for MRCP / Internal Medicine on Pulmonary Embolism -> NICE NG158, ESC Guidelines on Acute Pulmonary Embolism, Kumar & Clark's Clinical Medicine; NEVER return surgery textbooks for internal medicine topics).
+- Return ONLY valid JSON array of 2-3 objects:
+[
+  {
+    "source": "Exact Textbook or Guideline Name",
+    "type": "textbook" | "guideline",
+    "title": "Relevant Chapter or Guideline Section",
+    "chapterOrSection": "Chapter/Section",
+    "excerpt": "1-2 sentence concise authoritative principle",
+    "clinicalPearls": ["1 concise high-yield pearl"]
+  }
+]`;
+
+    const genPromise = ai.models.generateContent({
+      model: "gemini-3.5-flash-lite",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: { responseMimeType: "application/json", temperature: 0.1 },
+    });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Dynamic ref timeout")), 2500)
+    );
+    const resp: any = await Promise.race([genPromise, timeoutPromise]);
+    const raw = resp?.text?.trim();
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    const refs: ReferenceResource[] = parsed
+      .filter((r: any) => r?.source && !isGenericReferenceName(String(r.source)))
+      .slice(0, 3)
+      .map((r: any, idx: number) => ({
+        id: `ref-llm-${idx + 1}`,
+        source: String(r.source),
+        type: r.type === "guideline" ? "guideline" : "textbook",
+        title: String(r.title || r.source),
+        chapterOrSection: String(r.chapterOrSection || "Core Reference"),
+        excerpt: String(r.excerpt || ""),
+        clinicalPearls: Array.isArray(r.clinicalPearls) ? r.clinicalPearls.map(String) : [],
+        relevanceTag: params.domain,
+      }));
+
+    if (refs.length > 0) {
+      dynamicRefCache.set(cacheKey, refs);
+    }
+    return refs;
+  } catch {
+    return [];
+  }
+}
 
 export interface ContextRetrievalOptions {
   text: string;
@@ -49,8 +147,13 @@ export async function retrieveEnrichedContext(
     bookReferences = textOrOptions.bookReferences || [];
   }
 
-  // If authoritative dynamic references were already supplied by book blueprint, prioritize them
-  const validExplicitRefs = Array.isArray(bookReferences) && bookReferences.length > 0 ? bookReferences : [];
+  // If authoritative dynamic references were already supplied by book blueprint, prioritize them (excluding generic placeholders)
+  const validExplicitRefs = Array.isArray(bookReferences)
+    ? bookReferences.filter((r: any) => {
+        const name = typeof r === "string" ? r : r?.source || r?.title || "";
+        return name && !isGenericReferenceName(String(name));
+      })
+    : [];
 
   if (validExplicitRefs.length > 0) {
     const formattedRefs: ReferenceResource[] = validExplicitRefs.map((r: any, idx: number) => {
@@ -90,15 +193,21 @@ export async function retrieveEnrichedContext(
 
   const isInternalMedicine =
     bookScope.includes("internal medicine") ||
-    bookScope.includes("kumar & clark") ||
+    bookScope.includes("mrcp") ||
+    bookScope.includes("plab") ||
+    bookScope.includes("usmle") ||
+    bookScope.includes("kumar") ||
     bookScope.includes("harrison") ||
     bookScope.includes("davidson") ||
+    bookScope.includes("oxford handbook") ||
+    bookScope.includes("physician") ||
     bookScope.includes("endocrin") ||
     bookScope.includes("nephrol") ||
     bookScope.includes("gastroenterol") ||
     bookScope.includes("rheumatol") ||
     bookScope.includes("hematol") ||
     bookScope.includes("pulmonol") ||
+    bookScope.includes("respirat") ||
     bookScope.includes("pediatric");
 
   const isExplicitSurgery =
@@ -108,7 +217,9 @@ export async function retrieveEnrichedContext(
       bookScope.includes("operative") ||
       bookScope.includes("bailey") ||
       bookScope.includes("browse") ||
-      ((combined.includes("surgery") || combined.includes("surgical")) && !combined.includes("internal medicine")));
+      bookScope.includes("sabiston") ||
+      bookScope.includes("schwartz") ||
+      bookScope.includes("mrcs"));
 
   if (isExplicitSurgery) {
     domain = "surgery";
@@ -370,8 +481,82 @@ export async function retrieveEnrichedContext(
         if (rile) matchingMnemonics.push(rile);
         if (handgrip) matchingMnemonics.push(handgrip);
       } else {
-        focalTopic = "Clinical Medicine & Bedside Foundations";
-        // Do not inject random heart sound / S2 splitting distractors if the active topic is different
+        focalTopic = "Clinical Medicine & Evidence-Based Guidelines";
+        // Dynamically resolve exact canonical references for this specific medical topic (e.g., PE, ALS, Renal, etc.)
+        const llmRefs = await resolveDynamicCanonicalReferences({
+          bookTitle,
+          domain,
+          text,
+          query,
+        });
+        if (llmRefs.length > 0) {
+          matchingRefs.push(...llmRefs);
+        } else {
+          // Topic-aware clinical fallback (never surgery distractors)
+          const isPEorVTE =
+            combined.includes("pulmonary embolism") ||
+            combined.includes("dvt") ||
+            combined.includes("thrombolysis") ||
+            combined.includes("doac") ||
+            combined.includes("lmwh") ||
+            combined.includes("spesi");
+          const isPeriArrest =
+            combined.includes("peri-arrest") ||
+            combined.includes("bradycardia") ||
+            combined.includes("tachycardia") ||
+            combined.includes("atropine") ||
+            combined.includes("cardioversion") ||
+            combined.includes("asystole");
+
+          if (isPEorVTE) {
+            focalTopic = "Venous Thromboembolism & Pulmonary Embolism";
+            matchingRefs.push({
+              id: "ref-nice-ng158",
+              source: "NICE Guideline NG158: Venous thromboembolic diseases",
+              type: "guideline",
+              title: "Diagnosis, Risk Stratification & Anticoagulation for PE",
+              chapterOrSection: "Initial & Long-Term PE Management",
+              excerpt:
+                "Offer apixaban or rivaroxaban as first-line anticoagulation for confirmed PE unless contraindicated; consider thrombolysis (e.g. alteplase) for haemodynamically unstable massive PE.",
+              clinicalPearls: [
+                "Use sPESI to assess suitability for outpatient management in haemodynamically stable PE.",
+                "Use LMWH throughout pregnancy and for at least 6 weeks postpartum.",
+              ],
+              relevanceTag: "pulmonary_embolism_nice",
+            });
+          }
+          if (isPeriArrest) {
+            focalTopic = "Peri-Arrest Arrhythmias & Resuscitation";
+            matchingRefs.push({
+              id: "ref-resus-uk-als",
+              source: "Resuscitation Council UK: Adult Advanced Life Support Guidelines",
+              type: "guideline",
+              title: "Peri-Arrest Bradycardia & Tachycardia Algorithms",
+              chapterOrSection: "Section: Peri-Arrest Arrhythmias",
+              excerpt:
+                "Assess for adverse signs (shock, syncope, myocardial ischaemia, heart failure). First-line for unstable bradycardia is atropine 500 mcg IV; unstable tachycardia requires immediate synchronised DC cardioversion.",
+              clinicalPearls: [
+                "Screen for reversible causes: 4 Hs (Hypoxia, Hypovolaemia, Hypo/hyperkalaemia, Hypothermia) and 4 Ts (Thrombosis, Tension pneumothorax, Tamponade, Toxins).",
+              ],
+              relevanceTag: "peri_arrest_als",
+            });
+          }
+          if (matchingRefs.length === 0) {
+            matchingRefs.push({
+              id: "ref-kumar-clark",
+              source: "Kumar & Clark's Clinical Medicine",
+              type: "textbook",
+              title: "Core Internal Medicine & Clinical Management",
+              chapterOrSection: "Internal Medicine Canon",
+              excerpt:
+                "Evidence-based internal medicine integrates pathophysiology, bedside clinical signs, and societal guidelines to guide diagnostic investigation and first-line therapy.",
+              clinicalPearls: [
+                "Prioritize haemodynamic stability and reversible causes before definitive workup.",
+              ],
+              relevanceTag: "internal_medicine_canon",
+            });
+          }
+        }
       }
 
       // Add matching QBank vignette only if strictly relevant to active topic
