@@ -2,8 +2,13 @@ import { NextResponse } from "next/server";
 import * as agentHarness from "@/lib/ai/agent-harness";
 import { runStudyAgent } from "@/lib/ai/agent-harness";
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
+import { AI_CREDIT_COSTS } from "@/lib/subscription-constants";
+import { requireAuthAndCredits } from "@/lib/usage.server";
 
 export async function POST(request: Request) {
+  const authCheck = await requireAuthAndCredits(AI_CREDIT_COSTS.READER_ASSISTANT);
+  if (!authCheck.ok) return authCheck.response;
+
   let body: any = {};
   try {
     body = await request.json();

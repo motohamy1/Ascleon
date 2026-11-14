@@ -9,9 +9,14 @@ import { auth } from "@clerk/nextjs/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
+import { AI_CREDIT_COSTS } from "@/lib/subscription-constants";
+import { consumeCredits, requireAuthAndCredits } from "@/lib/usage.server";
 
 export async function POST(req: NextRequest) {
   try {
+    const authCheck = await requireAuthAndCredits(0);
+    if (!authCheck.ok) return authCheck.response;
+
     const body = await req.json();
     const {
       bookTitle = "Study Document",
@@ -128,6 +133,20 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Live AI Synthesis via Gemini 3.8 Flash
+    const creditCheck = await consumeCredits(authCheck.userId, AI_CREDIT_COSTS.MORPH);
+    if (!creditCheck.allowed) {
+      return NextResponse.json(
+        {
+          error: creditCheck.error,
+          isBillingError: true,
+          plan: creditCheck.plan,
+          creditsUsed: creditCheck.used,
+          creditLimit: creditCheck.limit,
+        },
+        { status: 402 },
+      );
+    }
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
       try {

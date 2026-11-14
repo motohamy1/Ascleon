@@ -1,0 +1,34 @@
+HTTP/1.1 200 OK
+Access-Control-Allow-Credentials: true
+Access-Control-Expose-Headers: Authorization, X-Country, Retry-After
+Authorization: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImNsaWVudF8zTTVVaGJ2eDBSSlNxd0toV2JhUkptTUJXRDIiLCJyb3RhdGluZ190b2tlbiI6ImQ2bWtoc3Q5dGZsZ3EzNmRjazh0Zm03c3EwMjlyY3Z5aWI5djhodnUifQ.JMrdi4ujimsJqfSsYeJLglgMySdhCDYyFHN1qI5PTOLQo6AEQXJB5os6rgghMPair4XAeNpBmmns_kCVNIUbX3dWZtZQZ5K2drvYS0lSop2Uf22TaLYCQLkjfcKN4HEfBNfI3Rn5LH58t8e7Yf4xIFYZE2rvGAFC3yWJn7hnhVYGUjdJdEvKblmddpYNCOwX0M5Y9S_QMSFAARgJ6vKlotE7zbjYjs1reIJCZwS0VDMo9Pmp59GJeoX_2zbY5JI8A3sUoK-L94eqPDf7gGezvjFHtzyQGuyYSeXxpdNyWWsyMl3fKO_Qlm2_scASCp2iwBMsDUMo9IKe8JzysgXVvg
+Cache-Control: no-store
+Cf-Cache-Status: DYNAMIC
+Cf-Ray: a5a42dc2fae623fb-FRA
+Clerk-Api-Version: 2026-08-20
+Content-Security-Policy: default-src 'none'; frame-ancestors 'none'
+Content-Type: application/json
+Date: Sat, 14 Nov 2026 07:07:21 GMT
+Expires: 0
+Nel: {"report_to":"cf-nel","success_fraction":0.01,"max_age":604800}
+Permissions-Policy: camera=(), microphone=(), geolocation=(), usb=()
+Pragma: no-cache
+Referrer-Policy: strict-origin-when-cross-origin
+Report-To: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=KGNbg5Z8GlVOcsMenm3zYh25bBCK77eL%2FxBM16LaaijxsIUUXd%2FMFYwlXgkNTqGmgPNo4cN1c8ItMGppCQTIexRwfG7tjzDGztclgCHTK4PlXfO9K3MsGZXeRCAtz5A1FtFFH7w090U%3D"}]}
+Server: Vercel
+Set-Cookie: __cf_bm=Ys_P_efdneylRXy3ckJK27M6CuoUcZmXjnUcKpqqa0Q-1794640041.4413588-1.0.1.1-Tz89a8k42F822r1XOp0PDhf_gdMX7InEPyKRh5gn6mYggKbsnT67cPek7c83YSNiwOdsDg5bUX_Rq1RYjDk_ZYEgEwUVksae2Tki2d.xt70SOdoc7ME_YhvyUNOFU1Li; HttpOnly; SameSite=None; Partitioned; Secure; Path=/; Domain=frontend-api.clerk.dev; Expires=Sat, 14 Nov 2026 07:37:21 GMT
+Set-Cookie: _cfuvid=3U1Di5n1ER8lyevOZvuPCv6T3oEGf71Z_b7k_mxeEuw-1794640041.4413588-1.0.1.1-URSbm5p8J1Djz27t6_rgecBJpqsa5DDpR3ft7uBdwuY; HttpOnly; SameSite=None; Secure; Path=/; Domain=frontend-api.clerk.dev
+Strict-Transport-Security: max-age=63072000;
+Vary: Origin
+Via: 1.1 google
+X-Cfworker: 1
+X-Clerk-Instance-Id: ins_3M3hB8fNpZ9p4XeFLYgvIs6It9U
+X-Clerk-Trace-Id: 03cd7739223939a39edc309f7f86f266
+X-Cloud-Trace-Context: ba43d4fd1f2d3e8ccd638e6f32198c5f
+X-Content-Type-Options: nosniff
+X-Country: DE
+X-Frame-Options: DENY
+X-Robots-Tag: noindex, nofollow
+X-Vercel-Id: fra1::7mbvs-1794640041400-33572517b584
+Transfer-Encoding: chunked
+

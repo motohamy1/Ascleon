@@ -12,6 +12,8 @@ import {
 } from "@/lib/whiteboard/video-mapper";
 import { DEFAULT_WHITEBOARD_VOICE, isValidWhiteboardVoice } from "@/lib/whiteboard/voices";
 import { StudyLanguage } from "@/lib/language";
+import { AI_CREDIT_COSTS } from "@/lib/subscription-constants";
+import { consumeCredits } from "@/lib/usage.server";
 
 export const maxDuration = 60;
 
@@ -36,6 +38,12 @@ const CreateVideoRequestSchema = z.object({
 export async function POST(req: NextRequest) {
   try {
     const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Authentication required. Please sign in to generate whiteboard videos." },
+        { status: 401 }
+      );
+    }
     const rawBody = await req.json();
     const parsed = CreateVideoRequestSchema.safeParse(rawBody);
     if (!parsed.success) {
@@ -100,6 +108,23 @@ export async function POST(req: NextRequest) {
           video: serializeWhiteboardVideo(updatedDoc || existing),
         });
       }
+    }
+
+    const creditCheck = await consumeCredits(
+      userId,
+      AI_CREDIT_COSTS.WHITEBOARD_VIDEO
+    );
+    if (!creditCheck.allowed) {
+      return NextResponse.json(
+        {
+          error: creditCheck.error,
+          isBillingError: true,
+          plan: creditCheck.plan,
+          creditsUsed: creditCheck.used,
+          creditLimit: creditCheck.limit,
+        },
+        { status: 402 }
+      );
     }
 
     // 2. Plan grounded script via gemini-3.8-flash

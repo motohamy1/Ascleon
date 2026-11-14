@@ -3,8 +3,8 @@
 import { EndSessionResult, StartSessionResult } from "@/types";
 import { connectToDatabase } from "@/database/mongoose";
 import VoiceSession from "@/database/models/voice-session.model";
-import getCurrentBillingPeriodStart, { PLAN_LIMITS } from "@/lib/subscription-constants";
-import { getUserPlan } from "@/lib/subscription.server";
+import getCurrentBillingPeriodStart from "@/lib/subscription-constants";
+import { checkVoiceBudget, recordVoiceMinutes } from "@/lib/usage.server";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import Book from "@/database/models/book.model";
@@ -91,21 +91,15 @@ export const startVoiceSession = async (
   try {
     await connectToDatabase();
 
-    const plan = await getUserPlan();
-    const limits = PLAN_LIMITS[plan];
     const billingPeriodStart = getCurrentBillingPeriodStart();
+    const voiceBudget = await checkVoiceBudget(clerkId);
 
-    const sessionCount = await VoiceSession.countDocuments({
-      clerkId,
-      billingPeriodStart,
-    });
-
-    if (sessionCount >= limits.maxSessionsPerMonth) {
+    if (!voiceBudget.allowed) {
       revalidatePath("/");
 
       return {
         success: false,
-        error: `You have reached the monthly session limit for your ${plan} plan (${limits.maxSessionsPerMonth}). Please upgrade for more sessions.`,
+        error: voiceBudget.error,
         isBillingError: true,
       };
     }
@@ -121,7 +115,7 @@ export const startVoiceSession = async (
     return {
       success: true,
       sessionId: session._id.toString(),
-      maxDurationMinutes: limits.maxDurationPerSession,
+      maxDurationMinutes: voiceBudget.maxDurationPerSession,
     };
   } catch (e) {
     console.error("Error starting voice session", e);
@@ -145,6 +139,10 @@ export const endVoiceSession = async (
     });
 
     if (!result) return { success: false, error: "Voice session not found." };
+
+    if (result.clerkId && durationSeconds > 0) {
+      await recordVoiceMinutes(result.clerkId, durationSeconds);
+    }
 
     return { success: true };
   } catch (e) {

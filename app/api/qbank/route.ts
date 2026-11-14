@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import { retrieveFromBookRAG } from "@/lib/ai/rag/book-rag-retriever";
+import { AI_CREDIT_COSTS } from "@/lib/subscription-constants";
+import { requireAuthAndCredits } from "@/lib/usage.server";
 
 function shuffleQuestionOptions(q: any) {
   if (!q || !Array.isArray(q.options) || q.options.length < 2) return q;
@@ -229,6 +231,9 @@ function buildCleanFallback(text: string, pageNumber: number, language: string) 
 
 export async function POST(req: NextRequest) {
   try {
+    const authCheck = await requireAuthAndCredits(AI_CREDIT_COSTS.QBANK);
+    if (!authCheck.ok) return authCheck.response;
+
     const body = await req.json();
     const {
       bookId,

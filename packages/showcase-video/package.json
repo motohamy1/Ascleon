@@ -1,0 +1,27 @@
+{
+  "name": "@ascleon/showcase-video",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ascleon production showcase video — Remotion project",
+  "scripts": {
+    "dev": "remotion studio",
+    "render:en": "remotion render src/index.ts Showcase out/en.mp4 --props={\"language\":\"en\"}",
+    "render:ar": "remotion render src/index.ts Showcase out/ar.mp4 --props={\"language\":\"ar\"}",
+    "render:mix": "remotion render src/index.ts Showcase out/mix.mp4 --props={\"language\":\"mix\"}",
+    "render:all": "npm run render:en && npm run render:ar && npm run render:mix",
+    "still": "remotion still src/index.ts Showcase out/frame.png",
+    "browser:ensure": "remotion browser ensure"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.543",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.543"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5"
+  }
+}

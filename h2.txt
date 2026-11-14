@@ -1,0 +1,37 @@
+HTTP/1.1 200 OK
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Origin: https://ascleon.vercel.app
+Access-Control-Expose-Headers: Authorization, X-Country, Retry-After
+Cache-Control: no-store
+Cf-Cache-Status: DYNAMIC
+Cf-Ray: a5a433b3f8e3dca9-FRA
+Clerk-Api-Version: 2026-08-20
+Content-Security-Policy: default-src 'none'; frame-ancestors 'none'
+Content-Type: application/json
+Date: Sat, 14 Nov 2026 07:11:24 GMT
+Expires: 0
+Nel: {"report_to":"cf-nel","success_fraction":0.01,"max_age":604800}
+Permissions-Policy: camera=(), microphone=(), geolocation=(), usb=()
+Pragma: no-cache
+Referrer-Policy: strict-origin-when-cross-origin
+Report-To: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=xH%2BnF2UJi5WNA8CeGqHIafMyf3hPgteLwsIsRkAkenQjphnJPLuVqVTDlbYcwxfFCjCA%2F%2BqGnF47AnQHLtffJChonlq4qx7FmAvW9kFDmzZIlZt1%2F27DSkzNImn73L8A2jI8VoDzXUE%3D"}]}
+Server: Vercel
+Set-Cookie: __client=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImNsaWVudF8zTTVWQzhsb0JKV0NyZTdZWUw1eDBUUHBqdTYiLCJyb3RhdGluZ190b2tlbiI6InQ0OHUxNzdhcG5iaG1xeGk3NTJvaGR4dHY4ZHJoc21vNmxneWI4cXEifQ.S5omAl_xPNxuuqg1NOR97JgoulLutDDFrc49g519aKoXizbGtPSIcBy9ajQHJUiFrVKbSMO9DPQY0XWjELelHpv2F4FJTPtWRdDeyhvuGvFOUURUH5ULnUHzvFxVuwTfyC6rp74P94ujKoqlhZ5SgMT9GmTfA8wQ-QCjZnZ2Jc0DglDOdieMGe3o6edr6RwQLRLMfVTYxN2ecaJQgKOuP0Gnf9j-xXYeALC8c-gys0nZy8tEChV7N0MJA3nuirVgUpjtkdbiR07b4uC3utSqo623hvdxjGkqxY2NN1IMpOwP2Jv3kndMTkcXfKGoDNf3_uflV_FDnkgeoxE4vg-fuQ; Path=/; Domain=ascleon.vercel.app; Max-Age=315360000; HttpOnly; Secure; SameSite=Lax
+Set-Cookie: __client_uat=0; Path=/; Domain=ascleon.vercel.app; Max-Age=315360000; Secure; SameSite=Lax
+Set-Cookie: __client_uat_2NUTkTit=0; Path=/; Domain=ascleon.vercel.app; Max-Age=315360000; Secure; SameSite=Lax
+Set-Cookie: __cf_bm=Ttk2UwLK321SEb93dP.VvmMgRIGeVBlRBZzyvly..BM-1794640284.800132-1.0.1.1-eAVgJLvyD63vIOS2i2DDBF3xCFyKmgfhFzP194GY3KWw2gj78qzMs2AYXMu.WMkhi9C.8drtLTaVwfMWmpw03LbZ8A6eWIckqf90LJQJ2vlAy54RD10AdLhJ_JONbTri; HttpOnly; SameSite=None; Partitioned; Secure; Path=/; Domain=frontend-api.clerk.dev; Expires=Sat, 14 Nov 2026 07:41:24 GMT
+Set-Cookie: _cfuvid=SfwDuKeOR6VjlpamA8sD4Gn_J5Aq6NL6yEv0vqx0XSA-1794640284.800132-1.0.1.1-ZryzgL.LyQA7Qyn5E7WHXn2eQV4sLCYEcjONJPZJTgA; HttpOnly; SameSite=None; Secure; Path=/; Domain=frontend-api.clerk.dev
+Strict-Transport-Security: max-age=63072000;
+Vary: Origin
+Via: 1.1 google
+X-Cfworker: 1
+X-Clerk-Instance-Id: ins_3M3hB8fNpZ9p4XeFLYgvIs6It9U
+X-Clerk-Trace-Id: d45b0ac8f67d668cc903142493e58168
+X-Cloud-Trace-Context: 532dece136beb1195720d3e4ec2cd24c
+X-Content-Type-Options: nosniff
+X-Country: DE
+X-Frame-Options: DENY
+X-Robots-Tag: noindex, nofollow
+X-Vercel-Id: fra1::rwmzw-1794640284750-ab40d4e51542
+Transfer-Encoding: chunked
+

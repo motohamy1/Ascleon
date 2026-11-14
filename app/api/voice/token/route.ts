@@ -3,11 +3,32 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import { auth } from "@clerk/nextjs/server";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import { DEFAULT_LIVE_VOICE } from "@/lib/voice-config";
+import { checkVoiceBudget } from "@/lib/usage.server";
 
 export async function POST(req: NextRequest) {
   try {
     const { userId } = await auth();
-    // Allow demo/guest mode if needed or enforce auth
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Authentication required. Please sign in to start a voice session." },
+        { status: 401 }
+      );
+    }
+
+    const voiceBudget = await checkVoiceBudget(userId);
+    if (!voiceBudget.allowed) {
+      return NextResponse.json(
+        {
+          error: voiceBudget.error,
+          isBillingError: true,
+          plan: voiceBudget.plan,
+          voiceMinutesUsed: voiceBudget.voiceMinutesUsed,
+          voiceMinutesLimit: voiceBudget.voiceMinutesLimit,
+        },
+        { status: 402 }
+      );
+    }
+
     const body = await req.json().catch(() => ({}));
     const {
       bookTitle = "Medical Study Document",

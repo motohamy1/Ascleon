@@ -15,6 +15,8 @@ import {
   DEFAULT_WHITEBOARD_VOICE,
   isValidWhiteboardVoice,
 } from "@/lib/whiteboard/voices";
+import { AI_CREDIT_COSTS } from "@/lib/subscription-constants";
+import { consumeCredits } from "@/lib/usage.server";
 
 export const maxDuration = 60;
 
@@ -39,6 +41,12 @@ const CreateLessonRequestSchema = z.object({
 export async function POST(req: NextRequest) {
   try {
     const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Authentication required. Please sign in to generate lessons." },
+        { status: 401 }
+      );
+    }
     const rawBody = await req.json();
     const parsed = CreateLessonRequestSchema.safeParse(rawBody);
     if (!parsed.success) {
@@ -116,6 +124,23 @@ export async function POST(req: NextRequest) {
           lesson: serializeLessonBoard(updatedDoc || existing),
         });
       }
+    }
+
+    const creditCheck = await consumeCredits(
+      userId,
+      AI_CREDIT_COSTS.WHITEBOARD_LESSON
+    );
+    if (!creditCheck.allowed) {
+      return NextResponse.json(
+        {
+          error: creditCheck.error,
+          isBillingError: true,
+          plan: creditCheck.plan,
+          creditsUsed: creditCheck.used,
+          creditLimit: creditCheck.limit,
+        },
+        { status: 402 }
+      );
     }
 
     const outline = await generateLessonOutline({

@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
+import { AI_CREDIT_COSTS } from "@/lib/subscription-constants";
+import { requireAuthAndCredits } from "@/lib/usage.server";
 
 export async function POST(req: NextRequest) {
   try {
+    const authCheck = await requireAuthAndCredits(AI_CREDIT_COSTS.SUMMARY);
+    if (!authCheck.ok) return authCheck.response;
+
     const body = await req.json();
     const {
       bookId,

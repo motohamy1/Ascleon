@@ -1,8 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI, Modality } from "@google/genai";
+import { auth } from "@clerk/nextjs/server";
+import { checkVoiceBudget } from "@/lib/usage.server";
 
 export async function GET(req: NextRequest) {
   try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+    const voiceBudget = await checkVoiceBudget(userId);
+    if (!voiceBudget.allowed) {
+      return NextResponse.json(
+        { error: voiceBudget.error, isBillingError: true },
+        { status: 402 }
+      );
+    }
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json({ error: "Missing GEMINI_API_KEY" }, { status: 500 });
@@ -49,6 +63,18 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+    const voiceBudget = await checkVoiceBudget(userId);
+    if (!voiceBudget.allowed) {
+      return NextResponse.json(
+        { error: voiceBudget.error, isBillingError: true },
+        { status: 402 }
+      );
+    }
+
     const body = await req.json();
     const {
       bookTitle = "Study Material",
