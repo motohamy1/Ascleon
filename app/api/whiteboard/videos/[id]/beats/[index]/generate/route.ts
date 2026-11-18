@@ -15,6 +15,8 @@ import {
 import { DEFAULT_WHITEBOARD_VOICE, isValidWhiteboardVoice } from "@/lib/whiteboard/voices";
 import { StudyLanguage } from "@/lib/language";
 import { VoiceTrack, WhiteboardBeat } from "@/types/whiteboard-video";
+import { calculateDynamicCreditCost } from "@/lib/subscription-constants";
+import { buildBillingErrorResponse, consumeCredits } from "@/lib/usage.server";
 
 export const maxDuration = 60;
 
@@ -53,6 +55,12 @@ export async function POST(
 
   try {
     const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Authentication required. Please sign in to generate whiteboard beats." },
+        { status: 401 }
+      );
+    }
     await connectToDatabase();
 
     const doc = await WhiteboardVideo.findById(id).lean<StoredWhiteboardVideo>();
@@ -89,6 +97,27 @@ export async function POST(
     const needsVector = forceVector || beat.vectorStatus !== "ready" || !beat.vectorData;
     const needsAudio =
       forceAudio || existingVoiceBeat?.status !== "ready" || !existingVoiceBeat?.audioUrl;
+
+    if (!needsVector && !needsAudio) {
+      return NextResponse.json({
+        success: true,
+        cached: true,
+        creditsCharged: 0,
+        beatIndex,
+        video: serializeWhiteboardVideo(doc as unknown as Record<string, unknown>),
+      });
+    }
+
+    const dynamicCost = calculateDynamicCreditCost({
+      feature: "whiteboard_beat",
+      needsVector,
+      needsAudio,
+      forceRefresh: forceVector || forceAudio,
+    });
+    const creditCheck = await consumeCredits(userId, dynamicCost.total);
+    if (!creditCheck.allowed) {
+      return buildBillingErrorResponse(creditCheck, dynamicCost.total);
+    }
 
     // Fetch Beat 0 style anchor image if rendering beat > 0
     let styleAnchorBase64: string | undefined;
@@ -209,6 +238,10 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
+      cached: false,
+      creditsCharged: dynamicCost.total,
+      creditsRemaining: creditCheck.remaining,
+      creditBreakdown: dynamicCost.summary,
       beatIndex,
       video: serializeWhiteboardVideo(finalized || (updated as unknown as Record<string, unknown>)),
     });

@@ -219,7 +219,7 @@ const UploadForm = () => {
           typeof book.error === "string" ? book.error : "Failed to create book",
         );
         if ("isBillingError" in book && book.isBillingError) {
-          router.push("/subscriptions");
+          router.push("/subscriptions?reason=limit");
         }
         setIsSubmitting(false);
         return;

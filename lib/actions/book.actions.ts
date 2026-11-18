@@ -6,7 +6,8 @@ import { escapeRegex, generateSlug, serializeData } from "@/lib/utils";
 import Book from "@/database/models/book.model";
 import BookSegment from "@/database/models/book-segment.model";
 import mongoose from "mongoose";
-import { consumePages } from "@/lib/usage.server";
+import { consumeCredits, consumePages, refundPages } from "@/lib/usage.server";
+import { calculateDynamicCreditCost } from "@/lib/subscription-constants";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 
@@ -145,6 +146,22 @@ export const createBook = async (data: CreateBook) => {
       return {
         success: false,
         error: pageCheck.error,
+        isBillingError: true,
+      };
+    }
+
+    const ingestCost = calculateDynamicCreditCost({
+      feature: "book_ingest",
+      totalPages: pageCount,
+    });
+    const creditCheck = await consumeCredits(userId, ingestCost.total);
+    if (!creditCheck.allowed) {
+      await refundPages(userId, pageCount);
+      revalidatePath("/");
+
+      return {
+        success: false,
+        error: creditCheck.error,
         isBillingError: true,
       };
     }

@@ -26,9 +26,15 @@ import {
   DEFAULT_WHITEBOARD_VOICE,
   WHITEBOARD_NARRATOR_VOICES,
 } from "@/lib/whiteboard/voices";
+import Link from "next/link";
+import { toast } from "sonner";
 import { LessonBoardPlayer } from "@/components/board/LessonBoardPlayer";
 import { WhiteboardPlayer } from "./WhiteboardPlayer";
 import { cn } from "@/lib/utils";
+import {
+  calculateDynamicCreditCost,
+  getScopePageSpan,
+} from "@/lib/subscription-constants";
 
 interface WhiteboardVideoStudioProps {
   book: IBook;
@@ -48,6 +54,13 @@ interface WhiteboardVideoStudioProps {
 const VOICE_PREF_KEY = "ascleon_whiteboard_voice_id";
 const USE_LESSON_BOARD_V2 =
   process.env.NEXT_PUBLIC_WHITEBOARD_V2 !== "false";
+
+class BillingLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BillingLimitError";
+  }
+}
 
 function estimateDurationPreview(
   scopeType: WhiteboardScopeType,
@@ -175,6 +188,7 @@ export function WhiteboardVideoStudio({
   const [isSwitchingVoice, setIsSwitchingVoice] = useState(false);
   const [isCinema, setIsCinema] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isBillingLimitError, setIsBillingLimitError] = useState(false);
   const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(
     null
   );
@@ -297,6 +311,16 @@ export function WhiteboardVideoStudio({
     return estimateDurationPreview(scopeType, words, span, pacing);
   }, [scopeType, selectedText, activePageLiveText, effectiveScope, pacing]);
 
+  const estimatedPlanCredits = useMemo(() => {
+    const breakdown = calculateDynamicCreditCost({
+      feature: USE_LESSON_BOARD_V2 ? "whiteboard_lesson" : "whiteboard_video",
+      scopeType,
+      pageSpan: getScopePageSpan(effectiveScope),
+      pacing,
+    });
+    return breakdown.total;
+  }, [scopeType, effectiveScope, pacing]);
+
   const handlePreviewVoice = useCallback(
     async (voiceId: string) => {
       setPreviewingVoiceId(voiceId);
@@ -346,6 +370,11 @@ export function WhiteboardVideoStudio({
         }
       );
       const data = await res.json();
+      if (res.status === 402 || data?.isBillingError) {
+        throw new BillingLimitError(
+          data?.error || "Monthly AI credit limit reached."
+        );
+      }
       if (!res.ok || !data.lesson) {
         throw new Error(
           data.error || `Failed recording section ${sectionIndex + 1}`
@@ -404,14 +433,15 @@ export function WhiteboardVideoStudio({
 
       // Process remaining sections sequentially/bounded and handle model re-pinning cleanly
       let guard = 0;
-      while (!signal.aborted && guard < 3) {
+      let hitBillingLimit = false;
+      while (!signal.aborted && !hitBillingLimit && guard < 3) {
         guard++;
         pending = getPending(currentLesson);
         if (pending.length === 0) break;
 
         let sawRepin = false;
         for (const idx of pending) {
-          if (signal.aborted) break;
+          if (signal.aborted || hitBillingLimit) break;
           try {
             const res = await synthesizeLessonSection(
               currentLesson.id,
@@ -425,6 +455,18 @@ export function WhiteboardVideoStudio({
               break;
             }
           } catch (err) {
+            if (err instanceof BillingLimitError) {
+              hitBillingLimit = true;
+              setIsBillingLimitError(true);
+              setErrorMsg(err.message);
+              toast.error(err.message, {
+                action: {
+                  label: "Upgrade Plan",
+                  onClick: () => window.location.assign("/subscriptions?reason=limit"),
+                },
+              });
+              break;
+            }
             if (!signal.aborted) {
               console.warn(
                 `[LessonBoard] Section ${idx} audio error:`,
@@ -451,6 +493,7 @@ export function WhiteboardVideoStudio({
       generationAbortRef.current = controller;
 
       setErrorMsg(null);
+      setIsBillingLimitError(false);
       setIsPlanning(true);
       try {
         localStorage.setItem(VOICE_PREF_KEY, selectedVoice);
@@ -485,6 +528,11 @@ export function WhiteboardVideoStudio({
         });
 
         const data = await res.json();
+        if (res.status === 402 || data?.isBillingError) {
+          throw new BillingLimitError(
+            data?.error || "Monthly AI credit limit reached."
+          );
+        }
         if (!res.ok || !data.lesson) {
           throw new Error(data.error || "Failed to plan whiteboard lesson");
         }
@@ -502,6 +550,9 @@ export function WhiteboardVideoStudio({
         if (controller.signal.aborted) return;
         setIsPlanning(false);
         setIsGeneratingMore(false);
+        if (err instanceof BillingLimitError) {
+          setIsBillingLimitError(true);
+        }
         setErrorMsg(
           err instanceof Error
             ? err.message
@@ -613,6 +664,11 @@ export function WhiteboardVideoStudio({
         }
       );
       const data = await res.json();
+      if (res.status === 402 || data?.isBillingError) {
+        throw new BillingLimitError(
+          data?.error || "Monthly AI credit limit reached."
+        );
+      }
       if (!res.ok || !data.video) {
         throw new Error(
           data.error || `Failed generating scene ${beatIndex + 1}`
@@ -659,14 +715,21 @@ export function WhiteboardVideoStudio({
 
       const remaining = pendingIndices.filter((i) => i !== 0);
       let cursor = 0;
+      let hitBillingLimit = false;
       const concurrency = 2;
 
       const worker = async () => {
-        while (cursor < remaining.length && !signal.aborted) {
+        while (cursor < remaining.length && !signal.aborted && !hitBillingLimit) {
           const nextIdx = remaining[cursor++];
           try {
             await renderBeat(initialVideo.id, nextIdx, voiceId, signal);
           } catch (err) {
+            if (err instanceof BillingLimitError) {
+              hitBillingLimit = true;
+              setIsBillingLimitError(true);
+              setErrorMsg(err.message);
+              break;
+            }
             if (!signal.aborted) {
               console.warn(
                 `[WhiteboardVideoStudio] Beat ${nextIdx} error:`,
@@ -697,6 +760,7 @@ export function WhiteboardVideoStudio({
       generationAbortRef.current = controller;
 
       setErrorMsg(null);
+      setIsBillingLimitError(false);
       setIsPlanning(true);
       try {
         localStorage.setItem(VOICE_PREF_KEY, selectedVoice);
@@ -731,6 +795,11 @@ export function WhiteboardVideoStudio({
         });
 
         const data = await res.json();
+        if (res.status === 402 || data?.isBillingError) {
+          throw new BillingLimitError(
+            data?.error || "Monthly AI credit limit reached."
+          );
+        }
         if (!res.ok || !data.video) {
           throw new Error(data.error || "Failed to plan whiteboard video");
         }
@@ -744,6 +813,9 @@ export function WhiteboardVideoStudio({
         if (controller.signal.aborted) return;
         setIsPlanning(false);
         setIsGeneratingMore(false);
+        if (err instanceof BillingLimitError) {
+          setIsBillingLimitError(true);
+        }
         setErrorMsg(
           err instanceof Error
             ? err.message
@@ -927,13 +999,21 @@ export function WhiteboardVideoStudio({
 
         {/* 1. Source Scope */}
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]/80">
               1. Source Scope
             </span>
-            <span className="rounded-full border border-[color:var(--ink)]/30 bg-[color:var(--panel)] px-2 py-0.5 font-mono text-[9.5px] font-bold text-[color:var(--ink)]">
-              {dynamicEstimateText}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="rounded-full border border-[color:var(--ink)]/30 bg-[color:var(--panel)] px-2 py-0.5 font-mono text-[9.5px] font-bold text-[color:var(--ink)]">
+                {dynamicEstimateText}
+              </span>
+              <span
+                title="0 credits if already cached; +1 credit per newly synthesized audio section"
+                className="rounded-full border border-[color:var(--ink)]/30 bg-[color:var(--orange)]/25 px-2 py-0.5 font-mono text-[9.5px] font-black text-[color:var(--ink)]"
+              >
+                {estimatedPlanCredits} cr plan + 1 cr/audio (0 if cached)
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1145,16 +1225,25 @@ export function WhiteboardVideoStudio({
 
         {/* Status / Error Banner */}
         {errorMsg && (
-          <div className="flex items-center gap-2 rounded-[14px] border-2 border-red-600 bg-red-50 px-3 py-2 text-xs font-bold text-red-900">
+          <div className="flex flex-wrap items-center gap-2 rounded-[14px] border-2 border-red-600 bg-red-50 px-3 py-2 text-xs font-bold text-red-900">
             <AlertCircle className="size-4 shrink-0 text-red-600" />
             <span className="flex-1">{errorMsg}</span>
-            <button
-              type="button"
-              onClick={() => startGeneration(false)}
-              className="cursor-pointer rounded-full border border-red-700 bg-white px-2.5 py-0.5 font-mono text-[10px] font-black uppercase"
-            >
-              Retry
-            </button>
+            {isBillingLimitError ? (
+              <Link
+                href="/subscriptions?reason=limit"
+                className="rounded-full border border-[color:var(--ink)] bg-[color:var(--orange)] px-3 py-1 font-mono text-[10px] font-black uppercase text-[color:var(--ink)]"
+              >
+                Upgrade Plan
+              </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={() => startGeneration(false)}
+                className="cursor-pointer rounded-full border border-red-700 bg-white px-2.5 py-0.5 font-mono text-[10px] font-black uppercase"
+              >
+                Retry
+              </button>
+            )}
           </div>
         )}
 

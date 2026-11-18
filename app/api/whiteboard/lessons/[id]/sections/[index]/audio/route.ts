@@ -19,6 +19,8 @@ import {
   isValidWhiteboardVoice,
 } from "@/lib/whiteboard/voices";
 import { LessonSection, LessonVoiceTrack } from "@/types/lesson-board";
+import { calculateDynamicCreditCost } from "@/lib/subscription-constants";
+import { buildBillingErrorResponse, consumeCredits } from "@/lib/usage.server";
 
 export const maxDuration = 60;
 
@@ -61,6 +63,12 @@ export async function POST(
 
   try {
     const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Authentication required. Please sign in to synthesize lesson audio." },
+        { status: 401 }
+      );
+    }
     await connectToDatabase();
 
     const doc = await LessonBoard.findById(id).lean<StoredLessonBoard>();
@@ -118,10 +126,21 @@ export async function POST(
     if (!needsAudio) {
       return NextResponse.json({
         success: true,
+        cached: true,
+        creditsCharged: 0,
         sectionIndex,
         rePinned: false,
         lesson: serializeLessonBoard(doc as unknown as Record<string, unknown>),
       });
+    }
+
+    const dynamicCost = calculateDynamicCreditCost({
+      feature: "whiteboard_audio",
+      forceRefresh: forceAudio,
+    });
+    const creditCheck = await consumeCredits(userId, dynamicCost.total);
+    if (!creditCheck.allowed) {
+      return buildBillingErrorResponse(creditCheck, dynamicCost.total);
     }
 
     const combinedNarration = section.script.map((s) => s.text).join(" ");
@@ -227,6 +246,10 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
+      cached: false,
+      creditsCharged: dynamicCost.total,
+      creditsRemaining: creditCheck.remaining,
+      creditBreakdown: dynamicCost.summary,
       sectionIndex,
       rePinned,
       lesson: serializeLessonBoard(

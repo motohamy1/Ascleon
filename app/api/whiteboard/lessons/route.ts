@@ -15,8 +15,11 @@ import {
   DEFAULT_WHITEBOARD_VOICE,
   isValidWhiteboardVoice,
 } from "@/lib/whiteboard/voices";
-import { AI_CREDIT_COSTS } from "@/lib/subscription-constants";
-import { consumeCredits } from "@/lib/usage.server";
+import {
+  calculateDynamicCreditCost,
+  getScopePageSpan,
+} from "@/lib/subscription-constants";
+import { buildBillingErrorResponse, consumeCredits } from "@/lib/usage.server";
 
 export const maxDuration = 60;
 
@@ -121,26 +124,22 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           success: true,
           cached: true,
+          creditsCharged: 0,
           lesson: serializeLessonBoard(updatedDoc || existing),
         });
       }
     }
 
-    const creditCheck = await consumeCredits(
-      userId,
-      AI_CREDIT_COSTS.WHITEBOARD_LESSON
-    );
+    const dynamicCost = calculateDynamicCreditCost({
+      feature: "whiteboard_lesson",
+      scopeType: scope.type,
+      pageSpan: getScopePageSpan(scope),
+      pacing,
+      forceRefresh,
+    });
+    const creditCheck = await consumeCredits(userId, dynamicCost.total);
     if (!creditCheck.allowed) {
-      return NextResponse.json(
-        {
-          error: creditCheck.error,
-          isBillingError: true,
-          plan: creditCheck.plan,
-          creditsUsed: creditCheck.used,
-          creditLimit: creditCheck.limit,
-        },
-        { status: 402 }
-      );
+      return buildBillingErrorResponse(creditCheck, dynamicCost.total);
     }
 
     const outline = await generateLessonOutline({
@@ -190,6 +189,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       cached: false,
+      creditsCharged: dynamicCost.total,
+      creditsRemaining: creditCheck.remaining,
+      creditBreakdown: dynamicCost.summary,
       lesson: serializeLessonBoard(doc || {}),
     });
   } catch (error) {

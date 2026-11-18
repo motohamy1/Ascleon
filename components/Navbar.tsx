@@ -34,19 +34,24 @@ const Navbar = () => {
   const pathname = usePathname();
   const { isSignedIn, isLoaded } = useAuth();
   const clerk = useClerk();
-  const [open, setOpen] = useState(false);
+  const [openPath, setOpenPath] = useState<string | null>(null);
+  const open = openPath === pathname;
+  const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    setOpenPath((prev) => {
+      const prevBool = prev === pathname;
+      const nextBool = typeof next === 'function' ? next(prevBool) : next;
+      return nextBool ? pathname : null;
+    });
+  };
 
   // Close mobile drawer on Escape key
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenPath(null);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
-
-  // Close mobile drawer whenever route changes
-  useEffect(() => {
-    setOpen(false);
-  }, [pathname]);
 
   // Collapse marketing navbar inside the dedicated Study Space to maximize vertical viewing canvas
   const isStudySpace = pathname?.startsWith('/books/') || pathname === '/space/active';
@@ -121,6 +126,17 @@ const Navbar = () => {
 
         {/* Right: Auth & CTAs (Desktop: lg screens and up) */}
         <div className="hidden items-center gap-2.5 lg:flex">
+          <Link
+            href="/subscriptions"
+            className={cn(
+              'rounded-[1.35rem] px-4 py-2.5 sm:py-3 font-serif text-xs sm:text-[13px] font-bold uppercase tracking-wider transition-transform hover:-translate-y-0.5 active:translate-y-0',
+              pathname?.startsWith('/subscriptions')
+                ? 'border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-nav-deep'
+                : cn('text-[color:var(--ink)]', clusterClass)
+            )}
+          >
+            Plans
+          </Link>
           <Show when="signed-out">
             <SignInButton mode="modal">
               <button
@@ -221,6 +237,21 @@ const Navbar = () => {
                   </Link>
                 );
               })}
+              <Link
+                href="/subscriptions"
+                onClick={() => setOpen(false)}
+                className={cn(
+                  'rounded-xl px-3.5 py-2.5 text-sm font-semibold uppercase tracking-wider transition-colors flex items-center justify-between',
+                  pathname?.startsWith('/subscriptions')
+                    ? 'bg-[color:var(--ink)] text-[color:var(--cream)]'
+                    : 'text-[color:var(--ink)] hover:bg-black/5'
+                )}
+              >
+                <span>Plans &amp; Subscriptions</span>
+                <span className="rounded-full bg-[#7fd8c9] px-2 py-0.5 text-[10px] font-black uppercase text-[color:var(--ink)]">
+                  EGP / Card
+                </span>
+              </Link>
             </nav>
             <div className="mt-2 border-t border-[color:var(--ink)]/15 pt-2">
               <Show when="signed-out">

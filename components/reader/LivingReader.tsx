@@ -898,6 +898,15 @@ export default function LivingReader({
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
+        if (res.status === 402 || errorData?.isBillingError) {
+          toast.error(errorData.error || "Monthly AI credit limit reached.", {
+            action: {
+              label: "Upgrade Plan",
+              onClick: () => window.location.assign("/subscriptions?reason=limit"),
+            },
+          });
+          return;
+        }
         throw new Error(
           errorData.error || `Morph API returned status ${res.status}`
         );
@@ -914,6 +923,9 @@ export default function LivingReader({
       }
     } catch (err) {
       console.error("Failed to generate Morph artifact:", err);
+      if (err instanceof Error) {
+        toast.error(err.message);
+      }
     } finally {
       setIsMorphLoading(false);
       setSelectionPos(null);
@@ -955,15 +967,26 @@ export default function LivingReader({
           language: studyLanguage,
           studyScope,
           excludeTopics: forceRefresh ? existingTopics : [],
+          forceRefresh: Boolean(forceRefresh),
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.questions && data.questions.length > 0) {
-          setDynamicQBankList(data.questions);
-          setQBankCache((prev) => ({ ...prev, [cacheKey]: data.questions }));
-          setActiveQBankIdx(0);
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        if (res.status === 402 || errorData?.isBillingError) {
+          toast.error(errorData.error || "Monthly AI credit limit reached.", {
+            action: {
+              label: "Upgrade Plan",
+              onClick: () => window.location.assign("/subscriptions?reason=limit"),
+            },
+          });
         }
+        return;
+      }
+      const data = await res.json();
+      if (data?.questions && data.questions.length > 0) {
+        setDynamicQBankList(data.questions);
+        setQBankCache((prev) => ({ ...prev, [cacheKey]: data.questions }));
+        setActiveQBankIdx(0);
       }
     } catch (e) {
       console.warn("Dynamic QBank load warning:", e);
@@ -999,14 +1022,25 @@ export default function LivingReader({
           selectedText: selectedText || undefined,
           language: studyLanguage,
           studyScope,
+          forceRefresh: Boolean(forceRefresh),
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.summary) {
-          setDynamicSummary(data.summary);
-          setSummaryCache((prev) => ({ ...prev, [cacheKey]: data.summary }));
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        if (res.status === 402 || errorData?.isBillingError) {
+          toast.error(errorData.error || "Monthly AI credit limit reached.", {
+            action: {
+              label: "Upgrade Plan",
+              onClick: () => window.location.assign("/subscriptions?reason=limit"),
+            },
+          });
         }
+        return;
+      }
+      const data = await res.json();
+      if (data?.summary) {
+        setDynamicSummary(data.summary);
+        setSummaryCache((prev) => ({ ...prev, [cacheKey]: data.summary }));
       }
     } catch (e) {
       console.warn("Dynamic Summary load warning:", e);
@@ -1155,7 +1189,31 @@ export default function LivingReader({
         }),
       });
 
-      if (!res.ok) throw new Error(`AI error ${res.status}`);
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        if (res.status === 402 || errorData?.isBillingError) {
+          const msg = errorData.error || "Monthly AI credit limit reached.";
+          toast.error(msg, {
+            action: {
+              label: "Upgrade Plan",
+              onClick: () => window.location.assign("/subscriptions?reason=limit"),
+            },
+          });
+          setMessages((prev) => [
+            ...prev,
+            {
+              sender: "ai",
+              text: `⚠️ **Monthly AI Credit Limit Reached**\n\n${msg}\n\n[Open Plans & Egyptian Payments](/subscriptions?reason=limit)`,
+              time: new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            },
+          ]);
+          return;
+        }
+        throw new Error(errorData.error || `AI error ${res.status}`);
+      }
       const data = await res.json();
 
       if (data.authoritativeReferences?.length) {

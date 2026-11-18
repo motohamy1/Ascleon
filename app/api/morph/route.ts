@@ -9,8 +9,15 @@ import { auth } from "@clerk/nextjs/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
-import { AI_CREDIT_COSTS } from "@/lib/subscription-constants";
-import { consumeCredits, requireAuthAndCredits } from "@/lib/usage.server";
+import {
+  calculateDynamicCreditCost,
+  getScopePageSpan,
+} from "@/lib/subscription-constants";
+import {
+  buildBillingErrorResponse,
+  consumeCredits,
+  requireAuthAndCredits,
+} from "@/lib/usage.server";
 
 export async function POST(req: NextRequest) {
   try {
@@ -125,6 +132,7 @@ export async function POST(req: NextRequest) {
             artifact: cachedDoc,
             data: cachedDoc,
             cached: true,
+            creditsCharged: 0,
           });
         }
       } catch (cacheCheckErr) {
@@ -133,18 +141,16 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Live AI Synthesis via Gemini 3.8 Flash
-    const creditCheck = await consumeCredits(authCheck.userId, AI_CREDIT_COSTS.MORPH);
+    const dynamicCost = calculateDynamicCreditCost({
+      feature: "morph",
+      scopeType: studyScope?.type,
+      pageSpan: getScopePageSpan(studyScope),
+      hasVisionInput: Boolean(snippedDiagram),
+      forceRefresh: Boolean(forceRefresh),
+    });
+    const creditCheck = await consumeCredits(authCheck.userId, dynamicCost.total);
     if (!creditCheck.allowed) {
-      return NextResponse.json(
-        {
-          error: creditCheck.error,
-          isBillingError: true,
-          plan: creditCheck.plan,
-          creditsUsed: creditCheck.used,
-          creditLimit: creditCheck.limit,
-        },
-        { status: 402 },
-      );
+      return buildBillingErrorResponse(creditCheck, dynamicCost.total);
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -521,6 +527,9 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
       artifact: artifactData,
       data: artifactData,
       cached: false,
+      creditsCharged: dynamicCost.total,
+      creditsRemaining: creditCheck.remaining,
+      creditBreakdown: dynamicCost.summary,
     });
   } catch (error) {
     console.error("Error in /api/morph:", error);

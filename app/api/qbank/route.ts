@@ -2,8 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import { retrieveFromBookRAG } from "@/lib/ai/rag/book-rag-retriever";
-import { AI_CREDIT_COSTS } from "@/lib/subscription-constants";
-import { requireAuthAndCredits } from "@/lib/usage.server";
+import {
+  calculateDynamicCreditCost,
+  getScopePageSpan,
+} from "@/lib/subscription-constants";
+import {
+  buildBillingErrorResponse,
+  consumeCredits,
+  requireAuthAndCredits,
+} from "@/lib/usage.server";
 
 function shuffleQuestionOptions(q: any) {
   if (!q || !Array.isArray(q.options) || q.options.length < 2) return q;
@@ -231,7 +238,7 @@ function buildCleanFallback(text: string, pageNumber: number, language: string) 
 
 export async function POST(req: NextRequest) {
   try {
-    const authCheck = await requireAuthAndCredits(AI_CREDIT_COSTS.QBANK);
+    const authCheck = await requireAuthAndCredits(0);
     if (!authCheck.ok) return authCheck.response;
 
     const body = await req.json();
@@ -245,6 +252,7 @@ export async function POST(req: NextRequest) {
       language = "en",
       studyScope,
       excludeTopics = [],
+      forceRefresh = false,
     } = body;
 
     let focalText = (selectedText || pageText || "").trim();
@@ -275,6 +283,24 @@ export async function POST(req: NextRequest) {
 
     if (!focalText && !snippedDiagram) {
       return NextResponse.json({ error: "Missing text or diagram to generate questions" }, { status: 400 });
+    }
+
+    const hasVisionInput =
+      typeof snippedDiagram === "string" && snippedDiagram.startsWith("data:image");
+    const isFreshRegen =
+      Boolean(forceRefresh) ||
+      (Array.isArray(excludeTopics) && excludeTopics.length > 0);
+    const dynamicCost = calculateDynamicCreditCost({
+      feature: "qbank",
+      scopeType: studyScope?.type,
+      pageSpan: getScopePageSpan(studyScope),
+      hasVisionInput,
+      forceRefresh: isFreshRegen,
+    });
+
+    const creditCheck = await consumeCredits(authCheck.userId, dynamicCost.total);
+    if (!creditCheck.allowed) {
+      return buildBillingErrorResponse(creditCheck, dynamicCost.total);
     }
 
     // 2. Sanitize extracted text: Strip OCR noise, page numbers, running headers, and raw file names
@@ -484,6 +510,9 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
             questions: fastestResult.questions,
             citedPages,
             source: fastestResult.source,
+            creditsCharged: dynamicCost.total,
+            creditsRemaining: creditCheck.remaining,
+            creditBreakdown: dynamicCost.summary,
           });
         }
       } catch (raceErr) {
@@ -523,6 +552,9 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                 questions: parsed.map(shuffleQuestionOptions),
                 citedPages,
                 source: `openrouter:${orModel}`,
+                creditsCharged: dynamicCost.total,
+                creditsRemaining: creditCheck.remaining,
+                creditBreakdown: dynamicCost.summary,
               });
             }
           }
@@ -540,6 +572,9 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
       questions: cleanFallback.map(shuffleQuestionOptions),
       citedPages,
       source: "clean-offline-fallback",
+      creditsCharged: dynamicCost.total,
+      creditsRemaining: creditCheck.remaining,
+      creditBreakdown: dynamicCost.summary,
     });
   } catch (error) {
     console.error("QBank API fatal error:", error);

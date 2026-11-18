@@ -6,7 +6,7 @@ import getCurrentBillingPeriodStart, {
   PLAN_LIMITS,
   PlanType,
 } from "@/lib/subscription-constants";
-import { getUserPlan } from "@/lib/subscription.server";
+import { getUserPlan, getUserPlanDetails } from "@/lib/subscription.server";
 
 export interface UsageCheckResult {
   allowed: boolean;
@@ -45,13 +45,15 @@ async function ensureMonthlyUsageDoc(clerkId: string, billingPeriodStart: Date) 
 }
 
 export async function getUserUsageSummary(clerkId: string) {
-  const plan = await getUserPlan();
+  const planDetails = await getUserPlanDetails();
+  const plan = planDetails.plan;
   const limits = PLAN_LIMITS[plan];
   const billingPeriodStart = getCurrentBillingPeriodStart();
   const doc = await ensureMonthlyUsageDoc(clerkId, billingPeriodStart);
 
   return {
     plan,
+    planDetails,
     limits,
     billingPeriodStart,
     usage: {
@@ -95,13 +97,18 @@ export async function consumeCredits(
   );
 
   if (!updated) {
+    const remaining = Math.max(0, limit - existing.creditsUsed);
+    const error =
+      remaining > 0
+        ? `This action requires ${cost} AI credits, but you only have ${remaining} remaining on your ${plan} plan (${existing.creditsUsed}/${limit} used). Try a narrower 1-page scope or upgrade your plan.`
+        : `Monthly AI credit limit reached for your ${plan} plan (${limit} credits/month). Please upgrade your plan to continue.`;
     return {
       allowed: false,
       plan,
       used: existing.creditsUsed,
       limit,
-      remaining: Math.max(0, limit - existing.creditsUsed),
-      error: `Monthly AI credit limit reached for your ${plan} plan (${limit} credits/month). Please upgrade your plan to continue.`,
+      remaining,
+      error,
     };
   }
 
@@ -167,6 +174,18 @@ export async function consumePages(
   };
 }
 
+export async function refundPages(clerkId: string, pageCount: number) {
+  const pages = Math.max(0, Math.ceil(pageCount));
+  if (pages <= 0) return;
+
+  const billingPeriodStart = getCurrentBillingPeriodStart();
+  await ensureMonthlyUsageDoc(clerkId, billingPeriodStart);
+  await UserUsage.findOneAndUpdate(
+    { clerkId, billingPeriodStart, pagesUsed: { $gte: pages } },
+    { $inc: { pagesUsed: -pages } },
+  );
+}
+
 export async function checkVoiceBudget(
   clerkId: string,
 ): Promise<VoiceBudgetResult> {
@@ -220,6 +239,24 @@ export async function recordVoiceMinutes(
   );
 }
 
+export function buildBillingErrorResponse(
+  check: UsageCheckResult,
+  requiredCredits?: number,
+) {
+  return NextResponse.json(
+    {
+      error: check.error,
+      isBillingError: true,
+      plan: check.plan,
+      creditsUsed: check.used,
+      creditLimit: check.limit,
+      creditsRemaining: check.remaining,
+      ...(typeof requiredCredits === "number" ? { requiredCredits } : {}),
+    },
+    { status: 402 },
+  );
+}
+
 /**
  * Authenticates the request and optionally consumes AI credits.
  * Pass cost=0 to only authenticate and defer credit deduction (e.g. until cache miss).
@@ -244,16 +281,7 @@ export async function requireAuthAndCredits(cost: number): Promise<
     if (!check.allowed) {
       return {
         ok: false,
-        response: NextResponse.json(
-          {
-            error: check.error,
-            isBillingError: true,
-            plan: check.plan,
-            creditsUsed: check.used,
-            creditLimit: check.limit,
-          },
-          { status: 402 },
-        ),
+        response: buildBillingErrorResponse(check, cost),
       };
     }
   }

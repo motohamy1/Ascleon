@@ -2,8 +2,15 @@ import { NextResponse } from "next/server";
 import * as agentHarness from "@/lib/ai/agent-harness";
 import { runStudyAgent } from "@/lib/ai/agent-harness";
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
-import { AI_CREDIT_COSTS } from "@/lib/subscription-constants";
-import { requireAuthAndCredits } from "@/lib/usage.server";
+import {
+  calculateDynamicCreditCost,
+  getScopePageSpan,
+} from "@/lib/subscription-constants";
+import {
+  buildBillingErrorResponse,
+  consumeCredits,
+  requireAuthAndCredits,
+} from "@/lib/usage.server";
 import {
   isGenericTopicTitle,
   resolveActivePageTopic,
@@ -30,7 +37,7 @@ interface ReaderAssistantRequestBody {
 }
 
 export async function POST(request: Request) {
-  const authCheck = await requireAuthAndCredits(AI_CREDIT_COSTS.READER_ASSISTANT);
+  const authCheck = await requireAuthAndCredits(0);
   if (!authCheck.ok) return authCheck.response;
 
   let body: ReaderAssistantRequestBody = {};
@@ -231,6 +238,24 @@ export async function POST(request: Request) {
     topicMap,
   };
 
+  const isTopicDeepDive =
+    Boolean(isTopicSummaryIntent) ||
+    effectiveScope.type === "topic" ||
+    effectiveScope.type === "range";
+
+  const dynamicCost = calculateDynamicCreditCost({
+    feature: "reader_assistant",
+    scopeType: effectiveScope.type,
+    pageSpan: getScopePageSpan(effectiveScope),
+    hasVisionInput: Boolean(typeof selectedImage === "string" && selectedImage),
+    isTopicDeepDive,
+  });
+
+  const creditCheck = await consumeCredits(authCheck.userId, dynamicCost.total);
+  if (!creditCheck.allowed) {
+    return buildBillingErrorResponse(creditCheck, dynamicCost.total);
+  }
+
   try {
     const output = await runStudyAgent(cleanQuery, context);
     const finalCitations = ragCitedPages.length > 0
@@ -248,6 +273,9 @@ export async function POST(request: Request) {
       qbankVignettes: output.qbankVignettes,
       mnemonics: output.mnemonics,
       topicLocation: effectiveTopicLocation || output.topicLocation,
+      creditsCharged: dynamicCost.total,
+      creditsRemaining: creditCheck.remaining,
+      creditBreakdown: dynamicCost.summary,
     });
   } catch (error) {
     console.error("Reader assistant agent error, falling back gracefully:", error);
@@ -302,6 +330,9 @@ export async function POST(request: Request) {
               authoritativeReferences: fallbackOutput.authoritativeReferences || [],
               qbankVignettes: fallbackOutput.qbankVignettes || [],
               mnemonics: fallbackOutput.mnemonics || [],
+              creditsCharged: dynamicCost.total,
+              creditsRemaining: creditCheck.remaining,
+              creditBreakdown: dynamicCost.summary,
             },
             { status: 200 }
           );
@@ -342,6 +373,9 @@ export async function POST(request: Request) {
         authoritativeReferences: [],
         qbankVignettes: [],
         mnemonics: [],
+        creditsCharged: dynamicCost.total,
+        creditsRemaining: creditCheck.remaining,
+        creditBreakdown: dynamicCost.summary,
       },
       { status: 200 }
     );

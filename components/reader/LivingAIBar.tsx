@@ -63,7 +63,15 @@ export default function LivingAIBar({
       });
 
       const data = await res.json();
-      if (data.success) {
+      if (res.status === 402 || data?.isBillingError) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: `${data?.error || "Monthly AI credit limit reached."} [Upgrade your plan](/subscriptions?reason=limit) to continue.`,
+          },
+        ]);
+      } else if (data.success) {
         setMessages((prev) => [
           ...prev,
           {
@@ -77,7 +85,7 @@ export default function LivingAIBar({
           ...prev,
           {
             role: "assistant",
-            content: "Sorry, I could not process your query at this moment.",
+            content: data?.error || "Sorry, I could not process your query at this moment.",
           },
         ]);
       }

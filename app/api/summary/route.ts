@@ -2,12 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
-import { AI_CREDIT_COSTS } from "@/lib/subscription-constants";
-import { requireAuthAndCredits } from "@/lib/usage.server";
+import {
+  calculateDynamicCreditCost,
+  getScopePageSpan,
+} from "@/lib/subscription-constants";
+import {
+  buildBillingErrorResponse,
+  consumeCredits,
+  requireAuthAndCredits,
+} from "@/lib/usage.server";
 
 export async function POST(req: NextRequest) {
   try {
-    const authCheck = await requireAuthAndCredits(AI_CREDIT_COSTS.SUMMARY);
+    const authCheck = await requireAuthAndCredits(0);
     if (!authCheck.ok) return authCheck.response;
 
     const body = await req.json();
@@ -19,6 +26,7 @@ export async function POST(req: NextRequest) {
       selectedText = "",
       language = "en",
       studyScope,
+      forceRefresh = false,
     } = body;
 
     let focalText = (selectedText || pageText || "").trim();
@@ -46,6 +54,18 @@ export async function POST(req: NextRequest) {
 
     if (!focalText) {
       return NextResponse.json({ error: "Missing text to summarize" }, { status: 400 });
+    }
+
+    const dynamicCost = calculateDynamicCreditCost({
+      feature: "summary",
+      scopeType: studyScope?.type,
+      pageSpan: getScopePageSpan(studyScope),
+      forceRefresh: Boolean(forceRefresh),
+    });
+
+    const creditCheck = await consumeCredits(authCheck.userId, dynamicCost.total);
+    if (!creditCheck.allowed) {
+      return buildBillingErrorResponse(creditCheck, dynamicCost.total);
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -113,6 +133,9 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
             success: true,
             summary: parsed,
             source: "gemini-3-flash-preview",
+            creditsCharged: dynamicCost.total,
+            creditsRemaining: creditCheck.remaining,
+            creditBreakdown: dynamicCost.summary,
           });
         }
       } catch (aiErr) {
@@ -147,6 +170,9 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
       success: true,
       summary: fallback,
       source: "fallback",
+      creditsCharged: dynamicCost.total,
+      creditsRemaining: creditCheck.remaining,
+      creditBreakdown: dynamicCost.summary,
     });
   } catch (error) {
     console.error("Summary API fatal error:", error);

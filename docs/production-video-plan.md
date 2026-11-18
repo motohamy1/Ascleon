@@ -269,7 +269,30 @@ ffmpeg -y -i out/final.mp4 -i out/audio-mix.wav \
 
 ---
 
-## 8. Out of scope (decided)
+## 8. As built (v1)
+
+The first cut is built from the user's own screen recordings rather than fresh
+captures, edited down to a 120s piece in `packages/showcase-video/`.
+
+| Segment | Time | Source | Cut |
+|---|---|---|---|
+| hook | 0:00–0:06 | homepage (hero) | 0–6s |
+| library | 0:06–0:17 | homepage (library) | 10–21s |
+| chat | 0:17–0:32 | AIchat-Morph | 2–17s |
+| voice | 0:32–1:04 | voice-feature | 9–41s |
+| morph | 1:04–1:18 | AIchat-Morph | 34–48s |
+| whiteboard | 1:18–1:32 | AIchat-Morph | 56–70s |
+| qbank | 1:32–1:44 | AIchat-Morph | 86–98s |
+| profile | 1:44–1:48 | homepage (profile popup, cleaned) | 50.5–54.5s |
+| closing | 1:48–2:00 | designed brand card | — |
+
+- The Clerk **"Development mode"** footer in the profile popup was removed with
+  a time-gated `drawbox` patch — see `packages/showcase-video/README.md`.
+- The messy `AIchat-Morph-features.mp4` recording was cut to **loaded results
+  only**; every spinner and tab flicker is gone.
+- Only the voice segment carries audio (the real session). No music bed yet.
+
+## 9. Out of scope (decided)
 
 - **Descript** — not in the pipeline. It's an editor, not a renderer: no motion engine, no frame-accurate montage, and it duplicates what Remotion + ffmpeg already do (captions, audio cleanup, clip derivation). It only pays off for a talking-head segment, which is not planned. Revisit if a founder intro/testimonial is added later.
 - **Manim / ASCII-video / Canva MCP** — wrong medium for a product showcase.

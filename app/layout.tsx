@@ -57,7 +57,13 @@ export default function RootLayout({
       <body
         className={`${ibmPlexSerif.variable} ${monaSans.variable} ${caveat.variable} ${marhey.variable} relative font-sans antialiased`}
       >
-        <ClerkProvider>
+        <ClerkProvider
+          appearance={{
+            options: {
+              unsafe_disableDevelopmentModeWarnings: true,
+            },
+          }}
+        >
           <Navbar />
           {children}
           <Toaster />
