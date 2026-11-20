@@ -4,12 +4,14 @@ import { ArrowUpRight } from 'lucide-react';
 import { IBook, UserStudyProgressData } from '@/types';
 import { SessionHistoryItem } from '@/lib/actions/session.actions';
 import { AscleonLogo } from '@/components/ui/AscleonLogo';
+import type { ActiveStudySourceResult } from '@/lib/actions/study-progress.actions';
 
 interface ProgressViewProps {
   books: IBook[];
   sessions: SessionHistoryItem[];
   firstName: string | null;
   latestStudyProgress?: UserStudyProgressData | null;
+  activeStudy?: ActiveStudySourceResult | null;
 }
 
 const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -59,7 +61,7 @@ const StatTile = ({
   value,
   label,
   cardClass = 'bg-[color:var(--panel)] text-[color:var(--ink)]',
-  dimClass = 'text-[color:var(--ink)]/55',
+  dimClass = 'text-[color:var(--ink)]/75',
 }: {
   value: number | string;
   label: string;
@@ -77,6 +79,7 @@ const ProgressView = ({
   sessions,
   firstName,
   latestStudyProgress,
+  activeStudy,
 }: ProgressViewProps) => {
   const name = (firstName ?? 'reader').toUpperCase();
   const favorites = books.filter((b) => b.isFavorite).length;
@@ -97,31 +100,54 @@ const ProgressView = ({
   };
   const statusTotal = books.length;
 
-  // Resume target: book from latest study progress > latest voice session > in-progress book > newest book
+  // Resume target: canonical activeStudy > latest study progress > latest voice session > in-progress book > newest book
   const targetStudyBook = latestStudyProgress
     ? books.find((b) => b.slug === latestStudyProgress.bookSlug)
     : null;
 
-  const resume =
-    (targetStudyBook && {
-      href: `/books/${targetStudyBook.slug}`,
-      title: targetStudyBook.title,
-      cover: targetStudyBook.coverURL,
-      page: latestStudyProgress?.lastStudiedPage,
-      totalPages: latestStudyProgress?.totalPages,
-      progressPercent: latestStudyProgress?.progressPercent,
-      activeIntent: latestStudyProgress?.studioState?.activeIntent,
-    }) ??
-    (sessions[0]?.bookSlug && {
-      href: `/books/${sessions[0].bookSlug}`,
-      title: sessions[0].bookTitle,
-      cover: sessions[0].bookCoverURL,
-      page: undefined,
-      totalPages: undefined,
-      progressPercent: undefined,
-      activeIntent: undefined,
-    }) ??
-    (books.find((b) => b.readingStatus === 'in_progress') ?? books[0]) ?? null;
+  const fallbackBook = books.find((b) => b.readingStatus === 'in_progress') ?? books[0] ?? null;
+
+  const resume: {
+    href: string;
+    title: string;
+    cover?: string;
+    page?: number;
+    totalPages?: number;
+    progressPercent?: number;
+    activeIntent?: string;
+  } | null = activeStudy
+    ? {
+        href: `/books/${activeStudy.slug}`,
+        title: activeStudy.title,
+        cover: activeStudy.coverURL,
+        page: activeStudy.totalPages > 0 ? activeStudy.lastStudiedPage : undefined,
+        totalPages: activeStudy.totalPages > 0 ? activeStudy.totalPages : undefined,
+        progressPercent: activeStudy.totalPages > 0 ? activeStudy.progressPercent : undefined,
+        activeIntent: activeStudy.activeIntent,
+      }
+    : targetStudyBook
+      ? {
+          href: `/books/${targetStudyBook.slug}`,
+          title: targetStudyBook.title,
+          cover: targetStudyBook.coverURL,
+          page: latestStudyProgress?.lastStudiedPage,
+          totalPages: latestStudyProgress?.totalPages,
+          progressPercent: latestStudyProgress?.progressPercent,
+          activeIntent: latestStudyProgress?.studioState?.activeIntent,
+        }
+      : sessions[0]?.bookSlug
+        ? {
+            href: `/books/${sessions[0].bookSlug}`,
+            title: sessions[0].bookTitle,
+            cover: sessions[0].bookCoverURL,
+          }
+        : fallbackBook
+          ? {
+              href: `/books/${fallbackBook.slug}`,
+              title: fallbackBook.title,
+              cover: fallbackBook.coverURL,
+            }
+          : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -130,7 +156,7 @@ const ProgressView = ({
         <div className="flex min-h-[310px] sm:min-h-[340px] lg:min-h-[370px] flex-col justify-between rounded-[24px] bg-[color:var(--cream)] p-6 sm:p-9 lg:p-10 md:col-span-7 lg:col-span-8">
           <div className="flex items-start justify-between gap-6">
             <div className="flex items-center gap-2">
-              <p className="meta-label text-[color:var(--ink)]/70">
+              <p className="meta-label text-[color:var(--ink)]/75">
                 Progress · the journey
               </p>
               <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--ink)]/20 bg-[#7fd8c9] px-2 py-0.5 font-mono text-[9.5px] font-bold text-[color:var(--ink)]">
@@ -181,31 +207,37 @@ const ProgressView = ({
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="meta-label text-[color:var(--ink)]/70">
+                  <p className="meta-label text-[color:var(--ink)]/75">
                     Continue reading
                   </p>
                   <h2 className="display mt-1 line-clamp-2 text-[24px] sm:text-[28px] leading-[1.05] text-[color:var(--ink)]">
                     {resume.title}
                   </h2>
-                  {"progressPercent" in resume && typeof (resume as any).progressPercent === "number" && (
-                    <div className="mt-3 flex flex-col gap-1.5">
-                      <div className="flex items-center justify-between text-[11px] font-bold text-[color:var(--ink)]/80">
-                        <span>Page {(resume as any).page} of {(resume as any).totalPages}</span>
-                        <span>{(resume as any).progressPercent}%</span>
+                  {typeof resume.progressPercent === "number" && (() => {
+                    const rawPage = Number(resume.page) || 1;
+                    const rawTotal = Number(resume.totalPages) || 1;
+                    const safeTotal = Math.max(1, rawTotal, rawPage);
+                    const safePercent = Math.min(100, Math.max(0, Number(resume.progressPercent) || 0));
+                    return (
+                      <div className="mt-3 flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between text-xs font-bold text-[color:var(--ink)]/85">
+                          <span>Page {rawPage} of {safeTotal}</span>
+                          <span>{safePercent}%</span>
+                        </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--ink)]/15">
+                          <div
+                            className="h-full bg-[color:var(--ink)] transition-all duration-700 ease-out"
+                            style={{ width: `${safePercent}%` }}
+                          />
+                        </div>
+                        {resume.activeIntent && (
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-[color:var(--ink)]/75">
+                            Studio: {resume.activeIntent}
+                          </span>
+                        )}
                       </div>
-                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--ink)]/15">
-                        <div
-                          className="h-full bg-[color:var(--ink)] transition-all duration-700 ease-out"
-                          style={{ width: `${(resume as any).progressPercent}%` }}
-                        />
-                      </div>
-                      {(resume as any).activeIntent && (
-                        <span className="text-[9.5px] font-bold uppercase tracking-wider text-[color:var(--ink)]/65">
-                          Studio: {(resume as any).activeIntent}
-                        </span>
-                      )}
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
             </Link>
@@ -240,7 +272,7 @@ const ProgressView = ({
         {/* 7-day session chart */}
         <div className="flex min-h-[200px] sm:min-h-[225px] lg:min-h-[245px] flex-col justify-between rounded-[22px] bg-[color:var(--panel)] p-5 sm:p-7 shadow-chip md:col-span-5 lg:col-span-4">
           <div className="flex items-baseline justify-between gap-4">
-            <p className="meta-label text-[color:var(--ink)]/60">
+            <p className="meta-label text-[color:var(--ink)]/75">
               Study log · last 7 days
             </p>
             <p className="text-sm font-bold text-[color:var(--ink)]">
@@ -264,7 +296,7 @@ const ProgressView = ({
                   }}
                 />
                 <span
-                  className={`meta-label text-[10px] ${d.isToday ? 'text-[color:var(--ink)] font-bold' : 'text-[color:var(--ink)]/40'}`}
+                  className={`meta-label ${d.isToday ? 'text-[color:var(--ink)] font-bold' : 'text-[color:var(--ink)]/75'}`}
                 >
                   {d.letter}
                 </span>
@@ -272,7 +304,7 @@ const ProgressView = ({
             ))}
           </div>
           {sessions.length === 0 && (
-            <p className="mt-2 text-[12.5px] font-medium text-[color:var(--ink)]/55">
+            <p className="mt-2 text-[12.5px] font-medium text-[color:var(--ink)]/75">
               No sessions this week yet. Open a book and the log fills itself.
             </p>
           )}
@@ -284,13 +316,13 @@ const ProgressView = ({
             value={books.length}
             label="Books on shelf"
             cardClass="bg-[color:var(--panel)] text-[color:var(--ink)]"
-            dimClass="text-[color:var(--ink)]/55"
+            dimClass="text-[color:var(--ink)]/75"
           />
           <StatTile
             value={sessions.length}
             label="Sessions logged"
             cardClass="bg-[#7fd8c9] text-[color:var(--ink)]"
-            dimClass="text-[color:var(--ink)]/70"
+            dimClass="text-[color:var(--ink)]/75"
           />
           <StatTile
             value={minutes}
@@ -302,7 +334,7 @@ const ProgressView = ({
             value={favorites}
             label="Marked favorites"
             cardClass="bg-[color:var(--ink)] text-[color:var(--cream)]"
-            dimClass="text-[color:var(--cream)]/60"
+            dimClass="text-[color:var(--cream)]/75"
           />
         </div>
       </section>
@@ -312,10 +344,10 @@ const ProgressView = ({
         {/* Reading-status distribution */}
         <div className="flex min-h-[260px] sm:min-h-[290px] flex-col justify-between rounded-[22px] bg-[color:var(--cream)] p-5 sm:p-7 md:col-span-6 lg:col-span-4">
           <div>
-            <p className="meta-label text-[color:var(--ink)]/60">Shelf status</p>
+            <p className="meta-label text-[color:var(--ink)]/75">Shelf status</p>
 
             {statusTotal === 0 ? (
-              <p className="mt-4 text-[13.5px] font-medium leading-relaxed text-[color:var(--ink)]/70">
+              <p className="mt-4 text-[13.5px] font-medium leading-relaxed text-[color:var(--ink)]/75">
                 Nothing shelved yet — upload a book and this ramp starts moving.
               </p>
             ) : (
@@ -340,7 +372,7 @@ const ProgressView = ({
                     />
                   )}
                 </div>
-                <ul className="meta-label mt-4 flex flex-col gap-2 text-[color:var(--ink)]/60">
+                <ul className="meta-label mt-4 flex flex-col gap-2 text-[color:var(--ink)]/75">
                   <li className="flex items-center justify-between">
                     <span className="flex items-center gap-2">
                       <span className="size-2.5 rounded-full bg-[color:var(--orange)]" />
@@ -366,7 +398,7 @@ const ProgressView = ({
               </>
             )}
           </div>
-          <div className="mt-4 pt-3 border-t border-[color:var(--ink)]/10 text-xs font-semibold text-[color:var(--ink)]/60">
+          <div className="mt-4 pt-3 border-t border-[color:var(--ink)]/10 text-xs font-semibold text-[color:var(--ink)]/75">
             {statusTotal} {statusTotal === 1 ? 'total title' : 'total titles'} tracked
           </div>
         </div>
@@ -374,17 +406,17 @@ const ProgressView = ({
         {/* Recent sessions */}
         <div className="flex min-h-[260px] sm:min-h-[290px] flex-col justify-between rounded-[22px] bg-[color:var(--panel)] p-5 sm:p-7 md:col-span-6 lg:col-span-5">
           <div className="flex items-center justify-between gap-4">
-            <p className="meta-label text-[color:var(--ink)]/60">
+            <p className="meta-label text-[color:var(--ink)]/75">
               Recent sessions
             </p>
             {sessions.length > 0 && (
-              <Link
-                href="/space/revision"
-                className="group flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[color:var(--ink)]"
+              <span
+                aria-disabled="true"
+                title="Full revision history is coming soon"
+                className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-full border border-[color:var(--ink)]/20 px-2.5 py-0.5 text-xs font-bold uppercase tracking-[0.08em] text-[color:var(--ink)]/60"
               >
-                Full history
-                <ArrowUpRight className="size-3.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-              </Link>
+                History · Soon
+              </span>
             )}
           </div>
 
@@ -393,7 +425,7 @@ const ProgressView = ({
               <p className="display text-[26px] text-[color:var(--ink)]">
                 Nothing on tape yet.
               </p>
-              <p className="max-w-sm text-sm font-medium leading-relaxed text-[color:var(--ink)]/60">
+              <p className="max-w-sm text-sm font-medium leading-relaxed text-[color:var(--ink)]/75">
                 Open a book, press the mic, and start asking. Every session
                 lands here afterwards.
               </p>
@@ -421,17 +453,17 @@ const ProgressView = ({
                       <p className="truncate text-sm font-bold text-[color:var(--ink)]">
                         {s.bookTitle}
                       </p>
-                      <p className="meta-label mt-0.5 text-[color:var(--ink)]/55">
+                      <p className="meta-label mt-0.5 text-[color:var(--ink)]/75">
                         {formatDate(s.startedAt)} · {formatDuration(s.durationSeconds)}
                       </p>
                     </div>
-                    <ArrowUpRight className="size-4 shrink-0 text-[color:var(--ink)]/50 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                    <ArrowUpRight className="size-4 shrink-0 text-[color:var(--ink)]/75 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
                   </Link>
                 </li>
               ))}
             </ul>
           )}
-          <div className="mt-4 pt-3 border-t border-[color:var(--ink)]/10 text-xs font-semibold text-[color:var(--ink)]/60">
+          <div className="mt-4 pt-3 border-t border-[color:var(--ink)]/10 text-xs font-semibold text-[color:var(--ink)]/75">
             {sessions.length} {sessions.length === 1 ? 'session recorded' : 'total sessions recorded'}
           </div>
         </div>
@@ -443,7 +475,7 @@ const ProgressView = ({
             className="card-lift group flex min-h-[125px] sm:min-h-[140px] flex-1 cursor-pointer items-start justify-between gap-4 rounded-[22px] bg-[color:var(--ink)] p-5 sm:p-6 text-[color:var(--cream)] shadow-chip"
           >
             <div>
-              <p className="meta-label text-[color:var(--cream)]/55">
+              <p className="meta-label text-[color:var(--cream)]/75">
                 Quick action
               </p>
               <h3 className="display mt-2 text-[26px] sm:text-[28px]">Add a book</h3>
@@ -457,7 +489,7 @@ const ProgressView = ({
             className="card-lift group flex min-h-[125px] sm:min-h-[140px] flex-1 cursor-pointer items-start justify-between gap-4 rounded-[22px] bg-[#7fd8c9] p-5 sm:p-6 text-[color:var(--ink)] shadow-chip border-2 border-[color:var(--ink)]"
           >
             <div>
-              <p className="meta-label text-[color:var(--ink)]/70">Browse</p>
+              <p className="meta-label text-[color:var(--ink)]/75">Browse</p>
               <h3 className="display mt-2 text-[26px] sm:text-[28px] text-[color:var(--ink)]">
                 The library
               </h3>

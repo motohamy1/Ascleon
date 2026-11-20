@@ -3,18 +3,20 @@ import { callStructuredJson } from "@/lib/whiteboard/ai-client";
 import { ResolvedWhiteboardSource } from "@/lib/whiteboard/source";
 import {
   ALLOWED_LESSON_ICONS,
+  ANATOMY_RIG_MODELS,
   BoardLimits,
   DroppedFactNotice,
   getBoardLimits,
   LessonLink,
   LessonSection,
+  PROCEDURAL_3D_BLUEPRINTS,
 } from "@/types/lesson-board";
+import { resolveGuaranteedLabScene } from "./math-presets";
 import {
-  applyGroundingAndPrune,
-  buildLessonOutlineZodSchema,
+  applySoftGroundingAndEnrich,
+  healRawLessonOutline,
   isQuoteGroundedInSource,
   RawLessonOutline,
-  validateRawLessonOutline,
 } from "./validate";
 
 function buildOutlineJsonSchema(limits: BoardLimits) {
@@ -80,6 +82,125 @@ function buildOutlineJsonSchema(limits: BoardLimits) {
                 },
                 required: ["id", "text", "kind", "tone", "source"],
               },
+            },
+            ops: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  t: {
+                    type: "string",
+                    enum: [
+                      "title",
+                      "write",
+                      "bullets",
+                      "term",
+                      "flow",
+                      "compare",
+                      "cycle",
+                      "timeline",
+                      "formula",
+                    ],
+                  },
+                  text: { type: "string" },
+                  subtitle: { type: "string" },
+                  heading: { type: "string" },
+                  items: { type: "array", items: { type: "string" } },
+                  term: { type: "string" },
+                  definition: { type: "string" },
+                  tex: { type: "string" },
+                  label: { type: "string" },
+                  leftTitle: { type: "string" },
+                  rightTitle: { type: "string" },
+                  rows: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        left: { type: "string" },
+                        right: { type: "string" },
+                      },
+                    },
+                  },
+                  steps: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        label: { type: "string" },
+                        sub: { type: "string" },
+                        tone: { type: "string" },
+                        nodeId: { type: "string" },
+                      },
+                    },
+                  },
+                  nodes: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        label: { type: "string" },
+                        tone: { type: "string" },
+                        nodeId: { type: "string" },
+                      },
+                    },
+                  },
+                  events: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        time: { type: "string" },
+                        label: { type: "string" },
+                        tone: { type: "string" },
+                        nodeId: { type: "string" },
+                      },
+                    },
+                  },
+                  tone: { type: "string" },
+                  wash: { type: "string" },
+                  emphasis: { type: "string" },
+                  nodeId: { type: "string" },
+                },
+                required: ["t"],
+              },
+            },
+            labScene: {
+              type: "object",
+              properties: {
+                tier: {
+                  type: "string",
+                  enum: [
+                    "anatomy-rig",
+                    "procedural-3d",
+                    "interactive-sim",
+                    "smart-diagram-3d",
+                  ],
+                },
+                title: { type: "string" },
+                model: { type: "string", enum: [...ANATOMY_RIG_MODELS] },
+                blueprint: { type: "string", enum: [...PROCEDURAL_3D_BLUEPRINTS] },
+                cam: { type: "string", enum: ["front", "side", "iso", "top"] },
+                presetId: { type: "string" },
+                xLabel: { type: "string" },
+                yLabel: { type: "string" },
+                fxy: { type: "string" },
+                readoutLabel: { type: "string" },
+                highlight: { type: "array", items: { type: "string" } },
+                labels: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      label: { type: "string" },
+                      labelAr: { type: "string" },
+                      tone: { type: "string" },
+                    },
+                  },
+                },
+              },
+              required: ["tier", "title"],
             },
             script: {
               type: "array",
@@ -239,8 +360,8 @@ export interface GeneratedLessonOutline {
 }
 
 /**
- * Generates a single cohesive, connected clinical LessonBoard outline from resolved book pages.
- * The AI supplies structured language, concepts, links, and teacher script; our code owns all coordinates and timing.
+ * Generates a single cohesive, connected clinical Living Board (2D handwritten ops + 4-tier 3D Lab + script).
+ * Zero-throw auto-healing ensures minor LLM formatting hiccups never break generation.
  */
 export async function generateLessonOutline(params: {
   source: ResolvedWhiteboardSource;
@@ -254,8 +375,8 @@ export async function generateLessonOutline(params: {
   );
   const langDirective = buildLanguageDirective(language, "json");
 
-  const prompt = `You are Ascleon's Master Clinical Whiteboard Teacher.
-Design ONE cohesive, connected whiteboard lesson map (NOT isolated flashcards) teaching the study material below step by step.
+  const prompt = `You are Ascleon's Master Clinical Whiteboard & 3D Lab Teacher.
+Design ONE cohesive, connected whiteboard + 3D interactive lesson teaching the study material below step by step.
 
 BOOK: "${source.bookTitle}"
 SCOPE: ${source.scope.type.toUpperCase()} (Pages ${source.scope.startPage}–${source.scope.endPage}${source.scope.topicTitle ? `, Topic: "${source.scope.topicTitle}"` : ""})
@@ -267,38 +388,37 @@ ${source.combinedText}
 
 ${langDirective}
 
-BOARD STRUCTURE & HIERARCHY RULES:
-1. OVERALL FRAME: Write a crisp lesson "title" (<= ${limits.maxTitleWords} words) and a 1-sentence learning "objective" (<= ${limits.maxObjectiveWords} words).
-2. SECTIONS (${limits.minSections} to ${limits.maxSections}): Organize the topic into a clear clinical teaching progression (e.g., Mechanism -> Clinical Signs -> Diagnosis -> Management, or Concept -> Cause -> Effect -> Pearl). Each section needs a short "id" ("s1", "s2", ...), a short "title" (<= ${limits.maxSectionTitleWords} words), and a "kind".
-3. NODES (${limits.minNodesPerSection} to ${limits.maxNodesPerSection} per section): Each node is ONE crisp board point:
-   - "id": unique short id like "n1", "n2", ...
-   - "text": <= ${limits.maxNodeTextWords} words (scannable board phrase, never a full paragraph!).
-   - "detail": optional <= 5-word clinical nuance (e.g. "ST elevation >= 2mm", "1st-line therapy").
-   - "kind": "structure" | "step" | "cause" | "effect" | "sign" | "test" | "treatment" | "pearl"
-   - "tone": "normal" (blue ink: healthy physiology / normal baseline / treatment), "pathology" (red ink: lesion / abnormal / danger), or "neutral" (black ink: structure / general step).
-   - "icon": choose the best clinical icon from: ${ALLOWED_LESSON_ICONS.join(", ")}.
-   - "trend": "up", "down", or "none" (use "up"/"down" when showing elevated/decreased lab values, pressure, or biomarkers).
-   - "source": { "page": [PAGE N] integer, "quote": EXACT verbatim 6–25 word substring copied directly from SOURCE TEXT }.
-4. LINKS (CRITICAL — NO UNRELATED CARDS): Connect nodes meaningfully with "links" ({ "from": nodeId, "to": nodeId, "kind": "leads_to" | "causes" | "contrasts" | "treats", "label"?: 1-2 word verb }). Include links both WITHIN sections AND bridging from the end of one section into the next so the entire board forms one continuous clinical reasoning chain. Every node must participate in the flow.
-5. TEACHER SCRIPT (SPOKEN LECTURE, NOT BOOK READING): Inside each section's "script" array (${limits.minSegmentsPerSection} to ${limits.maxSegmentsPerSection} segments):
-   - Write natural spoken teaching sentences (10–30 words each, ZERO markdown symbols *, #, \`, NO emojis).
-   - Use real teacher signposting ("First, look at...", "Notice how this arrow triggers...", "Compare that with...", "Here's the exam takeaway...").
-   - Set "nodeId" to the exact node ID in that section being drawn and explained during that sentence, or "null" for a brief section intro or closing takeaway. Cover every node in the section cleanly!
+BOARD & 3D LAB RULES:
+1. OVERALL FRAME: Crisp lesson "title" (<= ${limits.maxTitleWords} words) and 1-sentence "objective" (<= ${limits.maxObjectiveWords} words).
+2. SECTIONS (${limits.minSections} to ${limits.maxSections}): Clear clinical teaching progression. Each section needs "id", "title" (<= ${limits.maxSectionTitleWords} words), "kind", "nodes", "ops", "labScene", and "script".
+3. NODES (${limits.minNodesPerSection} to ${limits.maxNodesPerSection} per section):
+   - "id", "text" (<= ${limits.maxNodeTextWords} words), optional "detail" (<= 5 words), "kind", "tone" ("normal"|"pathology"|"neutral"), "icon" (${ALLOWED_LESSON_ICONS.join(", ")}), "trend", and "source" ({ "page": integer, "quote": exact 6–25 word substring from SOURCE TEXT }).
+4. HANDWRITTEN OPS ("ops"): Emit 2 to 4 visual drawing operations per section using the best layout for the concept:
+   - { "t": "title", "text": "...", "subtitle": "...", "tone": "..." }
+   - { "t": "flow", "steps": [{ "label": "...", "sub": "...", "tone": "...", "nodeId": "..." }] } (for causal mechanisms)
+   - { "t": "compare", "leftTitle": "...", "rightTitle": "...", "rows": [{ "left": "...", "right": "..." }] } (for differentials or normal vs abnormal)
+   - { "t": "cycle", "title": "...", "nodes": [{ "label": "...", "tone": "...", "nodeId": "..." }] } (for physiological loops)
+   - { "t": "term", "term": "...", "definition": "...", "tone": "...", "wash": "sky|mint|sand|coral|lilac", "nodeId": "..." }
+   - { "t": "bullets", "heading": "...", "items": ["..."], "wash": "sky|mint|sand|coral" }
+   - { "t": "formula", "tex": "LaTeX equation if relevant", "label": "..." }
+5. SYNCHRONIZED 3D / LAB SCENE ("labScene") — pick the BEST tier for this section (NEVER leave blank):
+   - Tier 1 "anatomy-rig": model in [${ANATOMY_RIG_MODELS.join(", ")}], optional cam ("front"|"side"|"iso"|"top"), highlight, labels.
+   - Tier 2 "procedural-3d": blueprint in [${PROCEDURAL_3D_BLUEPRINTS.join(", ")}] for salivary/exocrine glands (glandular-acinus), neoplasia/invasion (tumor-architecture), inflammation/autoimmunity (immune-cascade), vessels/plaques, receptors/membranes, axons, compartment diffusion, molecular binding, 3D math fields, or biomechanics.
+   - Tier 3 "interactive-sim": for physiological/PK curves (use presetId in [frank_starling, michaelis_menten, dose_response, oxyhemoglobin, pk_washout, action_potential] or valid xLabel/yLabel).
+   - Tier 4 "smart-diagram-3d": for pure concepts/lists.
+6. LINKS: Connect nodes meaningfully with "links" ({ "from", "to", "kind": "leads_to"|"causes"|"contrasts"|"treats", "label"? }) both within and across sections.
+7. TEACHER SCRIPT (${limits.minSegmentsPerSection} to ${limits.maxSegmentsPerSection} segments): Natural spoken teaching sentences (10–28 words each, ZERO markdown, NO emojis) referencing "nodeId" for live pen tracking.
 
 Return ONLY valid JSON matching the schema.`;
 
   const jsonSchema = buildOutlineJsonSchema(limits);
-  const zodSchema = buildLessonOutlineZodSchema(limits);
 
   const { data: rawOutline } = await callStructuredJson({
     prompt,
     schema: jsonSchema,
     temperature: 0.2,
-    timeoutMs: 20_000,
-    validate: (raw) => {
-      zodSchema.parse(raw);
-      return validateRawLessonOutline(raw, limits);
-    },
+    timeoutMs: 24_000,
+    validate: (raw) => healRawLessonOutline(raw, limits, source.scope.startPage),
   });
 
   // Identify nodes needing verbatim quote repair
@@ -312,7 +432,7 @@ Return ONLY valid JSON matching the schema.`;
   }
 
   const repairedOutline =
-    failedNodeIds.length > 0
+    failedNodeIds.length > 0 && failedNodeIds.length <= 8
       ? await repairUngroundedNodes({
           source,
           language,
@@ -322,18 +442,19 @@ Return ONLY valid JSON matching the schema.`;
       : rawOutline;
 
   const validPages = new Set(source.chunks.map((c) => c.pageNumber));
-  const { outline: groundedOutline, droppedFacts } = applyGroundingAndPrune({
+  const { outline: enrichedOutline, droppedFacts } = applySoftGroundingAndEnrich({
     outline: repairedOutline,
     sourceText: source.combinedText,
     validPages,
     defaultPage: source.scope.startPage,
+    resolveLabScene: (sec, title) => resolveGuaranteedLabScene(sec, title),
   });
 
   return {
-    title: groundedOutline.title,
-    objective: groundedOutline.objective,
-    sections: groundedOutline.sections,
-    links: groundedOutline.links,
+    title: enrichedOutline.title,
+    objective: enrichedOutline.objective,
+    sections: enrichedOutline.sections,
+    links: enrichedOutline.links,
     droppedFacts,
     limits,
   };

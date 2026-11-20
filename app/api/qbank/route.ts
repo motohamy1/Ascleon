@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
+import {
+  clearModelCooldown,
+  GEMINI_MODEL_CHAIN,
+  markModelCooldownFromError,
+  orderModelsByHealth,
+} from "@/lib/ai/model-cooldown";
+
+export const maxDuration = 60;
 import { retrieveFromBookRAG } from "@/lib/ai/rag/book-rag-retriever";
 import {
   calculateDynamicCreditCost,
@@ -428,8 +436,9 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
       );
     }
 
-    // Candidate B: Google Gemini (gemini-3.5-flash-lite - official, fast ~8s, generous 15s timeout)
+    // Candidate B: Google Gemini (gemini-4-hydrogen primary with cooldown-aware fallback)
     if (geminiKey && geminiKey !== "your_gemini_api_key_here") {
+      const qbankGeminiModel = orderModelsByHealth(GEMINI_MODEL_CHAIN)[0] || "gemini-4-hydrogen";
       candidateTasks.push(
         (async () => {
           const ai = new GoogleGenAI({ apiKey: geminiKey });
@@ -445,24 +454,39 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
             });
           }
 
-          const resp: any = await Promise.race([
-            ai.models.generateContent({
-              model: "gemini-3.5-flash-lite",
-              contents: [{ role: "user", parts: userParts }],
-              config: {
-                responseMimeType: "application/json",
-                temperature: 0.35,
-              },
-            }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("Gemini timeout 15s")), 15000)),
-          ]);
+          const abortCtrl = new AbortController();
+          const timer = setTimeout(() => abortCtrl.abort(), 14000);
+          try {
+            const resp: any = await Promise.race([
+              ai.models.generateContent({
+                model: qbankGeminiModel,
+                contents: [{ role: "user", parts: userParts }],
+                config: {
+                  responseMimeType: "application/json",
+                  temperature: 0.35,
+                  abortSignal: abortCtrl.signal,
+                },
+              }),
+              new Promise((_, reject) =>
+                abortCtrl.signal.addEventListener("abort", () =>
+                  reject(new Error(`Gemini ${qbankGeminiModel} timeout 14s`))
+                )
+              ),
+            ]);
 
-          const text = resp.text?.trim() || "";
-          const parsed = parseQuestionsJSON(text);
-          if (parsed && parsed.length > 0) {
-            return { questions: parsed.map(shuffleQuestionOptions), source: "gemini:gemini-3.5-flash-lite" };
+            const text = resp.text?.trim() || "";
+            const parsed = parseQuestionsJSON(text);
+            if (parsed && parsed.length > 0) {
+              clearModelCooldown(`gemini:${qbankGeminiModel}`);
+              return { questions: parsed.map(shuffleQuestionOptions), source: `gemini:${qbankGeminiModel}` };
+            }
+            throw new Error(`Invalid Gemini ${qbankGeminiModel} QBank JSON`);
+          } catch (err) {
+            markModelCooldownFromError(`gemini:${qbankGeminiModel}`, err);
+            throw err;
+          } finally {
+            clearTimeout(timer);
           }
-          throw new Error("Invalid Gemini QBank JSON");
         })()
       );
     }

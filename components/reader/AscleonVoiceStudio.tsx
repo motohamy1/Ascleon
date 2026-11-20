@@ -178,13 +178,13 @@ export function AscleonVoiceStudio({
   const renderSettingsPanel = () => {
     if (!showSettings) return null;
     return (
-      <div className="absolute right-3 top-14 z-30 w-72 rounded-2xl border-2 border-[color:var(--ink)] bg-[color:var(--panel)] p-4 text-[color:var(--ink)] shadow-[4px_4px_0px_#0f0e10]">
+      <div className="absolute right-3 top-14 z-30 w-72 rounded-2xl border-2 border-[var(--study-panel-border)] bg-[var(--study-surface-solid)] p-4 text-[var(--study-text)] shadow-[var(--study-shadow-lg)]">
         <div className="mb-3 flex items-center justify-between">
           <span className="text-xs font-black uppercase tracking-wider">Voice Settings</span>
           <button
             type="button"
             onClick={() => setShowSettings(false)}
-            className="cursor-pointer rounded-full p-1 hover:bg-[color:var(--ink)]/10"
+            className="cursor-pointer rounded-full p-1 hover:bg-[var(--study-glass-hover)]"
             aria-label="Close settings"
           >
             <X className="size-4" />
@@ -195,7 +195,7 @@ export function AscleonVoiceStudio({
           {/* Language */}
           {onStudyLanguageChange && (
             <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-[color:var(--ink)]/70">
+              <label className="block text-[11px] font-bold text-[var(--study-text-muted)]">
                 Session Language
               </label>
               <StudyLanguageSwitch
@@ -207,14 +207,14 @@ export function AscleonVoiceStudio({
 
           {/* Voice Persona */}
           <div className="space-y-1.5">
-            <label className="block text-[11px] font-bold text-[color:var(--ink)]/70">
+            <label className="block text-[11px] font-bold text-[var(--study-text-muted)]">
               Mentor Voice {isConnected ? "(next session)" : ""}
             </label>
             <select
               value={voiceName}
               disabled={isConnected}
               onChange={(e) => setVoiceName(e.target.value)}
-              className="w-full cursor-pointer rounded-xl border-2 border-[color:var(--ink)] bg-white px-3 py-1.5 text-xs font-bold text-[color:var(--ink)] focus:outline-none disabled:opacity-50"
+              className="w-full cursor-pointer rounded-xl border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface-muted)] px-3 py-1.5 text-xs font-bold text-[var(--study-text)] focus:outline-none disabled:opacity-50"
             >
               {AVAILABLE_LIVE_VOICES.map((v) => (
                 <option key={v.id} value={v.id}>
@@ -225,12 +225,12 @@ export function AscleonVoiceStudio({
           </div>
 
           {/* Noisy Place Toggle */}
-          <div className="flex items-start justify-between gap-3 rounded-xl border border-[color:var(--ink)]/15 bg-white/70 p-2.5">
+          <div className="flex items-start justify-between gap-3 rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-2.5">
             <div>
-              <div className="font-bold text-[color:var(--ink)]">
+              <div className="font-bold text-[var(--study-text)]">
                 {language === "ar" ? "مكان مزدحم (اضغط للتحدث)" : "Noisy place (Hold-to-talk)"}
               </div>
-              <div className="mt-0.5 text-[11px] leading-snug text-[color:var(--ink)]/65">
+              <div className="mt-0.5 text-[11px] leading-snug text-[var(--study-text-muted)]">
                 {language === "ar"
                   ? "يمنع الضوضاء المحيطة من مقاطعة الشرح."
                   : "Manual hold-to-speak so background chatter never interrupts."}
@@ -242,13 +242,13 @@ export function AscleonVoiceStudio({
               aria-checked={noisyPlace}
               onClick={() => setNoisyPlace(!noisyPlace)}
               className={cn(
-                "relative mt-0.5 h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-[color:var(--ink)] transition-colors duration-150",
-                noisyPlace ? "bg-[color:var(--orange)]" : "bg-[color:var(--cream)]"
+                "relative mt-0.5 h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-[var(--study-panel-border)] transition-colors duration-150",
+                noisyPlace ? "bg-[color:var(--orange)]" : "bg-[var(--study-surface-solid)]"
               )}
             >
               <span
                 className={cn(
-                  "block size-4 rounded-full bg-[color:var(--ink)] transition-transform duration-150",
+                  "block size-4 rounded-full bg-[var(--study-text)] transition-transform duration-150",
                   noisyPlace ? "translate-x-5" : "translate-x-0.5"
                 )}
               />
@@ -256,8 +256,8 @@ export function AscleonVoiceStudio({
           </div>
 
           {/* Captions Toggle */}
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-[color:var(--ink)]/15 bg-white/70 p-2.5">
-            <span className="font-bold text-[color:var(--ink)]">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-2.5">
+            <span className="font-bold text-[var(--study-text)]">
               {language === "ar" ? "إظهار الترجمة الحية" : "Live mentor captions"}
             </span>
             <button
@@ -266,13 +266,13 @@ export function AscleonVoiceStudio({
               aria-checked={showCaptions}
               onClick={() => setShowCaptions((prev) => !prev)}
               className={cn(
-                "relative h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-[color:var(--ink)] transition-colors duration-150",
-                showCaptions ? "bg-[color:var(--mint)]" : "bg-[color:var(--cream)]"
+                "relative h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-[var(--study-panel-border)] transition-colors duration-150",
+                showCaptions ? "bg-[color:var(--mint)]" : "bg-[var(--study-surface-solid)]"
               )}
             >
               <span
                 className={cn(
-                  "block size-4 rounded-full bg-[color:var(--ink)] transition-transform duration-150",
+                  "block size-4 rounded-full bg-[var(--study-text)] transition-transform duration-150",
                   showCaptions ? "translate-x-5" : "translate-x-0.5"
                 )}
               />
@@ -288,7 +288,7 @@ export function AscleonVoiceStudio({
   // =========================================================================
   if (isActiveOrConnecting) {
     return (
-      <div className="relative flex h-full flex-col justify-between overflow-hidden bg-[color:var(--ink-soft)] text-[color:var(--cream)]">
+      <div className="relative flex h-full flex-col justify-between overflow-hidden bg-transparent text-[var(--study-text)]">
         {/* Quiet Top Bar */}
         <div className="flex items-center justify-between px-4 pt-3.5 pb-2">
           <div className="flex items-center gap-2">
@@ -304,7 +304,7 @@ export function AscleonVoiceStudio({
                   : "bg-[color:var(--orange)]"
               )}
             />
-            <span className="text-xs font-semibold tracking-wide text-[color:var(--cream)]/85">
+            <span className="text-xs font-semibold tracking-wide text-[var(--study-text-soft)]">
               {statusLabel}
             </span>
           </div>
@@ -314,10 +314,10 @@ export function AscleonVoiceStudio({
               type="button"
               onClick={() => setShowSettings((s) => !s)}
               className={cn(
-                "flex size-8 cursor-pointer items-center justify-center rounded-full border transition-colors",
+                "flex size-8 cursor-pointer items-center justify-center rounded-full border-[1.5px] transition-colors",
                 showSettings
-                  ? "border-[color:var(--orange)] bg-[color:var(--orange)] text-[color:var(--ink)]"
-                  : "border-white/15 bg-white/5 text-[color:var(--cream)]/80 hover:bg-white/10"
+                  ? "border-[var(--study-panel-border)] bg-[color:var(--orange)] text-[#0f0e10]"
+                  : "border-[var(--study-pill-border)] bg-[var(--study-surface)] text-[var(--study-text-soft)] hover:bg-[var(--study-glass-hover)]"
               )}
               title="Voice settings"
               aria-label="Voice settings"
@@ -328,7 +328,7 @@ export function AscleonVoiceStudio({
               <button
                 type="button"
                 onClick={onClose}
-                className="flex size-8 cursor-pointer items-center justify-center rounded-full border border-white/15 bg-white/5 text-[color:var(--cream)]/80 hover:bg-white/10"
+                className="flex size-8 cursor-pointer items-center justify-center rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] text-[var(--study-text-soft)] hover:bg-[var(--study-glass-hover)]"
                 title="Minimize"
                 aria-label="Minimize"
               >
@@ -342,14 +342,14 @@ export function AscleonVoiceStudio({
 
         {/* Optional Visual Grounding Pill */}
         {activeVisualTrigger && (
-          <div className="mx-auto mt-1 flex max-w-[90%] items-center gap-2 rounded-full border border-[color:var(--mint)]/40 bg-[color:var(--mint)]/15 px-3 py-1 text-[11px] text-[color:var(--mint)]">
+          <div className="mx-auto mt-1 flex max-w-[90%] items-center gap-2 rounded-full border border-[var(--study-teal-border)] bg-[var(--study-teal-bg)] px-3 py-1 text-[11px] text-[var(--study-teal-text)]">
             <Sparkles className="size-3.5 shrink-0" />
             <span className="truncate font-semibold">{activeVisualTrigger.conceptName}</span>
             {activeVisualTrigger.action === "open_morph" && onTriggerMorph && (
               <button
                 type="button"
                 onClick={onTriggerMorph}
-                className="cursor-pointer rounded-full bg-[color:var(--mint)] px-2 py-0.5 text-[10px] font-black text-[color:var(--ink)]"
+                className="cursor-pointer rounded-full bg-[color:var(--mint)] px-2 py-0.5 text-[10px] font-black text-[#0f0e10]"
               >
                 Open Morph
               </button>
@@ -401,16 +401,16 @@ export function AscleonVoiceStudio({
               onPointerLeave={noisyPlace ? stopHoldToTalk : undefined}
               onClick={!noisyPlace ? toggleMute : undefined}
               className={cn(
-                "relative z-10 flex size-32 cursor-pointer select-none items-center justify-center rounded-full border-2 border-[color:var(--ink)] shadow-[0_0_40px_rgba(255,76,0,0.18)] transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--orange)] motion-reduce:transform-none",
+                "relative z-10 flex size-32 cursor-pointer select-none items-center justify-center rounded-full border-2 border-[var(--study-panel-border)] shadow-[0_0_40px_rgba(255,76,0,0.22)] transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--orange)] motion-reduce:transform-none",
                 status === "speaking"
-                  ? "bg-[color:var(--mint)] text-[color:var(--ink)]"
+                  ? "bg-[color:var(--mint)] text-[#0f0e10]"
                   : status === "connecting" || status === "reconnecting"
-                  ? "bg-[color:var(--cream)] text-[color:var(--ink)]"
+                  ? "bg-[color:var(--cream)] text-[#0f0e10]"
                   : isMuted
-                  ? "bg-white/10 text-[color:var(--cream)]/60 border-white/20"
+                  ? "bg-[var(--study-surface-solid)] text-[var(--study-text-muted)] border-[var(--study-panel-border)]"
                   : isHoldToTalkActive
-                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] ring-4 ring-[color:var(--orange)]/40"
-                  : "bg-[color:var(--orange)] text-[color:var(--ink)]"
+                  ? "bg-[color:var(--orange)] text-[#0f0e10] ring-4 ring-[color:var(--orange)]/40"
+                  : "bg-[color:var(--orange)] text-[#0f0e10]"
               )}
               style={{
                 transform: "scale(var(--voice-scale, 1))",
@@ -435,7 +435,7 @@ export function AscleonVoiceStudio({
 
           {/* Helper hint for Noisy Place */}
           {noisyPlace && isConnected && (
-            <p className="mt-4 text-[11px] font-semibold tracking-wide text-[color:var(--cream)]/65">
+            <p className="mt-4 text-[11px] font-semibold tracking-wide text-[var(--study-text-muted)]">
               {isHoldToTalkActive
                 ? language === "ar"
                   ? "اترك الزر عند الانتهاء"
@@ -452,7 +452,7 @@ export function AscleonVoiceStudio({
               type="button"
               onClick={() => setShowTranscriptSheet(true)}
               dir="auto"
-              className="mt-6 max-w-[42ch] cursor-pointer rounded-2xl px-4 py-2 text-center text-sm font-medium leading-relaxed text-[color:var(--cream)]/90 transition-colors hover:bg-white/5 line-clamp-3"
+              className="mt-6 max-w-[42ch] cursor-pointer rounded-2xl border border-[var(--study-pill-border)]/45 bg-[var(--study-surface)] px-4 py-2 text-center text-sm font-medium leading-relaxed text-[var(--study-text)] transition-colors hover:bg-[var(--study-glass-hover)] line-clamp-3"
               title="Tap to view full mentor transcript"
             >
               {latestCaption}
@@ -469,8 +469,8 @@ export function AscleonVoiceStudio({
             className={cn(
               "flex size-12 cursor-pointer items-center justify-center rounded-full border-2 transition-all duration-150",
               isMuted
-                ? "border-red-400/70 bg-red-500/20 text-red-200 hover:bg-red-500/30"
-                : "border-white/15 bg-white/10 text-[color:var(--cream)] hover:bg-white/20"
+                ? "border-[var(--study-red-border)] bg-[var(--study-red-bg)] text-[var(--study-red-text)] hover:brightness-105"
+                : "border-[var(--study-pill-border)] bg-[var(--study-surface)] text-[var(--study-text)] hover:bg-[var(--study-glass-hover)]"
             )}
             title={isMuted ? "Unmute microphone" : "Mute microphone"}
             aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
@@ -485,8 +485,8 @@ export function AscleonVoiceStudio({
             className={cn(
               "flex size-12 cursor-pointer items-center justify-center rounded-full border-2 transition-all duration-150",
               noisyPlace
-                ? "border-[color:var(--orange)] bg-[color:var(--orange)] text-[color:var(--ink)]"
-                : "border-white/15 bg-white/10 text-[color:var(--cream)] hover:bg-white/20"
+                ? "border-[var(--study-panel-border)] bg-[color:var(--orange)] text-[#0f0e10]"
+                : "border-[var(--study-pill-border)] bg-[var(--study-surface)] text-[var(--study-text)] hover:bg-[var(--study-glass-hover)]"
             )}
             title={
               noisyPlace
@@ -506,8 +506,8 @@ export function AscleonVoiceStudio({
             className={cn(
               "flex size-12 cursor-pointer items-center justify-center rounded-full border-2 transition-all duration-150",
               showTranscriptSheet
-                ? "border-[color:var(--mint)] bg-[color:var(--mint)] text-[color:var(--ink)]"
-                : "border-white/15 bg-white/10 text-[color:var(--cream)] hover:bg-white/20"
+                ? "border-[var(--study-panel-border)] bg-[color:var(--mint)] text-[#0f0e10]"
+                : "border-[var(--study-pill-border)] bg-[var(--study-surface)] text-[var(--study-text)] hover:bg-[var(--study-glass-hover)]"
             )}
             title="View mentor transcript"
             aria-label="View mentor transcript"
@@ -529,15 +529,15 @@ export function AscleonVoiceStudio({
 
         {/* Slide-up Mentor Transcript Sheet */}
         {showTranscriptSheet && (
-          <div className="absolute inset-x-0 bottom-0 top-14 z-20 flex flex-col rounded-t-2xl border-t-2 border-[color:var(--ink)] bg-[color:var(--panel)] text-[color:var(--ink)] shadow-lg">
-            <div className="flex items-center justify-between border-b border-[color:var(--ink)]/10 px-4 py-3">
+          <div className="absolute inset-x-0 bottom-0 top-14 z-20 flex flex-col rounded-t-2xl border-t-2 border-[var(--study-panel-border)] bg-[var(--study-surface-solid)] text-[var(--study-text)] shadow-[var(--study-shadow-lg)]">
+            <div className="flex items-center justify-between border-b border-[var(--study-border)] px-4 py-3">
               <span className="text-xs font-black uppercase tracking-wider">
                 Mentor Transcript
               </span>
               <button
                 type="button"
                 onClick={() => setShowTranscriptSheet(false)}
-                className="cursor-pointer rounded-full p-1 hover:bg-[color:var(--ink)]/10"
+                className="cursor-pointer rounded-full p-1 hover:bg-[var(--study-glass-hover)]"
                 aria-label="Close transcript"
               >
                 <X className="size-4" />
@@ -546,7 +546,7 @@ export function AscleonVoiceStudio({
 
             <div ref={transcriptScrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
               {messages.length === 0 && !currentCaption && (
-                <p className="py-8 text-center text-xs font-medium text-[color:var(--ink)]/55">
+                <p className="py-8 text-center text-xs font-medium text-[var(--study-text-muted)]">
                   Mentor captions will appear here as the session progresses.
                 </p>
               )}
@@ -554,13 +554,13 @@ export function AscleonVoiceStudio({
                 <div
                   key={m.id}
                   dir="auto"
-                  className="ascleon-bidi rounded-xl border border-[color:var(--ink)]/15 bg-white p-3 text-xs leading-relaxed text-[color:var(--ink)]"
+                  className="ascleon-bidi rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-3 text-xs leading-relaxed text-[var(--study-text)]"
                 >
-                  <div className="mb-1 flex items-center justify-between text-[10px] font-bold text-[color:var(--ink)]/55">
+                  <div className="mb-1 flex items-center justify-between text-[10px] font-bold text-[var(--study-text-muted)]">
                     <span>ASCLEON MENTOR</span>
                     <div className="flex items-center gap-1.5">
                       {m.interrupted && (
-                        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-800">
+                        <span className="rounded bg-[var(--study-amber-bg)] px-1.5 py-0.5 text-[9px] font-bold text-[var(--study-amber-text)]">
                           Interrupted
                         </span>
                       )}
@@ -573,7 +573,7 @@ export function AscleonVoiceStudio({
               {currentCaption && (
                 <div
                   dir="auto"
-                  className="ascleon-bidi rounded-xl border border-[color:var(--orange)]/40 bg-[color:var(--cream)]/50 p-3 text-xs leading-relaxed text-[color:var(--ink)]"
+                  className="ascleon-bidi rounded-xl border border-[color:var(--orange)]/45 bg-[color:var(--orange)]/10 p-3 text-xs leading-relaxed text-[var(--study-text)]"
                 >
                   <p className="whitespace-pre-wrap">{currentCaption}</p>
                 </div>
@@ -582,7 +582,7 @@ export function AscleonVoiceStudio({
 
             <form
               onSubmit={handleSendText}
-              className="flex items-center gap-2 border-t border-[color:var(--ink)]/10 bg-white p-3"
+              className="flex items-center gap-2 border-t border-[var(--study-border)] bg-[var(--study-surface)] p-3"
             >
               <input
                 type="text"
@@ -590,12 +590,12 @@ export function AscleonVoiceStudio({
                 value={typedInput}
                 onChange={(e) => setTypedInput(e.target.value)}
                 placeholder="Type a question silently…"
-                className="ascleon-bidi flex-1 rounded-xl border border-[color:var(--ink)]/20 bg-[color:var(--panel)] px-3 py-2 text-xs font-medium text-[color:var(--ink)] focus:border-[color:var(--orange)] focus:outline-none"
+                className="ascleon-bidi flex-1 rounded-xl border border-[var(--study-pill-border)] bg-[var(--study-surface-solid)] px-3 py-2 text-xs font-medium text-[var(--study-text)] placeholder:text-[var(--study-text-muted)] focus:border-[color:var(--orange)] focus:outline-none"
               />
               <button
                 type="submit"
                 disabled={!typedInput.trim()}
-                className="flex size-9 cursor-pointer items-center justify-center rounded-xl bg-[color:var(--orange)] text-[color:var(--ink)] disabled:opacity-40"
+                className="flex size-9 cursor-pointer items-center justify-center rounded-xl border border-[var(--study-panel-border)] bg-[color:var(--orange)] text-[#0f0e10] disabled:opacity-40"
                 aria-label="Send"
               >
                 <Send className="size-4" />
@@ -611,14 +611,14 @@ export function AscleonVoiceStudio({
   // 2. IDLE / POST-CALL VIEW
   // =========================================================================
   return (
-    <div className="relative flex h-full flex-col bg-[color:var(--ink-soft)] text-[color:var(--cream)]">
+    <div className="relative flex h-full flex-col bg-transparent text-[var(--study-text)]">
       {/* Clean Header */}
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-[var(--study-border)] bg-[var(--study-surface)]/75 backdrop-blur-md px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-black uppercase tracking-wider text-[color:var(--cream)]">
+          <span className="text-xs font-black uppercase tracking-wider text-[var(--study-text)]">
             Ascleon Voice
           </span>
-          <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--cream)]/75">
+          <span className="rounded-full border border-[var(--study-pill-border)] bg-[var(--study-surface-muted)] px-2 py-0.5 text-[10px] font-semibold text-[var(--study-text-muted)]">
             Page {currentPageNumber}
           </span>
         </div>
@@ -628,7 +628,7 @@ export function AscleonVoiceStudio({
             <button
               type="button"
               onClick={resetSession}
-              className="flex cursor-pointer items-center gap-1 rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] font-bold text-[color:var(--cream)] hover:bg-white/10"
+              className="flex cursor-pointer items-center gap-1 rounded-full border border-[var(--study-pill-border)] bg-[var(--study-surface)] px-2.5 py-1 text-[11px] font-bold text-[var(--study-text)] hover:bg-[var(--study-glass-hover)]"
               title="Clear history and start a new session"
             >
               <RotateCcw className="size-3" />
@@ -639,10 +639,10 @@ export function AscleonVoiceStudio({
             type="button"
             onClick={() => setShowSettings((s) => !s)}
             className={cn(
-              "flex size-8 cursor-pointer items-center justify-center rounded-full border transition-colors",
+              "flex size-8 cursor-pointer items-center justify-center rounded-full border-[1.5px] transition-colors",
               showSettings
-                ? "border-[color:var(--orange)] bg-[color:var(--orange)] text-[color:var(--ink)]"
-                : "border-white/15 bg-white/5 text-[color:var(--cream)]/80 hover:bg-white/10"
+                ? "border-[var(--study-panel-border)] bg-[color:var(--orange)] text-[#0f0e10]"
+                : "border-[var(--study-pill-border)] bg-[var(--study-surface)] text-[var(--study-text-soft)] hover:bg-[var(--study-glass-hover)]"
             )}
             title="Voice settings"
             aria-label="Voice settings"
@@ -653,7 +653,7 @@ export function AscleonVoiceStudio({
             <button
               type="button"
               onClick={onClose}
-              className="flex size-8 cursor-pointer items-center justify-center rounded-full border border-white/15 bg-white/5 text-[color:var(--cream)]/80 hover:bg-white/10"
+              className="flex size-8 cursor-pointer items-center justify-center rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] text-[var(--study-text-soft)] hover:bg-[var(--study-glass-hover)]"
               aria-label="Close"
             >
               <X className="size-4" />
@@ -666,9 +666,9 @@ export function AscleonVoiceStudio({
 
       {/* Error Notice */}
       {errorMessage && (
-        <div className="mx-4 mt-3 flex items-center justify-between gap-2 rounded-xl border border-red-400/50 bg-red-500/15 px-3 py-2 text-xs text-red-100">
+        <div className="mx-4 mt-3 flex items-center justify-between gap-2 rounded-xl border border-[var(--study-red-border)] bg-[var(--study-red-bg)] px-3 py-2 text-xs text-[var(--study-red-text)]">
           <div className="flex items-center gap-2">
-            <AlertCircle className="size-4 shrink-0 text-red-300" />
+            <AlertCircle className="size-4 shrink-0" />
             <span className="font-medium">{errorMessage}</span>
           </div>
           <button
@@ -690,18 +690,18 @@ export function AscleonVoiceStudio({
             onPointerEnter={prefetchToken}
             onFocus={prefetchToken}
             onClick={connect}
-            className="flex size-28 cursor-pointer items-center justify-center rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-[0_0_40px_rgba(255,76,0,0.22)] transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--orange)]"
+            className="flex size-28 cursor-pointer items-center justify-center rounded-full border-2 border-[var(--study-panel-border)] bg-[color:var(--orange)] text-[#0f0e10] shadow-[0_0_40px_rgba(255,76,0,0.22)] transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--orange)]"
             aria-label="Start live voice session"
           >
             <Mic className="size-10" />
           </button>
 
-          <h3 className="mt-5 text-sm font-bold text-[color:var(--cream)]">
+          <h3 className="mt-5 text-sm font-bold text-[var(--study-text)]">
             {language === "ar"
               ? "ابدأ جلسة صوتية حية"
               : "Tap to start a live voice session"}
           </h3>
-          <p className="mt-1.5 max-w-[34ch] text-xs leading-relaxed text-[color:var(--cream)]/65">
+          <p className="mt-1.5 max-w-[34ch] text-xs leading-relaxed text-[var(--study-text-muted)]">
             {language === "ar"
               ? "اتكلم بشكل طبيعي وقاطع الشرح في أي وقت للسؤال."
               : "Speak naturally about this page and interrupt anytime to ask a question."}
@@ -731,7 +731,7 @@ export function AscleonVoiceStudio({
                 type="button"
                 dir="auto"
                 onClick={() => handleStarterChip(chip)}
-                className="ascleon-bidi cursor-pointer rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-medium text-[color:var(--cream)]/90 transition-colors hover:border-[color:var(--orange)] hover:bg-white/10"
+                className="ascleon-bidi cursor-pointer rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] px-3 py-1.5 text-xs font-medium text-[var(--study-text)] shadow-[var(--study-glass-shadow)] transition-colors hover:border-[color:var(--orange)] hover:bg-[var(--study-glass-hover)]"
               >
                 {chip}
               </button>
@@ -740,14 +740,14 @@ export function AscleonVoiceStudio({
         </div>
       ) : (
         <div className="flex flex-1 flex-col overflow-hidden">
-          <div ref={transcriptScrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
+          <div ref={transcriptScrollRef} className="study-scrollbar flex-1 space-y-3 overflow-y-auto p-4">
             {messages.map((m) => (
               <div
                 key={m.id}
                 dir="auto"
-                className="ascleon-bidi rounded-xl border border-white/10 bg-white/5 p-3 text-xs leading-relaxed text-[color:var(--cream)]/90"
+                className="ascleon-bidi rounded-xl border border-[var(--study-pill-border)]/50 bg-[var(--study-surface)] p-3 text-xs leading-relaxed text-[var(--study-text)]"
               >
-                <div className="mb-1 flex items-center justify-between text-[10px] font-bold text-[color:var(--cream)]/50">
+                <div className="mb-1 flex items-center justify-between text-[10px] font-bold text-[var(--study-text-muted)]">
                   <span>ASCLEON MENTOR</span>
                   <span>{m.time}</span>
                 </div>
@@ -757,11 +757,11 @@ export function AscleonVoiceStudio({
           </div>
 
           {/* Resume & Continue Actions */}
-          <div className="flex items-center gap-2 border-t border-white/10 p-3">
+          <div className="flex items-center gap-2 border-t border-[var(--study-border)] bg-[var(--study-surface)]/80 backdrop-blur-md p-3">
             <button
               type="button"
               onClick={connect}
-              className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-[color:var(--ink)] bg-[color:var(--orange)] py-2.5 text-xs font-black text-[color:var(--ink)] transition-opacity hover:opacity-95"
+              className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-[var(--study-panel-border)] bg-[color:var(--orange)] py-2.5 text-xs font-black text-[#0f0e10] transition-opacity hover:opacity-95"
             >
               <Mic className="size-4" />
               <span>{language === "ar" ? "استكمال الجلسة" : "Resume Voice"}</span>
@@ -774,7 +774,7 @@ export function AscleonVoiceStudio({
                   const summary = messages.map((m) => m.text).join("\n\n");
                   onContinueInChat(summary);
                 }}
-                className="flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-white/20 bg-white/5 px-3.5 py-2.5 text-xs font-bold text-[color:var(--cream)] hover:bg-white/10"
+                className="flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] px-3.5 py-2.5 text-xs font-bold text-[var(--study-text)] hover:bg-[var(--study-glass-hover)]"
               >
                 <MessageSquare className="size-4" />
                 <span>{language === "ar" ? "متابعة في الشات" : "AI Chat"}</span>

@@ -99,19 +99,19 @@ const STUDIO_MODES: Array<{
   { id: "voice", label: "Ascleon Voice", subtitle: "Live oral mentor", icon: Mic },
   { id: "chat", label: "AI Chat", subtitle: "Grounded Q&A", icon: MessageSquare },
   { id: "morph", label: "Morph", subtitle: "Interactive map", icon: Sparkles },
-  { id: "whiteboard", label: "Whiteboard", subtitle: "Visual lesson", icon: Tv, soon: true },
+  { id: "whiteboard", label: "Living Board", subtitle: "2D Board + 3D Lab", icon: Tv },
   { id: "quiz", label: "Qbanks", subtitle: "Board practice", icon: HelpCircle },
   { id: "summary", label: "Summary", subtitle: "Pearls & mnemonics", icon: FileText },
 ];
 
 export const GLASS_BUTTON_BASE =
-  "backdrop-blur-md bg-white/[0.06] border border-white/15 text-[color:var(--cream)]/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_6px_18px_rgba(0,0,0,0.28)] transition-all duration-150 hover:bg-white/[0.13] hover:border-white/30 hover:text-white active:scale-[0.98] cursor-pointer";
+  "backdrop-blur-md bg-[var(--study-glass)] border border-[var(--study-pill-border)]/45 text-[var(--study-text-soft)] shadow-[var(--study-glass-shadow)] transition-all duration-150 hover:bg-[var(--study-glass-hover)] hover:border-[var(--study-panel-border)] hover:text-[var(--study-text)] active:scale-[0.98] cursor-pointer";
 
 export const GLASS_BUTTON_ACTIVE =
-  "backdrop-blur-md bg-[color:var(--orange)]/25 border border-[color:var(--orange)]/80 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.24),0_0_20px_rgba(255,76,0,0.28)] hover:bg-[color:var(--orange)]/35 cursor-pointer";
+  "backdrop-blur-md bg-[var(--study-active-bg)] border border-[var(--study-active-border)] text-[var(--study-active-text)] shadow-[var(--study-active-shadow)] hover:brightness-105 cursor-pointer";
 
 export const GLASS_BUTTON_VOICE_ACTIVE =
-  "backdrop-blur-md bg-[#43a08f]/30 border border-[#7fd8c9]/80 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.24),0_0_20px_rgba(67,160,143,0.3)] hover:bg-[#43a08f]/40 cursor-pointer";
+  "backdrop-blur-md bg-[var(--study-voice-bg)] border border-[var(--study-voice-border)] text-[var(--study-voice-text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_0_20px_rgba(67,160,143,0.24)] hover:brightness-105 cursor-pointer";
 
 export function StudioMenuDrawer({
   isOpen,
@@ -220,7 +220,7 @@ export function StudioMenuDrawer({
         aria-hidden="true"
         onClick={onClose}
         className={cn(
-          "absolute inset-0 z-30 bg-black/45 backdrop-blur-[2px] transition-opacity duration-200",
+          "absolute inset-0 z-30 bg-black/30 backdrop-blur-[2px] transition-opacity duration-200",
           isOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
         )}
       />
@@ -231,18 +231,18 @@ export function StudioMenuDrawer({
         aria-label="Studio tools and settings menu"
         aria-hidden={!isOpen}
         className={cn(
-          "absolute inset-y-0 right-0 z-40 flex w-[300px] sm:w-[332px] max-w-[90%] flex-col border-l border-white/15 bg-[#121116]/88 backdrop-blur-xl shadow-[-16px_0_48px_rgba(0,0,0,0.65)] transition-transform duration-200 ease-out",
-          isOpen ? "translate-x-0" : "translate-x-full pointer-events-none"
+          "absolute inset-y-0 right-0 z-40 flex w-[300px] sm:w-[332px] max-w-[90%] flex-col border-l-2 border-[var(--study-panel-border)] bg-[var(--study-surface-solid)] text-[var(--study-text)] backdrop-blur-xl transition-all duration-200 ease-out",
+          isOpen ? "translate-x-0 opacity-100 visible shadow-[var(--study-shadow-lg)]" : "translate-x-full opacity-0 invisible pointer-events-none"
         )}
       >
         {/* Drawer Header */}
-        <div className="flex h-11 shrink-0 items-center justify-between border-b border-white/10 px-3.5">
+        <div className="flex h-13 shrink-0 items-center justify-between border-b border-[var(--study-border)] px-4 pt-1">
           <div className="flex items-center gap-2">
             <span className="flex size-6 items-center justify-center rounded-lg bg-[color:var(--orange)]/20 border border-[color:var(--orange)]/50 text-[color:var(--orange)]">
               <Menu className="size-3.5" />
             </span>
             <div className="flex flex-col">
-              <span className="text-xs font-black tracking-wide text-[color:var(--cream)]">
+              <span className="text-xs font-black tracking-wide text-[var(--study-text)]">
                 Study Controls
               </span>
             </div>
@@ -259,14 +259,14 @@ export function StudioMenuDrawer({
         </div>
 
         {/* Drawer Scrollable Body */}
-        <div className="custom-scrollbar-dark flex-1 overflow-y-auto overscroll-y-contain p-3.5 flex flex-col gap-4">
+        <div className="study-scrollbar flex-1 overflow-y-auto overscroll-y-contain p-3.5 flex flex-col gap-4">
           {/* 1. DYNAMIC CONTEXT SECTION: Adapts to Selection & Current Feature */}
           <section className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-widest text-[color:var(--cream)]/55">
+              <span className="text-[10px] font-black uppercase tracking-widest text-[var(--study-text-muted)]">
                 {hasSelectionContext ? "Active Selection" : "Context Actions"}
               </span>
-              <span className="rounded-full bg-white/[0.06] border border-white/10 px-2 py-0.5 text-[9.5px] font-bold text-[color:var(--orange)]">
+              <span className="rounded-full bg-[var(--study-surface-muted)] border border-[var(--study-border)] px-2 py-0.5 text-[9.5px] font-bold text-[color:var(--orange)]">
                 {STUDIO_MODES.find((m) => m.id === activeIntent)?.label || "Studio"}
               </span>
             </div>
@@ -275,14 +275,14 @@ export function StudioMenuDrawer({
               <div className="rounded-2xl border border-[color:var(--orange)]/40 bg-[color:var(--orange)]/[0.09] backdrop-blur-md p-2.5 flex flex-col gap-2">
                 {selectedText && (
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-[11px] text-[color:var(--cream)]/90 line-clamp-2 leading-snug">
+                    <p className="text-[11px] text-[var(--study-text)] line-clamp-2 leading-snug">
                       <span className="font-bold text-[color:var(--orange)]">Text: </span>
                       &ldquo;{selectedText}&rdquo;
                     </p>
                     <button
                       type="button"
                       onClick={onClearSelection}
-                      className="shrink-0 rounded-full p-1 text-[color:var(--cream)]/60 hover:bg-white/10 hover:text-white cursor-pointer"
+                      className="shrink-0 rounded-full p-1 text-[var(--study-text-muted)] hover:bg-[var(--study-glass-hover)] hover:text-[var(--study-text)] cursor-pointer"
                       title="Clear text selection"
                     >
                       <X className="size-3" />
@@ -291,15 +291,15 @@ export function StudioMenuDrawer({
                 )}
 
                 {snippedDiagram && (
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-amber-200">
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--study-amber-text)]">
                     <span className="flex items-center gap-1 font-bold">
-                      <Crop className="size-3 text-amber-400" />
+                      <Crop className="size-3" />
                       Diagram locked (Page {snippedDiagram.pageNumber})
                     </span>
                     <button
                       type="button"
                       onClick={onClearDiagram}
-                      className="shrink-0 rounded-full p-1 text-amber-200/70 hover:bg-white/10 hover:text-white cursor-pointer"
+                      className="shrink-0 rounded-full p-1 text-[var(--study-amber-text)]/70 hover:bg-[var(--study-glass-hover)] hover:text-[var(--study-text)] cursor-pointer"
                       title="Clear diagram"
                     >
                       <X className="size-3" />
@@ -325,18 +325,18 @@ export function StudioMenuDrawer({
                     </button>
                     <button
                       type="button"
-                      disabled
-                      title="Whiteboard — Coming Soon"
+                      onClick={() => {
+                        onWhiteboardSelection();
+                        onClose();
+                      }}
+                      title="Create Living Board from selected text"
                       className={cn(
                         GLASS_BUTTON_BASE,
-                        "flex items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] font-bold opacity-55 cursor-not-allowed hover:bg-white/[0.06] hover:border-white/15 hover:text-[color:var(--cream)]/90 active:scale-100"
+                        "flex items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] font-bold"
                       )}
                     >
                       <Tv className="size-3 text-[color:var(--orange)]" />
-                      <span>Whiteboard</span>
-                      <span className="rounded-full border border-white/20 bg-white/10 px-1.5 py-0.2 text-[8.5px] font-black uppercase tracking-wider text-[color:var(--cream)]/85">
-                        Soon
-                      </span>
+                      <span>Living Board</span>
                     </button>
                     <button
                       type="button"
@@ -529,7 +529,7 @@ export function StudioMenuDrawer({
 
           {/* 2. STUDIO FEATURES (GLASSMORPHISM MODE GRID) */}
           <section className="flex flex-col gap-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-[color:var(--cream)]/55">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--study-text-muted)]">
               AI Studio Features
             </span>
             <div className="grid grid-cols-2 gap-2">
@@ -554,7 +554,7 @@ export function StudioMenuDrawer({
                       isActive ? activeClass : GLASS_BUTTON_BASE,
                       "flex flex-col items-start gap-1 rounded-2xl p-2.5 text-left",
                       mode.soon &&
-                        "opacity-55 cursor-not-allowed hover:bg-white/[0.06] hover:border-white/15 hover:text-[color:var(--cream)]/90 active:scale-100"
+                        "opacity-55 cursor-not-allowed active:scale-100"
                     )}
                   >
                     <div className="flex w-full items-center justify-between">
@@ -562,18 +562,18 @@ export function StudioMenuDrawer({
                         className={cn(
                           "size-4",
                           isActive
-                            ? "text-white"
+                            ? "text-current"
                             : mode.id === "voice"
-                            ? "text-[#7fd8c9]"
+                            ? "text-[var(--study-teal-text)]"
                             : "text-[color:var(--orange)]"
                         )}
                       />
                       {mode.soon ? (
-                        <span className="rounded-full border border-white/20 bg-white/10 px-1.5 py-0.5 text-[8.5px] font-black uppercase tracking-wider text-[color:var(--cream)]/90">
+                        <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-1.5 py-0.5 text-[8.5px] font-black uppercase tracking-wider text-[var(--study-text-soft)]">
                           Soon
                         </span>
                       ) : isActive ? (
-                        <span className="size-1.5 rounded-full bg-white shadow-[0_0_8px_#fff]" />
+                        <span className="size-1.5 rounded-full bg-current" />
                       ) : null}
                     </div>
                     <div className="flex flex-col">
@@ -589,8 +589,8 @@ export function StudioMenuDrawer({
           </section>
 
           {/* 3. STUDY SCOPE & LANGUAGE (Stays open while adjusting) */}
-          <section className="flex flex-col gap-2.5 rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-md p-3">
-            <span className="text-[10px] font-black uppercase tracking-widest text-[color:var(--cream)]/55">
+          <section className="flex flex-col gap-2.5 rounded-2xl border border-[var(--study-border)] bg-[var(--study-surface-muted)] backdrop-blur-md p-3">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--study-text-muted)]">
               Scope &amp; Language
             </span>
 
@@ -641,24 +641,24 @@ export function StudioMenuDrawer({
             </div>
 
             {isEditingRange && (
-              <div className="flex items-center gap-1.5 rounded-xl border border-white/15 bg-black/40 p-2">
-                <span className="text-[10px] text-white/60">P.</span>
+              <div className="flex items-center gap-1.5 rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-solid)] p-2">
+                <span className="text-[10px] text-[var(--study-text-muted)]">P.</span>
                 <input
                   type="number"
                   min={1}
                   max={totalPages || 999}
                   value={rangeStart}
                   onChange={(e) => setRangeStart(parseInt(e.target.value, 10) || 1)}
-                  className="w-12 rounded-lg border border-white/20 bg-white/10 px-1.5 py-1 text-center font-mono text-[11px] font-bold text-white outline-none focus:border-[color:var(--orange)]"
+                  className="w-12 rounded-lg border border-[var(--study-border-strong)] bg-[var(--study-surface-muted)] px-1.5 py-1 text-center font-mono text-[11px] font-bold text-[var(--study-text)] outline-none focus:border-[color:var(--orange)]"
                 />
-                <span className="text-[10px] text-white/60">to</span>
+                <span className="text-[10px] text-[var(--study-text-muted)]">to</span>
                 <input
                   type="number"
                   min={rangeStart}
                   max={totalPages || 999}
                   value={rangeEnd}
                   onChange={(e) => setRangeEnd(parseInt(e.target.value, 10) || rangeStart)}
-                  className="w-12 rounded-lg border border-white/20 bg-white/10 px-1.5 py-1 text-center font-mono text-[11px] font-bold text-white outline-none focus:border-[color:var(--orange)]"
+                  className="w-12 rounded-lg border border-[var(--study-border-strong)] bg-[var(--study-surface-muted)] px-1.5 py-1 text-center font-mono text-[11px] font-bold text-[var(--study-text)] outline-none focus:border-[color:var(--orange)]"
                 />
                 <button
                   type="button"
@@ -695,14 +695,14 @@ export function StudioMenuDrawer({
                 }}
                 className={cn(
                   studyScope.type === "topic" ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
-                  "w-full rounded-xl px-2.5 py-1.5 text-[11px] font-bold outline-none bg-[#1a1820]"
+                  "w-full rounded-xl px-2.5 py-1.5 text-[11px] font-bold outline-none bg-[var(--study-surface-solid)] text-[var(--study-text)]"
                 )}
               >
-                <option value="" disabled className="bg-[#18161d] text-white">
+                <option value="" disabled className="bg-[var(--study-surface-solid)] text-[var(--study-text)]">
                   ✦ Pick Book Topic ({topics.length})
                 </option>
                 {topics.map((t) => (
-                  <option key={t.id} value={t.id} className="bg-[#18161d] text-white">
+                  <option key={t.id} value={t.id} className="bg-[var(--study-surface-solid)] text-[var(--study-text)]">
                     {t.title} (P.{t.startPage}–{t.endPage})
                   </option>
                 ))}
@@ -710,8 +710,8 @@ export function StudioMenuDrawer({
             )}
 
             {/* Universal Language Switch (Glass Pills) */}
-            <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-white/10">
-              <span className="flex items-center gap-1 text-[10.5px] font-bold text-[color:var(--cream)]/70">
+            <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-[var(--study-border)]">
+              <span className="flex items-center gap-1 text-[10.5px] font-bold text-[var(--study-text-muted)]">
                 <Globe className="size-3 text-[color:var(--orange)]" />
                 <span>Language</span>
               </span>
@@ -738,8 +738,8 @@ export function StudioMenuDrawer({
           </section>
 
           {/* 4. READER VIEW & SESSION SETTINGS */}
-          <section className="flex flex-col gap-2.5 rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-md p-3">
-            <span className="text-[10px] font-black uppercase tracking-widest text-[color:var(--cream)]/55">
+          <section className="flex flex-col gap-2.5 rounded-2xl border border-[var(--study-border)] bg-[var(--study-surface-muted)] backdrop-blur-md p-3">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--study-text-muted)]">
               Reader View &amp; Session
             </span>
 
@@ -754,7 +754,7 @@ export function StudioMenuDrawer({
                 >
                   <ZoomOut className="size-3.5" />
                 </button>
-                <span className="w-10 text-center font-mono text-[10.5px] font-bold text-[color:var(--cream)]">
+                <span className="w-10 text-center font-mono text-[10.5px] font-bold text-[var(--study-text)]">
                   {fitMode === "normal" ? `${zoomLevel}%` : "Auto"}
                 </span>
                 <button
@@ -791,23 +791,40 @@ export function StudioMenuDrawer({
               </div>
             </div>
 
-            {/* Theme & RAG Status */}
-            <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/10">
+            {/* Canvas Theme & RAG Status */}
+            <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-[var(--study-border)]">
               <div className="flex items-center gap-1.5">
-                <span className="text-[10.5px] font-bold text-[color:var(--cream)]/70">Theme</span>
-                {(["paper", "ink"] as const).map((t) => (
+                <span className="text-[10.5px] font-bold text-[var(--study-text-muted)]">Canvas</span>
+                <div className="flex items-center rounded-full border border-[var(--study-border)] bg-[var(--study-surface-solid)] p-0.5">
                   <button
-                    key={t}
                     type="button"
-                    onClick={() => onThemeChange(t)}
+                    onClick={() => onThemeChange("paper")}
                     className={cn(
-                      "size-5 rounded-full border transition-transform cursor-pointer",
-                      t === "paper" ? "bg-[#fbf7f0] border-white/40" : "bg-[#0f0e10] border-white/30",
-                      theme === t && "scale-110 ring-2 ring-[color:var(--orange)]"
+                      "flex items-center gap-1 rounded-full px-2 py-0.5 text-[9.5px] font-bold transition-all cursor-pointer",
+                      theme === "paper"
+                        ? "bg-[#0f0e10] text-white shadow-xs"
+                        : "text-[var(--study-text-muted)] hover:text-[var(--study-text)]"
                     )}
-                    title={`Set reader theme to ${t}`}
-                  />
-                ))}
+                    title="White dotted canvas"
+                  >
+                    <span className="size-2.5 rounded-full border border-black/25 bg-white" />
+                    <span>White</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onThemeChange("ink")}
+                    className={cn(
+                      "flex items-center gap-1 rounded-full px-2 py-0.5 text-[9.5px] font-bold transition-all cursor-pointer",
+                      theme === "ink"
+                        ? "bg-[color:var(--orange)] text-[#0f0e10] shadow-xs"
+                        : "text-[var(--study-text-muted)] hover:text-[var(--study-text)]"
+                    )}
+                    title="Black dotted canvas"
+                  >
+                    <span className="size-2.5 rounded-full border border-white/40 bg-[#08080a]" />
+                    <span>Black</span>
+                  </button>
+                </div>
               </div>
 
               {bookId && (

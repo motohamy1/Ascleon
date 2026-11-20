@@ -6,10 +6,22 @@ import {
 } from "@/lib/board/layout";
 import {
   applyGroundingAndPrune,
+  applySoftGroundingAndEnrich,
   computeSectionCues,
+  healRawLessonOutline,
   LessonValidationError,
   validateRawLessonOutline,
 } from "@/lib/board/validate";
+import {
+  CANONICAL_SIM_PRESETS,
+  compileMathExpr,
+  evalMathExprSafe,
+  isValidMathExpr,
+  resolveGuaranteedLabScene,
+} from "@/lib/board/math-presets";
+import { sketchPolyline } from "@/lib/board/prng-sketch";
+import { BOARD, layoutBoardOps, revealAt } from "@/lib/board/ops-layout";
+import { sampleSimCurves, solveAnatomyRigPose } from "@/lib/board/rig-solver";
 import { computeBoardTimeline } from "@/lib/board/timeline";
 import {
   callGeminiTtsAudioWithMeta,
@@ -317,3 +329,292 @@ describe("TTS single-model pinning invariant", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Living Board safe math compiler & 4-tier lab resolver", () => {
+  it("evaluates algebraic expressions with implicit multiplication and blocks code injection", () => {
+    const fn = compileMathExpr("2x + 3 * sin(0) + vmax / (km + x)");
+    expect(fn({ x: 5, vmax: 100, km: 5 })).toBeCloseTo(20, 5);
+    expect(Number.isFinite(evalMathExprSafe("10 / x", { x: 0 }))).toBe(true);
+    expect(isValidMathExpr("window.alert(1)")).toBe(false);
+    expect(isValidMathExpr("vmax * x / (km + x)", { x: 10, vmax: 90, km: 15 })).toBe(true);
+  });
+
+  it("validates every canonical sim preset produces finite sampled points", () => {
+    for (const preset of Object.values(CANONICAL_SIM_PRESETS)) {
+      const defaults = Object.fromEntries(preset.params.map((p) => [p.name, p.value]));
+      const sampled = sampleSimCurves(preset.curves, preset.xRange, defaults, 24);
+      expect(sampled.length).toBeGreaterThan(0);
+      for (const curve of sampled) {
+        expect(curve.points).toHaveLength(25);
+        for (const pt of curve.points) {
+          expect(Number.isFinite(pt.x)).toBe(true);
+          expect(Number.isFinite(pt.y)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("never returns an empty lab scene across anatomy, procedural, sim, or invalid LLM outputs", () => {
+    const heartSec: LessonSection = {
+      id: "s-heart",
+      title: "Myocardial Oxygen Demand",
+      kind: "mechanism",
+      nodes: [
+        {
+          id: "nh1",
+          text: "Left ventricular wall stress rises",
+          kind: "cause",
+          tone: "pathology",
+          source: { page: 5, quote: "Left ventricular wall stress rises" },
+        },
+      ],
+      script: [{ id: "seg-h", nodeId: "nh1", text: "Wall stress climbs." }],
+    };
+    expect(resolveGuaranteedLabScene(heartSec).tier).toBe("anatomy-rig");
+
+    const brokenSimSec: LessonSection = {
+      id: "s-broken",
+      title: "Abstract Administrative Policy",
+      kind: "concept",
+      nodes: [
+        {
+          id: "nb1",
+          text: "Documentation checklist complete",
+          kind: "step",
+          tone: "neutral",
+          source: { page: 1, quote: "Documentation checklist complete" },
+        },
+      ],
+      script: [{ id: "seg-b", nodeId: "nb1", text: "Checklist step." }],
+      labScene: {
+        tier: "interactive-sim",
+        title: "Broken",
+        xLabel: "x",
+        yLabel: "y",
+        xRange: [0, 10],
+        yRange: [0, 10],
+        curves: [{ fx: "??? invalid syntax ???", label: "Broken" }],
+        params: [],
+      },
+    };
+    const fallback = resolveGuaranteedLabScene(brokenSimSec);
+    expect(fallback.tier).toBe("smart-diagram-3d");
+  });
+});
+
+describe("Living Board zero-throw auto-healer & deterministic 2D sketcher", () => {
+  it("heals missing links, missing ops/challenge, and tags unverified quotes without throwing", () => {
+    const dirtyOutline = {
+      title: "Renal Clearance Review",
+      objective: "Understand GFR and filtration",
+      sections: [
+        {
+          id: "sec1",
+          title: "Glomerular Filtration",
+          kind: "mechanism",
+          nodes: [
+            {
+              id: "n1",
+              text: "Afferent arteriole dilation",
+              kind: "cause",
+              tone: "normal",
+              source: { page: 8, quote: "Afferent arteriole dilation boosts renal blood flow" },
+            },
+            {
+              id: "n2",
+              text: "GFR increases proportionally",
+              kind: "effect",
+              tone: "normal",
+              source: { page: 8, quote: "Totally ungrounded fabricated sentence xyz" },
+            },
+          ],
+          script: [],
+        },
+      ],
+      links: [],
+    };
+
+    const healed = healRawLessonOutline(dirtyOutline, DEFAULT_BOARD_LIMITS, 8);
+    expect(healed.links).toHaveLength(1);
+    expect(healed.sections[0].script.length).toBeGreaterThan(0);
+
+    const enriched = applySoftGroundingAndEnrich({
+      outline: healed,
+      sourceText: "Afferent arteriole dilation boosts renal blood flow across the kidney nephron.",
+      validPages: new Set([8]),
+      defaultPage: 8,
+      resolveLabScene: (sec, title) => resolveGuaranteedLabScene(sec, title),
+    });
+
+    const sec = enriched.outline.sections[0];
+    expect(sec.nodes[0].source.inferred).toBe(false);
+    expect(sec.nodes[1].source.inferred).toBe(true);
+    expect(sec.ops && sec.ops.length).toBeGreaterThan(0);
+    expect(sec.labScene).toBeDefined();
+    expect(sec.challenge).toBeDefined();
+  });
+
+  it("renders deterministic PRNG strokes and strictly bounded 1000x625 EN & Arabic RTL layouts", () => {
+    const strokeA = sketchPolyline(
+      [{ x: 20, y: 30 }, { x: 240, y: 120 }],
+      "deterministic-seed-key"
+    );
+    const strokeB = sketchPolyline(
+      [{ x: 20, y: 30 }, { x: 240, y: 120 }],
+      "deterministic-seed-key"
+    );
+    expect(strokeA).toEqual(strokeB);
+
+    const arabicSec: LessonSection = {
+      id: "ar-1",
+      title: "ضغط الدم الشرياني",
+      kind: "mechanism",
+      nodes: [
+        {
+          id: "na1",
+          text: "تضيق الشرايين الطرفية",
+          kind: "cause",
+          tone: "pathology",
+          source: { page: 4, quote: "تضيق الشرايين" },
+        },
+        {
+          id: "na2",
+          text: "ارتفاع المقاومة الوعائية",
+          kind: "effect",
+          tone: "pathology",
+          source: { page: 4, quote: "ارتفاع المقاومة" },
+        },
+      ],
+      script: [{ id: "sa1", nodeId: "na1", text: "يزداد المقاومة" }],
+    };
+
+    const layout = layoutBoardOps({
+      lessonId: "lesson-ar",
+      section: arabicSec,
+      sectionIndex: 0,
+      links: [{ from: "na1", to: "na2", kind: "leads_to" }],
+      rtl: true,
+    });
+
+    expect(layout.width).toBe(BOARD.w);
+    expect(layout.height).toBe(BOARD.h);
+    expect(layout.primitives.length).toBeGreaterThan(0);
+    for (const p of layout.primitives) {
+      if (p.k === "stroke") {
+        for (const pt of p.points) {
+          expect(pt.x).toBeGreaterThanOrEqual(0);
+          expect(pt.x).toBeLessThanOrEqual(BOARD.w);
+          expect(pt.y).toBeGreaterThanOrEqual(0);
+          expect(pt.y).toBeLessThanOrEqual(BOARD.h);
+        }
+      } else {
+        expect(p.x).toBeGreaterThanOrEqual(0);
+        expect(p.y).toBeGreaterThanOrEqual(0);
+        expect(p.x + p.w).toBeLessThanOrEqual(BOARD.w + 2);
+        expect(p.y + p.h).toBeLessThanOrEqual(BOARD.h + 2);
+      }
+    }
+
+    const midFrame = revealAt(layout, 0.45);
+    const fullFrame = revealAt(layout, 1);
+    expect(midFrame.visibleStrokes.size).toBeGreaterThan(0);
+    expect(fullFrame.penTip).toBeNull();
+  });
+
+  it("solves elbow anatomy rig pose deterministically with flexion angle changes", () => {
+    const flexed = solveAnatomyRigPose("elbow", { flexion: 110 });
+    const extended = solveAnatomyRigPose("elbow", { flexion: 20 });
+    expect(flexed.bones.length).toBeGreaterThanOrEqual(3);
+    expect(flexed.bands.length).toBeGreaterThanOrEqual(2);
+    expect(flexed.goniometer?.degrees).toBe(110);
+    expect(extended.goniometer?.degrees).toBe(20);
+    expect(flexed.angleDeg).toBeLessThan(extended.angleDeg);
+  });
+
+  it("upgrades cached smart-diagram-3d salivary/neoplastic sections to specialized 3D blueprints and gives subtitles roomy width", () => {
+    const sjogrenSection: LessonSection = {
+      id: "sec-sjogren",
+      title: "Inflammatory & Autoimmune",
+      kind: "mechanism",
+      nodes: [
+        {
+          id: "n-sj1",
+          text: "Sjogren's Syndrome Triad",
+          kind: "sign",
+          tone: "pathology",
+          source: { page: 22, quote: "Rheumatoid arthritis, Kerato-conjunctivitis sicca, Xerostomia" },
+        },
+        {
+          id: "n-sj2",
+          text: "Mikulicz Disease Variant",
+          kind: "effect",
+          tone: "pathology",
+          source: { page: 22, quote: "Symmetrical enlargement of all salivary glands" },
+        },
+      ],
+      ops: [
+        {
+          t: "title",
+          text: "Inflammatory & Autoimmune",
+          subtitle: "Parotitis & Sjogren's",
+          tone: "pathology",
+        },
+      ],
+      labScene: {
+        tier: "smart-diagram-3d",
+        title: "Old Cached Smart Diagram",
+      },
+      script: [{ id: "seg-sj1", nodeId: "n-sj1", text: "Sjogren affects salivary glands." }],
+    };
+
+    const resolvedSjogren = resolveGuaranteedLabScene(sjogrenSection, "Salivary Gland Swellings");
+    expect(resolvedSjogren.tier).toBe("procedural-3d");
+    if (resolvedSjogren.tier === "procedural-3d") {
+      expect(resolvedSjogren.blueprint).toBe("glandular-acinus");
+    }
+
+    const tumorSection: LessonSection = {
+      id: "sec-tumor",
+      title: "Neoplastic Causes Classification",
+      kind: "clinical",
+      nodes: [
+        {
+          id: "n-tm1",
+          text: "Pleomorphic adenoma vs mucoepidermoid carcinoma",
+          kind: "structure",
+          tone: "pathology",
+          source: { page: 23, quote: "Benign pleomorphic adenoma versus malignant carcinoma" },
+        },
+      ],
+      labScene: {
+        tier: "smart-diagram-3d",
+        title: "Old Tumor Smart Diagram",
+      },
+      script: [{ id: "seg-tm1", nodeId: "n-tm1", text: "Compare benign and malignant masses." }],
+    };
+
+    const resolvedTumor = resolveGuaranteedLabScene(tumorSection, "Salivary Gland Masses");
+    expect(resolvedTumor.tier).toBe("procedural-3d");
+    if (resolvedTumor.tier === "procedural-3d") {
+      expect(resolvedTumor.blueprint).toBe("tumor-architecture");
+    }
+
+    const layout = layoutBoardOps({
+      lessonId: "sjogren-test",
+      section: sjogrenSection,
+      sectionIndex: 0,
+      links: [],
+      rtl: false,
+    });
+    const subtitlePrim = layout.primitives.find(
+      (p) => p.k === "text" && p.text === "Parotitis & Sjogren's"
+    );
+    expect(subtitlePrim).toBeDefined();
+    if (subtitlePrim && subtitlePrim.k === "text") {
+      expect(subtitlePrim.w).toBeGreaterThanOrEqual(200);
+      expect(subtitlePrim.align).toBe("right");
+      expect(subtitlePrim.x + subtitlePrim.w).toBeLessThanOrEqual(BOARD.w);
+    }
+  });
+});
+

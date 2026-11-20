@@ -288,42 +288,42 @@ export function ConceptMapCanvas({
       onPointerCancel={handlePointerUp}
       onWheel={handleWheel}
       className={cn(
-        "relative flex h-[460px] w-full flex-col overflow-hidden rounded-[20px] border-2 border-[#ff4c00]/40 shadow-chip select-none cursor-grab active:cursor-grabbing",
+        "relative flex h-[460px] w-full flex-col overflow-hidden rounded-[20px] border-2 border-[var(--study-panel-border)] shadow-[var(--study-shadow)] select-none cursor-grab active:cursor-grabbing",
         className
       )}
       style={{
-        backgroundColor: "var(--ink, #0f0e10)",
+        backgroundColor: "var(--study-canvas-bg)",
         backgroundImage:
-          "radial-gradient(circle, rgba(255, 76, 0, 0.16) 1.2px, transparent 1.2px)",
+          "radial-gradient(circle, var(--study-canvas-dot) var(--study-canvas-dot-size, 1.25px), transparent calc(var(--study-canvas-dot-size, 1.25px) + 0.2px))",
         backgroundSize: "22px 22px",
         touchAction: "none",
       }}
     >
       {/* Header Controls Bar */}
-      <div className="mindmap-controls relative z-20 flex h-11 shrink-0 items-center justify-between border-b border-white/10 bg-[#0f0e10]/95 px-3.5 backdrop-blur-md">
-        <div className="flex items-center gap-2">
-          <div className="flex size-6 items-center justify-center rounded-lg bg-[#ff4c00] text-[#0f0e10] shadow-xs">
-            <Workflow className="size-3.5" />
+      <div className="mindmap-controls relative z-20 flex h-10 shrink-0 items-center justify-between border-b border-[var(--study-border)] bg-[var(--study-surface)] px-3 backdrop-blur-md">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="flex size-5 shrink-0 items-center justify-center rounded-md bg-[#ff4c00] text-[#0f0e10] shadow-xs">
+            <Workflow className="size-3" />
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-black tracking-tight text-[#f6d7a1]">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="truncate text-xs font-black tracking-tight text-[var(--study-text)]">
               {rootLabel}
             </span>
-            <span className="hidden sm:inline-flex rounded-full border border-[#ff4c00]/30 bg-[#ff4c00]/15 px-2 py-0.5 text-[9.5px] font-bold text-[#ff4c00]">
+            <span className="hidden sm:inline-flex shrink-0 rounded-full border border-[#ff4c00]/40 bg-[#ff4c00]/15 px-2 py-0.5 text-[9.5px] font-bold text-[#ff4c00]">
               Interactive Node Canvas
             </span>
           </div>
         </div>
 
         {/* Pan/Zoom Controls */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-mono text-white/50 mr-1 hidden sm:inline">
-            Drag canvas or nodes • Pinch/scroll to zoom
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[10px] font-mono text-[var(--study-text-muted)] mr-1 hidden sm:inline">
+            Drag canvas or nodes • Scroll to zoom
           </span>
           <button
             type="button"
             onClick={handleZoomIn}
-            className="flex size-7 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-white/80 hover:bg-white/15 hover:text-white cursor-pointer"
+            className="flex size-7 items-center justify-center rounded-lg border border-[var(--study-border)] bg-[var(--study-surface-muted)] text-[var(--study-text)] hover:bg-[#ff4c00] hover:text-[#0f0e10] hover:border-[#0f0e10] transition-colors cursor-pointer"
             title="Zoom In"
           >
             <ZoomIn className="size-3.5" />
@@ -331,7 +331,7 @@ export function ConceptMapCanvas({
           <button
             type="button"
             onClick={handleZoomOut}
-            className="flex size-7 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-white/80 hover:bg-white/15 hover:text-white cursor-pointer"
+            className="flex size-7 items-center justify-center rounded-lg border border-[var(--study-border)] bg-[var(--study-surface-muted)] text-[var(--study-text)] hover:bg-[#ff4c00] hover:text-[#0f0e10] hover:border-[#0f0e10] transition-colors cursor-pointer"
             title="Zoom Out"
           >
             <ZoomOut className="size-3.5" />
@@ -339,7 +339,7 @@ export function ConceptMapCanvas({
           <button
             type="button"
             onClick={handleResetView}
-            className="flex size-7 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-white/80 hover:bg-white/15 hover:text-white cursor-pointer"
+            className="flex size-7 items-center justify-center rounded-lg border border-[var(--study-border)] bg-[var(--study-surface-muted)] text-[var(--study-text)] hover:bg-[#ff4c00] hover:text-[#0f0e10] hover:border-[#0f0e10] transition-colors cursor-pointer"
             title="Reset View"
           >
             <RotateCcw className="size-3.5" />
@@ -391,12 +391,12 @@ export function ConceptMapCanvas({
               className={cn(
                 "absolute rounded-[14px] p-2.5 transition-all cursor-move flex flex-col justify-between border-2",
                 isSelected
-                  ? "border-[#ff4c00] bg-[#f6d7a1] text-[#0f0e10] shadow-[0_0_20px_rgba(255,76,0,0.5)] scale-105 z-30"
+                  ? "border-[#ff4c00] bg-[#f6d7a1] text-[#0f0e10] shadow-[0_0_20px_rgba(255,76,0,0.45)] scale-105 z-30"
                   : isRoot
-                  ? "border-[#ff4c00] bg-[#1a1820] text-[#f6d7a1] shadow-lg z-20 hover:scale-102"
+                  ? "border-[#ff4c00] bg-[var(--study-surface-solid)] text-[var(--study-text)] shadow-lg z-20 hover:scale-102"
                   : isPillar
-                  ? "border-[#2e6f68] bg-[#151c1c] text-[#7fd8c9] shadow-md z-15 hover:scale-102"
-                  : "border-white/20 bg-[#16151a] text-white/90 shadow-sm z-10 hover:border-white/50"
+                  ? "border-[var(--study-teal-border)] bg-[var(--study-surface-solid)] text-[var(--study-teal-text)] shadow-md z-15 hover:scale-102"
+                  : "border-[var(--study-border-strong)] bg-[var(--study-surface-solid)] text-[var(--study-text)] shadow-sm z-10 hover:border-[#ff4c00]/60"
               )}
               style={{
                 left: node.xPos,
@@ -406,10 +406,10 @@ export function ConceptMapCanvas({
               }}
             >
               <div className="flex items-center justify-between gap-1 pb-1">
-                <span className="text-[9px] font-black uppercase tracking-wider opacity-70 truncate">
+                <span className="text-[9px] font-black uppercase tracking-wider opacity-85 truncate">
                   {node.category || (isRoot ? "Root Topic" : isPillar ? "Core Pillar" : "Key Rule")}
                 </span>
-                <Move className="size-2.5 opacity-40 shrink-0" />
+                <Move className="size-2.5 opacity-60 shrink-0" />
               </div>
 
               <div className="font-bold text-xs leading-snug line-clamp-2">
@@ -417,7 +417,7 @@ export function ConceptMapCanvas({
               </div>
 
               {node.sublabel && (
-                <div className="text-[10px] opacity-75 truncate mt-0.5">
+                <div className="text-[10px] opacity-85 truncate mt-0.5">
                   <BiDiText text={node.sublabel} />
                 </div>
               )}
@@ -428,19 +428,19 @@ export function ConceptMapCanvas({
 
       {/* Deep Comprehensive Node Inspector Drawer (Non-truncated) */}
       {activeNode && (
-        <div className="mindmap-controls absolute bottom-2 inset-x-2 z-30 rounded-[16px] border-2 border-[#ff4c00] bg-[#0f0e10]/95 p-3.5 text-[#f6d7a1] shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-2 duration-150 max-h-56 overflow-y-auto">
-          <div className="flex items-start justify-between gap-2 pb-2 border-b border-white/10 mb-2">
+        <div className="mindmap-controls absolute bottom-2 inset-x-2 z-30 rounded-[16px] border-2 border-[#ff4c00] bg-[var(--study-surface-solid)] p-3.5 text-[var(--study-text)] shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-2 duration-150 max-h-56 overflow-y-auto study-scrollbar">
+          <div className="flex items-start justify-between gap-2 pb-2 border-b border-[var(--study-border)] mb-2">
             <div>
               <div className="flex items-center gap-2">
                 <span className="rounded-full bg-[#ff4c00] text-[#0f0e10] px-2 py-0.5 text-[9.5px] font-black uppercase">
                   {activeNode.category}
                 </span>
-                <h4 className="font-serif font-bold text-xs sm:text-sm text-white">
+                <h4 className="font-serif font-bold text-xs sm:text-sm text-[var(--study-text)]">
                   <BiDiText text={activeNode.label} />
                 </h4>
               </div>
               {activeNode.sublabel && (
-                <p className="text-[11px] text-[#7fd8c9] mt-0.5">
+                <p className="text-[11px] text-[var(--study-teal-text)] mt-0.5">
                   <BiDiText text={activeNode.sublabel} />
                 </p>
               )}
@@ -449,7 +449,7 @@ export function ConceptMapCanvas({
             <button
               type="button"
               onClick={() => setSelectedNodeId(null)}
-              className="text-white/60 hover:text-white p-1 rounded-md"
+              className="text-[var(--study-text-muted)] hover:text-[var(--study-text)] p-1 rounded-md cursor-pointer"
               title="Close Drawer"
             >
               <X className="size-4" />
@@ -457,17 +457,17 @@ export function ConceptMapCanvas({
           </div>
 
           {/* Full Non-Truncated Explanation */}
-          <div className="text-xs leading-relaxed text-white/90 mb-3">
+          <div className="text-xs leading-relaxed text-[var(--study-text-soft)] mb-3">
             <BiDiText text={activeNode.details} />
           </div>
 
           {/* Step-by-Step Mechanisms if available */}
           {activeNode.mechanismSteps && activeNode.mechanismSteps.length > 0 && (
-            <div className="mb-3 p-2 rounded-lg bg-white/5 border border-white/10 text-xs">
+            <div className="mb-3 p-2 rounded-lg bg-[var(--study-surface-muted)] border border-[var(--study-border)] text-xs">
               <span className="text-[10px] font-black uppercase text-[#ff4c00] block mb-1">
                 ✦ Step-by-Step Mechanism:
               </span>
-              <ul className="space-y-1">
+              <ul className="space-y-1 text-[var(--study-text)]">
                 {activeNode.mechanismSteps.map((step, sIdx) => (
                   <li key={sIdx} className="flex items-start gap-1.5 text-[11px]">
                     <span className="font-bold text-[#ff4c00]">{sIdx + 1}.</span>
@@ -479,11 +479,11 @@ export function ConceptMapCanvas({
           )}
 
           {/* Action Buttons */}
-          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/10">
+          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[var(--study-border)]">
             <button
               type="button"
               onClick={handleAskAIAboutNode}
-              className="flex cursor-pointer items-center gap-1.5 rounded-full border border-[#0f0e10] bg-[#ff4c00] px-3 py-1 text-[11px] font-black text-[#0f0e10] shadow-xs hover:bg-[#ff4c00]/80"
+              className="flex cursor-pointer items-center gap-1.5 rounded-full border border-[#0f0e10] bg-[#ff4c00] px-3 py-1 text-[11px] font-black text-[#0f0e10] shadow-xs hover:brightness-105"
             >
               <MessageSquare className="size-3" />
               <span>Explain in AI Chat</span>
@@ -492,18 +492,18 @@ export function ConceptMapCanvas({
             <button
               type="button"
               onClick={handleQuizAboutNode}
-              className="flex cursor-pointer items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-bold text-white hover:bg-white/20"
+              className="flex cursor-pointer items-center gap-1.5 rounded-full border border-[var(--study-border-strong)] bg-[var(--study-surface-muted)] px-3 py-1 text-[11px] font-bold text-[var(--study-text)] hover:bg-[#ff4c00] hover:text-[#0f0e10] hover:border-[#0f0e10] transition-colors"
             >
-              <HelpCircle className="size-3 text-amber-400" />
+              <HelpCircle className="size-3 text-[#ff4c00]" />
               <span>Test in QBank</span>
             </button>
 
             <button
               type="button"
               onClick={handlePinActiveNode}
-              className="flex cursor-pointer items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/20"
+              className="flex cursor-pointer items-center gap-1.5 rounded-full border border-[var(--study-teal-border)] bg-[var(--study-teal-bg)] px-3 py-1 text-[11px] font-bold text-[var(--study-teal-text)] hover:opacity-90 transition-colors"
             >
-              {pinnedSuccess ? <Check className="size-3 text-emerald-400" /> : <BookmarkPlus className="size-3" />}
+              {pinnedSuccess ? <Check className="size-3 text-[var(--study-teal-text)]" /> : <BookmarkPlus className="size-3" />}
               <span>{pinnedSuccess ? "Pinned!" : "Pin to Vault"}</span>
             </button>
           </div>

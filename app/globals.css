@@ -183,6 +183,24 @@
   body {
     background-color: var(--paper);
   }
+
+  /* One authored focus ring for every interactive control */
+  :where(a, button, [role="button"], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 3px solid var(--orange);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 5px rgba(15, 14, 16, 0.9);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @layer utilities {
@@ -1044,9 +1062,9 @@ button[data-variant='unstyled'] *,
 
   /* Small meta label — used sparingly for genuine metadata */
   .meta-label {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
   }
 
@@ -1237,3 +1255,142 @@ button[data-variant='unstyled'] *,
   font-family: var(--font-mona-sans), system-ui, sans-serif;
 }
 
+/* ==========================================================================
+   STUDY SPACE DOTTED CANVAS & FLOATING ISLAND THEME SYSTEM
+   Two themes:
+   - [data-study-theme="paper"] : Pure White canvas with Black dots
+   - [data-study-theme="ink"]   : Deep Black canvas with White dots
+   All panels, HUD bars, popovers, and drawers float above the canvas.
+   ========================================================================== */
+[data-study-theme="paper"] {
+  --study-canvas-bg: #ffffff;
+  --study-canvas-dot: rgba(15, 14, 16, 0.22);
+  --study-surface: rgba(255, 255, 255, 0.90);
+  --study-surface-solid: #ffffff;
+  --study-surface-elevated: rgba(249, 249, 251, 0.94);
+  --study-surface-muted: rgba(15, 14, 16, 0.045);
+  --study-glass: rgba(255, 255, 255, 0.84);
+  --study-glass-hover: rgba(15, 14, 16, 0.075);
+  --study-border: rgba(15, 14, 16, 0.16);
+  --study-border-strong: rgba(15, 14, 16, 0.34);
+  --study-panel-border: #0f0e10;
+  --study-pill-border: rgba(15, 14, 16, 0.72);
+  --study-text: #0f0e10;
+  --study-text-muted: rgba(15, 14, 16, 0.62);
+  --study-text-soft: rgba(15, 14, 16, 0.82);
+  --study-teal-text: #0f766e;
+  --study-teal-bg: rgba(20, 184, 166, 0.14);
+  --study-teal-border: rgba(13, 148, 136, 0.50);
+  --study-amber-text: #b45309;
+  --study-amber-bg: rgba(245, 158, 11, 0.14);
+  --study-amber-border: rgba(217, 119, 6, 0.50);
+  --study-red-text: #b91c1c;
+  --study-red-bg: rgba(239, 68, 68, 0.12);
+  --study-red-border: rgba(220, 38, 38, 0.50);
+  --study-shadow: 0 12px 32px -12px rgba(15, 14, 16, 0.16),
+    0 2px 8px -2px rgba(15, 14, 16, 0.08);
+  --study-shadow-lg: 0 22px 54px -16px rgba(15, 14, 16, 0.22),
+    0 6px 18px -6px rgba(15, 14, 16, 0.10);
+  --study-glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 4px 12px rgba(15, 14, 16, 0.07);
+  --study-active-bg: #ff4c00;
+  --study-active-border: #0f0e10;
+  --study-active-text: #0f0e10;
+  --study-active-shadow: 0 6px 16px -4px rgba(255, 76, 0, 0.35);
+  --study-voice-bg: rgba(127, 216, 201, 0.30);
+  --study-voice-border: #0f766e;
+  --study-voice-text: #0f0e10;
+  --study-scrollbar: rgba(15, 14, 16, 0.24);
+  --study-scrollbar-hover: rgba(15, 14, 16, 0.42);
+}
+
+[data-study-theme="ink"] {
+  --study-canvas-bg: #08080a;
+  --study-canvas-dot: rgba(255, 255, 255, 0.23);
+  --study-canvas-dot-size: 1.35px;
+  --study-surface: rgba(20, 19, 24, 0.90);
+  --study-surface-solid: #141318;
+  --study-surface-elevated: rgba(27, 25, 32, 0.95);
+  --study-surface-muted: rgba(255, 255, 255, 0.065);
+  --study-glass: rgba(255, 255, 255, 0.07);
+  --study-glass-hover: rgba(255, 255, 255, 0.14);
+  --study-border: rgba(245, 239, 228, 0.18);
+  --study-border-strong: rgba(245, 239, 228, 0.34);
+  --study-panel-border: rgba(245, 239, 228, 0.78);
+  --study-pill-border: rgba(245, 239, 228, 0.52);
+  --study-text: #f5efe4;
+  --study-text-muted: rgba(245, 239, 228, 0.62);
+  --study-text-soft: rgba(245, 239, 228, 0.86);
+  --study-teal-text: #7fd8c9;
+  --study-teal-bg: rgba(67, 160, 143, 0.22);
+  --study-teal-border: rgba(127, 216, 201, 0.55);
+  --study-amber-text: #fcd34d;
+  --study-amber-bg: rgba(245, 158, 11, 0.20);
+  --study-amber-border: rgba(251, 191, 36, 0.55);
+  --study-red-text: #fecaca;
+  --study-red-bg: rgba(239, 68, 68, 0.22);
+  --study-red-border: rgba(248, 113, 113, 0.55);
+  --study-shadow: 0 14px 36px -12px rgba(0, 0, 0, 0.72),
+    0 4px 12px -4px rgba(0, 0, 0, 0.48);
+  --study-shadow-lg: 0 26px 64px -16px rgba(0, 0, 0, 0.86),
+    0 8px 24px -6px rgba(0, 0, 0, 0.60);
+  --study-glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 6px 18px rgba(0, 0, 0, 0.28);
+  --study-active-bg: rgba(255, 76, 0, 0.26);
+  --study-active-border: rgba(255, 76, 0, 0.90);
+  --study-active-text: #ffffff;
+  --study-active-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 0 20px rgba(255, 76, 0, 0.28);
+  --study-voice-bg: rgba(67, 160, 143, 0.30);
+  --study-voice-border: rgba(127, 216, 201, 0.80);
+  --study-voice-text: #ffffff;
+  --study-scrollbar: rgba(245, 239, 228, 0.24);
+  --study-scrollbar-hover: rgba(245, 239, 228, 0.40);
+}
+
+.study-dotted-canvas {
+  background-color: var(--study-canvas-bg);
+  background-image: radial-gradient(
+    circle,
+    var(--study-canvas-dot) var(--study-canvas-dot-size, 1.25px),
+    transparent calc(var(--study-canvas-dot-size, 1.25px) + 0.2px)
+  );
+  background-size: 22px 22px;
+  background-position: 0 0;
+  color: var(--study-text);
+}
+
+.study-floating-panel {
+  background-color: var(--study-surface);
+  border: 2px solid var(--study-panel-border);
+  box-shadow: var(--study-shadow-lg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  color: var(--study-text);
+}
+
+.study-floating-pill {
+  background-color: var(--study-surface);
+  border: 1.5px solid var(--study-pill-border);
+  box-shadow: var(--study-shadow);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  color: var(--study-text);
+}
+
+.study-scrollbar {
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--study-scrollbar);
+    border-radius: 3px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--study-scrollbar-hover);
+  }
+}

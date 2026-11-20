@@ -14,6 +14,12 @@ import { buildLanguageDirective } from "@/lib/language";
 import { retrieveEnrichedContext } from "./knowledge/knowledge-retriever";
 import { EnrichedStudyContext } from "@/types/knowledge";
 import { normalizeScientificNotation } from "@/lib/formatting/scientific-text";
+import {
+  clearModelCooldown,
+  GEMINI_MODEL_CHAIN,
+  markModelCooldownFromError,
+  orderModelsByHealth,
+} from "./model-cooldown";
 
 const SOCRATIC_SYSTEM_PROMPT = `You are Ascleon's elite AI Clinical Study Agent & Academic Mentor.
 Your mission is to guide students to first-principles mastery of the material in their study source with absolute scientific fidelity, pedagogical elegance, and crystal-clear presentation.
@@ -72,7 +78,9 @@ async function callGeminiAgent(
   enriched: EnrichedStudyContext
 ): Promise<AgentRunOutput> {
   const ai = new GoogleGenAI({ apiKey });
-  const modelName = "gemini-3.5-flash-lite";
+  const orderedModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
+  const modelName = orderedModels[0] || "gemini-4-hydrogen";
+  const fallbackModel = orderedModels[1] || "gemini-3.8-flash";
 
   // Build grounding context from active page + background textbook knowledge
   const pageIntro = `Active Book: "${context.bookTitle}" (Section ${context.currentSegmentIndex + 1}${
@@ -144,25 +152,36 @@ async function callGeminiAgent(
   const fullSystemInstruction = `${SOCRATIC_SYSTEM_PROMPT}\n\n${langDirective}`;
 
   try {
-    const generatePromise = ai.models.generateContent({
-      model: modelName,
-      contents,
-      config: {
-        systemInstruction: fullSystemInstruction,
-        tools: toolsDeclaration as any,
-        temperature: 0.2,
-        thinkingConfig: {
-          thinkingBudget: isQuickQuery ? 0 : 256,
+    const turn1Abort = new AbortController();
+    const turn1Timer = setTimeout(() => turn1Abort.abort(), 16_000);
+    let response: any;
+    try {
+      const generatePromise = ai.models.generateContent({
+        model: modelName,
+        contents,
+        config: {
+          systemInstruction: fullSystemInstruction,
+          tools: toolsDeclaration as any,
+          temperature: 0.2,
+          abortSignal: turn1Abort.signal,
+          thinkingConfig: {
+            thinkingBudget: isQuickQuery ? 0 : 256,
+          },
         },
-      },
-    });
+      });
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Gemini call timed out after 30s")), 30000)
-    );
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        turn1Abort.signal.addEventListener("abort", () =>
+          reject(new Error(`Gemini ${modelName} timed out after 16s`))
+        )
+      );
 
-    const response: any = await Promise.race([generatePromise, timeoutPromise]);
+      response = await Promise.race([generatePromise, timeoutPromise]);
+    } finally {
+      clearTimeout(turn1Timer);
+    }
 
+    clearModelCooldown(`gemini:${modelName}`);
     const candidate = response.candidates?.[0];
     const functionCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall);
 
@@ -210,22 +229,32 @@ async function callGeminiAgent(
         },
       ];
 
-      const finalResponsePromise = ai.models.generateContent({
-        model: modelName,
-        contents: followUpContents,
-        config: {
-          temperature: 0.3,
-          thinkingConfig: {
-            thinkingBudget: isQuickQuery ? 0 : 256,
+      const turn2Abort = new AbortController();
+      const turn2Timer = setTimeout(() => turn2Abort.abort(), 14_000);
+      let finalResponse: any;
+      try {
+        const finalResponsePromise = ai.models.generateContent({
+          model: modelName,
+          contents: followUpContents,
+          config: {
+            temperature: 0.3,
+            abortSignal: turn2Abort.signal,
+            thinkingConfig: {
+              thinkingBudget: isQuickQuery ? 0 : 256,
+            },
           },
-        },
-      });
+        });
 
-      const finalTimeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Gemini Turn 2 call timed out after 30s")), 30000)
-      );
+        const finalTimeoutPromise = new Promise<never>((_, reject) =>
+          turn2Abort.signal.addEventListener("abort", () =>
+            reject(new Error(`Gemini ${modelName} Turn 2 timed out after 14s`))
+          )
+        );
 
-      const finalResponse: any = await Promise.race([finalResponsePromise, finalTimeoutPromise]);
+        finalResponse = await Promise.race([finalResponsePromise, finalTimeoutPromise]);
+      } finally {
+        clearTimeout(turn2Timer);
+      }
 
       return {
         text: normalizeScientificNotation(
@@ -270,24 +299,42 @@ async function callGeminiAgent(
       mnemonics: enriched.mnemonics,
     };
   } catch (err: any) {
-    // If primary model hits an error, try gemini-3.8-flash fallback
+    markModelCooldownFromError(`gemini:${modelName}`, err);
+    // Fast bounded fallback to secondary Gemini model
+    const fbAbort = new AbortController();
+    const fbTimer = setTimeout(() => fbAbort.abort(), 12_000);
     try {
-      const fallbackResp = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+      const fbPromise = ai.models.generateContent({
+        model: fallbackModel,
         contents,
+        config: {
+          systemInstruction: fullSystemInstruction,
+          temperature: 0.25,
+          abortSignal: fbAbort.signal,
+        },
       });
+      const fbTimeout = new Promise<never>((_, reject) =>
+        fbAbort.signal.addEventListener("abort", () =>
+          reject(new Error(`Gemini fallback ${fallbackModel} timed out after 12s`))
+        )
+      );
+      const fallbackResp: any = await Promise.race([fbPromise, fbTimeout]);
+      clearModelCooldown(`gemini:${fallbackModel}`);
       return {
         text: normalizeScientificNotation(fallbackResp.text || "Analysis completed."),
         provider: "gemini",
-        model: "gemini-3.8-flash",
+        model: fallbackModel,
         toolsUsed: [],
         citations: [`Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`],
         authoritativeReferences: enriched.authoritativeReferences,
         qbankVignettes: enriched.qbankVignettes,
         mnemonics: enriched.mnemonics,
       };
-    } catch {
+    } catch (fbErr) {
+      markModelCooldownFromError(`gemini:${fallbackModel}`, fbErr);
       throw err;
+    } finally {
+      clearTimeout(fbTimer);
     }
   }
 }
@@ -414,6 +461,7 @@ async function callOpenAICompatibleAgent(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
+      signal: AbortSignal.timeout(10000),
       body: JSON.stringify({
         model: effectiveModel,
         messages,
@@ -535,14 +583,26 @@ export async function runStudyAgent(
   userQuery: string,
   context: AgentContext
 ): Promise<AgentRunOutput> {
-  // Pre-flight background enrichment: Dynamically adapts to the book title and text
-  const enriched = await retrieveEnrichedContext({
-    text: context.currentSegmentContent,
-    query: userQuery,
-    bookTitle: context.bookTitle,
-    bookTopic: context.bookTopic || "",
-    bookReferences: context.bookReferences,
-  });
+  // Pre-flight background enrichment with 2.5s cap so slow DB/enrichment never stalls chat
+  const emptyEnriched: EnrichedStudyContext = {
+    focalTopic: context.bookTopic || context.bookTitle || "General Study",
+    groundingSnippet: "",
+    authoritativeReferences: [],
+    qbankVignettes: [],
+    mnemonics: [],
+  };
+  const enriched = await Promise.race([
+    retrieveEnrichedContext({
+      text: context.currentSegmentContent,
+      query: userQuery,
+      bookTitle: context.bookTitle,
+      bookTopic: context.bookTopic || "",
+      bookReferences: context.bookReferences,
+    }).catch(() => emptyEnriched),
+    new Promise<EnrichedStudyContext>((resolve) =>
+      setTimeout(() => resolve(emptyEnriched), 2500)
+    ),
+  ]);
 
   const geminiKey = process.env.GEMINI_API_KEY;
   const groqKey = process.env.GROQ_API_KEY;

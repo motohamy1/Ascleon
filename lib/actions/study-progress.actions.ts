@@ -369,19 +369,19 @@ export async function getActiveStudySource(): Promise<{
     const lastStudiedPage = matchedProgress
       ? Math.max(1, matchedProgress.lastStudiedPage || 1)
       : 1;
-    const totalPages =
-      (matchedProgress?.totalPages && matchedProgress.totalPages > 0
-        ? matchedProgress.totalPages
-        : targetBook.totalPages) || 0;
+    const rawTotalPages = Math.max(
+      Number(matchedProgress?.totalPages) || 0,
+      Number(targetBook.totalPages) || 0
+    );
+    const totalPages = rawTotalPages > 0 ? Math.max(lastStudiedPage, rawTotalPages) : 0;
     const progressPercent = matchedProgress
       ? Math.min(
           100,
           Math.max(
             0,
-            matchedProgress.progressPercent ??
-              (totalPages > 0
-                ? Math.round((lastStudiedPage / totalPages) * 100)
-                : 0)
+            totalPages > 0
+              ? Math.round((lastStudiedPage / totalPages) * 100)
+              : matchedProgress.progressPercent ?? 0
           )
         )
       : 0;

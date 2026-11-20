@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Serif, Mona_Sans, Caveat, Marhey } from "next/font/google";
+import { IBM_Plex_Serif, Mona_Sans, Caveat, Marhey, Kalam, Playpen_Sans_Arabic } from "next/font/google";
+import "katex/dist/katex.min.css";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import { ClerkProvider } from "@clerk/nextjs";
@@ -32,6 +33,20 @@ const marhey = Marhey({
     display: 'swap'
 });
 
+const kalam = Kalam({
+    variable: '--font-kalam',
+    subsets: ['latin'],
+    weight: ['400', '700'],
+    display: 'swap'
+});
+
+const playpenArabic = Playpen_Sans_Arabic({
+    variable: '--font-playpen-arabic',
+    subsets: ['arabic', 'latin'],
+    display: 'swap',
+    adjustFontFallback: false
+});
+
 
 export const metadata: Metadata = {
   title: "Ascleon",
@@ -55,7 +70,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${ibmPlexSerif.variable} ${monaSans.variable} ${caveat.variable} ${marhey.variable} relative font-sans antialiased`}
+        className={`${ibmPlexSerif.variable} ${monaSans.variable} ${caveat.variable} ${marhey.variable} ${kalam.variable} ${playpenArabic.variable} relative font-sans antialiased`}
       >
         <ClerkProvider
           appearance={{

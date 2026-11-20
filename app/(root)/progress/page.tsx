@@ -5,7 +5,7 @@ import {
   getUserSessions,
   SessionHistoryItem,
 } from "@/lib/actions/session.actions";
-import { getLatestUserStudyProgress } from "@/lib/actions/study-progress.actions";
+import { getActiveStudySource } from "@/lib/actions/study-progress.actions";
 import ProgressView from "@/components/progress/ProgressView";
 import { IBook } from "@/types";
 
@@ -15,11 +15,11 @@ export default async function ProgressPage() {
     redirect("/");
   }
 
-  const [user, booksResult, sessionsResult, progressResult] = await Promise.all([
+  const [user, booksResult, sessionsResult, activeStudyRes] = await Promise.all([
     currentUser(),
     getUserBooks(),
     getUserSessions(40),
-    getLatestUserStudyProgress(),
+    getActiveStudySource(),
   ]);
 
   const books = (booksResult.success ? (booksResult.data as IBook[]) ?? [] : []);
@@ -33,7 +33,7 @@ export default async function ProgressPage() {
         books={books}
         sessions={sessions}
         firstName={user?.firstName ?? null}
-        latestStudyProgress={progressResult?.data || null}
+        activeStudy={activeStudyRes.success ? activeStudyRes.data : null}
       />
     </main>
   );

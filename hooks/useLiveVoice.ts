@@ -68,6 +68,29 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+function createAudioContext(desiredSampleRate: number): AudioContext {
+  const AudioCtx =
+    window.AudioContext ||
+    (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext!;
+  try {
+    return new AudioCtx({ sampleRate: desiredSampleRate });
+  } catch {
+    return new AudioCtx();
+  }
+}
+
+function getConstrainedNetworkLimitBytes(): number {
+  if (typeof navigator === "undefined") return 65_536;
+  const nav = navigator as Navigator & {
+    connection?: { effectiveType?: string; saveData?: boolean };
+  };
+  const eff = nav.connection?.effectiveType;
+  if (nav.connection?.saveData || eff === "slow-2g" || eff === "2g" || eff === "3g") {
+    return 24_576;
+  }
+  return 65_536;
+}
+
 export function useLiveVoice({
   bookTitle,
   pageNumber,
@@ -313,6 +336,7 @@ export function useLiveVoice({
       const tokenRes = await fetch("/api/voice/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(12_000),
         body: JSON.stringify({
           bookTitle,
           pageNumber,
@@ -378,6 +402,11 @@ export function useLiveVoice({
       return;
     }
 
+    // Drop outgoing frames under WebSocket backpressure so weak mobile links don't build multi-second lag
+    if (wsRef.current.bufferedAmount > getConstrainedNetworkLimitBytes()) {
+      return;
+    }
+
     const base64Chunk = arrayBufferToBase64(pcmBuffer);
     wsRef.current.send(
       JSON.stringify({
@@ -392,11 +421,8 @@ export function useLiveVoice({
   }, []);
 
   const ensureOutputPipeline = useCallback(async () => {
-    const AudioCtx =
-      window.AudioContext ||
-      (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext!;
     if (!outputAudioCtxRef.current || outputAudioCtxRef.current.state === "closed") {
-      const outputCtx = new AudioCtx({ sampleRate: 24000 });
+      const outputCtx = createAudioContext(24000);
       outputAudioCtxRef.current = outputCtx;
       if (outputCtx.state === "suspended") {
         await outputCtx.resume();
@@ -473,10 +499,6 @@ export function useLiveVoice({
         cleanupInputAudio();
 
         try {
-          const AudioCtx =
-            window.AudioContext ||
-            (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext!;
-
           // Parallelize token fetch, mic permission, and audio worklet initialization
           const [tokenInfo, stream] = await Promise.all([
             fetchToken(isReconnect),
@@ -496,7 +518,7 @@ export function useLiveVoice({
           mediaStreamRef.current = stream;
           lastReportedPageRef.current = pageNumber;
 
-          const inputCtx = new AudioCtx({ sampleRate: 16000 });
+          const inputCtx = createAudioContext(16000);
           inputAudioCtxRef.current = inputCtx;
           if (inputCtx.state === "suspended") await inputCtx.resume();
           await inputCtx.audioWorklet.addModule("/worklets/pcm-recorder.js");
@@ -533,6 +555,17 @@ export function useLiveVoice({
 
           const connected = await new Promise<boolean>((resolve, reject) => {
             let settled = false;
+            const handshakeTimer = window.setTimeout(() => {
+              if (!settled) {
+                settled = true;
+                try {
+                  ws.close(4000, "Handshake timeout");
+                } catch {}
+                reject(new Error("Voice connection timed out. Check your internet connection and tap to retry."));
+              }
+            }, 12_000);
+
+            const clearHandshakeTimer = () => window.clearTimeout(handshakeTimer);
 
             ws.onopen = () => {
               const automaticActivityDetection = tokenInfo.noisyPlace
@@ -625,6 +658,7 @@ export function useLiveVoice({
                 }
 
                 if (data.setupComplete) {
+                  clearHandshakeTimer();
                   isSetupCompleteRef.current = true;
                   reconnectAttemptsRef.current = 0;
                   if (!isReconnect && metricsRef.current.connectStartedAt > 0) {
@@ -751,6 +785,7 @@ export function useLiveVoice({
             };
 
             ws.onerror = (err) => {
+              clearHandshakeTimer();
               console.error("[useLiveVoice] WebSocket error:", err);
               if (!settled) {
                 settled = true;
@@ -759,20 +794,24 @@ export function useLiveVoice({
             };
 
             ws.onclose = (closeEvent) => {
+              clearHandshakeTimer();
               cleanupInputAudio();
               const isNormalClose =
                 manualDisconnectRef.current ||
                 closeEvent.code === 1000 ||
                 closeEvent.code === 1005;
 
+              const retryDelays = [500, 1500, 3000];
               if (
                 !isNormalClose &&
-                resumptionHandleRef.current &&
-                reconnectAttemptsRef.current < 2
+                closeEvent.code !== 1008 &&
+                reconnectAttemptsRef.current < retryDelays.length
               ) {
+                const attemptIdx = reconnectAttemptsRef.current;
                 reconnectAttemptsRef.current += 1;
                 metricsRef.current.reconnectCount += 1;
                 syncMetrics();
+                updateStatus("reconnecting");
                 if (!settled) {
                   settled = true;
                   resolve(false);
@@ -781,7 +820,7 @@ export function useLiveVoice({
                   if (!manualDisconnectRef.current) {
                     connectInternal(true);
                   }
-                }, 400);
+                }, retryDelays[attemptIdx]);
                 return;
               }
 
@@ -953,6 +992,36 @@ export function useLiveVoice({
     setCurrentCaption("");
     setErrorMessage(null);
   }, [disconnect]);
+
+  // Mobile backgrounding & network recovery listeners
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        if (inputAudioCtxRef.current?.state === "suspended") {
+          inputAudioCtxRef.current.resume().catch(() => {});
+        }
+        if (outputAudioCtxRef.current?.state === "suspended") {
+          outputAudioCtxRef.current.resume().catch(() => {});
+        }
+      }
+    };
+    const handleOnline = () => {
+      if (
+        !manualDisconnectRef.current &&
+        statusRef.current === "error" &&
+        resumptionHandleRef.current
+      ) {
+        reconnectAttemptsRef.current = 0;
+        connectInternal(true);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("online", handleOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [connectInternal]);
 
   useEffect(() => {
     return () => {

@@ -43,3 +43,4 @@ next-env.d.ts
 packages/showcase-video/
 scripts/
 video/
+.impeccable

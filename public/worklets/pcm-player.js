@@ -10,7 +10,9 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
     this.queue = [];
     this.currentOffset = 0;
     this.bufferedSamples = 0;
-    this.prebufferSamples = 2400; // 100ms at 24kHz
+    this.basePrebufferSamples = 2400; // 100ms at 24kHz
+    this.maxPrebufferSamples = 7200; // 300ms cap for jittery mobile links
+    this.prebufferSamples = this.basePrebufferSamples;
     this.isBuffering = true;
     this.isPlaying = false;
     this.isDraining = false;
@@ -116,10 +118,14 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
         this.port.postMessage({ type: "playback_state", playing: true, rms: 0, underruns: this.underrunCount });
       }
 
-      // If queue ran dry mid-turn (not draining), count underrun and re-buffer cleanly
+      // If queue ran dry mid-turn (not draining), count underrun and adaptively grow jitter buffer
       if (written < bufferSize && this.queue.length === 0) {
         if (this.isPlaying && !this.isDraining) {
           this.underrunCount++;
+          this.prebufferSamples = Math.min(
+            this.maxPrebufferSamples,
+            this.prebufferSamples + 1200
+          );
           this.isBuffering = true;
         } else if (this.isPlaying && this.isDraining) {
           this.isPlaying = false;
