@@ -37,14 +37,14 @@ const LibraryPage = async ({ searchParams }: LibraryPageProps) => {
   return (
     <main className="mx-auto w-full max-w-[1840px] 2xl:max-w-[2160px] min-h-[calc(100vh-120px)] px-3.5 pt-[94px] pb-16 sm:px-6 md:px-8 lg:px-10 xl:px-12 sm:pt-[102px] acid-bg transition-all">
       <div className="rounded-[24px] sm:rounded-[32px] bg-[color:var(--ink)] p-2.5 sm:p-4 shadow-frame">
-        <header className="flex flex-col gap-4 rounded-[22px] bg-[color:var(--cream)] p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8 shadow-chip">
-          <div className="flex items-center gap-4">
-            <AscleonLogo size={46} className="shadow-xs transition-transform duration-200 hover:scale-105" />
-            <h1 className="display text-[42px] text-[color:var(--ink)] sm:text-[54px]">
+        <header className="flex flex-col gap-4 rounded-[22px] bg-[color:var(--cream)] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-8 shadow-chip">
+          <div className="flex flex-wrap items-center gap-2.5 sm:gap-4 min-w-0">
+            <AscleonLogo size={42} className="shrink-0 shadow-xs transition-transform duration-200 hover:scale-105 sm:size-[46px]" />
+            <h1 className="display text-[32px] leading-none text-[color:var(--ink)] sm:text-[54px]">
               Library
             </h1>
-            <span className="meta-label flex items-center gap-2 rounded-full border-2 border-[color:var(--ink)] px-3.5 py-1.5 text-[color:var(--ink)]">
-              <LibraryIcon className="size-4" />
+            <span className="meta-label inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border-2 border-[color:var(--ink)] px-2.5 py-1 text-[11px] text-[color:var(--ink)] sm:gap-2 sm:px-3.5 sm:py-1.5 sm:text-xs">
+              <LibraryIcon className="size-3.5 sm:size-4 shrink-0" />
               {books.length} {books.length === 1 ? 'book' : 'books'}
             </span>
           </div>
