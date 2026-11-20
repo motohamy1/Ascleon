@@ -17,32 +17,32 @@ const features = [
     title: 'Upload anything',
     desc: 'Drop a PDF. Ascleon splits it into chapters and preps the conversation.',
     card: 'bg-[color:var(--panel)] text-[color:var(--ink)]',
-    dim: 'text-[color:var(--ink)]/50',
-    body: 'text-[color:var(--ink)]/70',
+    dim: 'text-[color:var(--ink)]/75',
+    body: 'text-[color:var(--ink)]/80',
   },
   {
     n: '02',
     title: 'Talk it out',
     desc: 'Voice sessions that question, argue and re-explain until it clicks.',
     card: 'bg-[#7fd8c9] text-[color:var(--ink)]',
-    dim: 'text-[color:var(--ink)]/60',
-    body: 'text-[color:var(--ink)]/80',
+    dim: 'text-[color:var(--ink)]/75',
+    body: 'text-[color:var(--ink)]/85',
   },
   {
     n: '03',
     title: 'Get past the hard part',
     desc: 'The AI co-reader moves at your pace. No chapter gets left behind.',
     card: 'bg-[color:var(--orange)] text-[color:var(--ink)]',
-    dim: 'text-[color:var(--ink)]/50',
-    body: 'text-[color:var(--ink)]/75',
+    dim: 'text-[color:var(--ink)]/75',
+    body: 'text-[color:var(--ink)]/85',
   },
   {
     n: '04',
     title: 'Keep what sticks',
     desc: 'Return to anything you marked, in Revision, days or weeks later.',
     card: 'bg-[color:var(--ink)] text-[color:var(--cream)]',
-    dim: 'text-[color:var(--cream)]/45',
-    body: 'text-[color:var(--cream)]/75',
+    dim: 'text-[color:var(--cream)]/75',
+    body: 'text-[color:var(--cream)]/80',
   },
 ];
 
@@ -147,7 +147,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
             <div className="barcode h-8 w-24 shrink-0 text-[color:var(--ink)]" />
           </div>
 
-          <div className="mt-5 sm:mt-8 max-w-2xl">
+          <div className="mt-5 sm:mt-8 max-w-2xl pb-20 sm:pb-8 lg:pb-0 relative z-20">
             <Show when="signed-in">
               <p className="mb-2.5 text-[15px] sm:text-base font-bold tracking-tight text-[color:var(--ink)]/85">
                 Welcome back,{' '}
@@ -171,7 +171,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
             <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-4">
               <Show when="signed-out">
                 <SignInButton mode="modal">
-                  <button className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 active:translate-y-0">
+                  <button className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-colors hover:bg-[#ff621f]">
                     Start reading
                     <ArrowUpRight className="size-4.5" />
                   </button>
@@ -180,9 +180,9 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
               <Show when="signed-in">
                 <Link
                   href={studyHref}
-                  className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-transform hover:-translate-y-0.5 active:translate-y-0"
+                  className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-colors hover:bg-[#ff621f]"
                 >
-                  Start reading
+                  {currentActiveStudy ? 'Continue reading' : 'Start reading'}
                   <ArrowUpRight className="size-4.5" />
                 </Link>
               </Show>
@@ -193,11 +193,20 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                 Browse the library
                 <ArrowUpRight className="size-4.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
               </Link>
+              <Show when="signed-in">
+                <Link
+                  href="/progress"
+                  className="group flex items-center gap-1.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)]/80 hover:text-[color:var(--ink)] hover:underline underline-offset-4"
+                >
+                  View progress
+                  <ArrowUpRight className="size-4.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                </Link>
+              </Show>
             </div>
           </div>
 
           {/* Chrome cluster — decorative, sits on the card surface */}
-          <div className="pointer-events-none absolute bottom-0 right-2 sm:-bottom-4 sm:right-0 flex items-end gap-2 sm:gap-3 z-10">
+          <div className="pointer-events-none absolute -bottom-2 right-2 sm:-bottom-4 sm:right-0 flex items-end gap-2 sm:gap-3 z-10 scale-75 origin-bottom-right sm:scale-100">
             <div className="chrome-sphere mb-4 sm:mb-6 w-10 h-10 sm:w-12 sm:h-12 shrink-0" />
             <div className="chrome-sphere-violet mb-2 sm:mb-3 w-14 h-14 sm:w-[72px] sm:h-[72px] shrink-0" />
             <div className="chrome-sphere w-24 h-24 sm:w-32 sm:h-32 shrink-0" />
@@ -217,7 +226,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                   <br />
                   one conversation.
                 </h2>
-                <p className="mt-3 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85">
+                <p className="mt-3 pr-14 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85">
                   Live voice sessions with your book, up to 60 minutes.
                 </p>
                 <ArrowUpRight className="absolute right-6 bottom-5 size-12 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
@@ -229,9 +238,14 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
               <div className="group relative flex min-h-[250px] sm:min-h-[280px] lg:min-h-[310px] w-full cursor-pointer flex-col justify-between overflow-hidden rounded-[24px] bg-[color:var(--orange)] p-6 sm:p-7 shadow-chip transition-transform duration-200 hover:-translate-y-1">
                 {currentActiveStudy ? (
                   <>
-                    <p className="meta-label text-[color:var(--ink)]/80">
-                      Active study source
-                    </p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="meta-label text-[color:var(--ink)]/80">
+                        Continue reading
+                      </p>
+                      <span className="rounded-full border border-[color:var(--ink)]/30 bg-[color:var(--cream)]/80 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-[color:var(--ink)]">
+                        Target: 15 min
+                      </span>
+                    </div>
                     <div className="mt-4 flex items-center gap-3.5 sm:gap-4">
                       <div className="relative aspect-[2/3] w-12 sm:w-14 shrink-0 overflow-hidden rounded-lg border-2 border-[color:var(--ink)]/25 bg-[color:var(--cream)]/40 shadow-sm">
                         {currentActiveStudy.coverURL ? (
@@ -260,11 +274,21 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                         {currentActiveStudy.title}
                       </h2>
                     </div>
-                    <p className="mt-3 pr-14 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85 line-clamp-2">
-                      {currentActiveStudy.totalPages > 0
-                        ? `${currentActiveStudy.author ? `${currentActiveStudy.author} · ` : ''}Page ${currentActiveStudy.lastStudiedPage} of ${currentActiveStudy.totalPages} — enter study space.`
-                        : `${currentActiveStudy.author ? `${currentActiveStudy.author} · ` : ''}Click to enter your study space.`}
-                    </p>
+                    <div className="mt-3 pr-14 flex flex-col gap-2">
+                      <p className="text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85 line-clamp-2">
+                        {currentActiveStudy.totalPages > 0
+                          ? `${currentActiveStudy.author ? `${currentActiveStudy.author} · ` : ''}Page ${currentActiveStudy.lastStudiedPage} of ${Math.max(currentActiveStudy.totalPages, currentActiveStudy.lastStudiedPage)} (${Math.min(100, Math.max(0, currentActiveStudy.progressPercent))}%)`
+                          : `${currentActiveStudy.author ? `${currentActiveStudy.author} · ` : ''}Click to enter your study space.`}
+                      </p>
+                      {currentActiveStudy.totalPages > 0 && (
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--ink)]/20">
+                          <div
+                            className="h-full bg-[color:var(--ink)]"
+                            style={{ width: `${Math.min(100, Math.max(0, currentActiveStudy.progressPercent))}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
                   </>
                 ) : (
                   <>
@@ -276,7 +300,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                       <br />
                       one conversation.
                     </h2>
-                    <p className="mt-3 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85">
+                    <p className="mt-3 pr-14 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85">
                       Live voice sessions with your book, up to 60 minutes.
                     </p>
                   </>
@@ -289,7 +313,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
           <div className="flex min-h-[160px] sm:min-h-[185px] flex-col justify-between rounded-[24px] bg-[color:var(--panel)] p-5 sm:p-6 shadow-chip">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="meta-label text-[color:var(--ink)]/60">
+                <p className="meta-label text-[color:var(--ink)]/75">
                   Format
                 </p>
                 <p className="display mt-1.5 text-[26px] text-[color:var(--ink)]">
@@ -299,7 +323,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
               <div className="barcode h-9 w-22 shrink-0 text-[color:var(--ink)]" />
             </div>
             <div className="swatch-ramp mt-4 h-9 rounded-full border-2 border-[color:var(--ink)]" />
-            <div className="meta-label mt-2 flex justify-between text-[color:var(--ink)]/60 text-xs">
+            <div className="meta-label mt-2 flex justify-between text-[color:var(--ink)]/75 text-xs">
               <span>Magenta sample</span>
               <span>Read · Re-read</span>
             </div>

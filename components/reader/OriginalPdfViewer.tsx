@@ -73,6 +73,7 @@ interface PdfPageItemProps {
   fitMode: "normal" | "fit-width" | "fit-page";
   scrollOrientation?: "vertical" | "horizontal";
   defaultPageSize: { width: number; height: number };
+  isActivePage?: boolean;
   isSnipActive: boolean;
   onSnipMouseDown: (e: React.MouseEvent, pageNum: number) => void;
   onSnipMouseMove: (e: React.MouseEvent, pageNum: number) => void;
@@ -89,6 +90,7 @@ const PdfPageItem = React.memo(function PdfPageItem({
   fitMode,
   scrollOrientation = "vertical",
   defaultPageSize,
+  isActivePage = true,
   isSnipActive,
   onSnipMouseDown,
   onSnipMouseMove,
@@ -282,10 +284,15 @@ const PdfPageItem = React.memo(function PdfPageItem({
       id={`pdf-page-container-${pageNum}`}
       data-page-number={pageNum}
       className={cn(
-        "pdf-page-wrapper relative overflow-visible rounded-md bg-white shadow-2xl select-text",
+        "pdf-page-wrapper relative overflow-visible rounded-xl bg-white shadow-[var(--study-shadow-lg)] select-text transition-[opacity,transform] duration-200",
         scrollOrientation === "horizontal"
-          ? "mx-2.5 my-auto shrink-0 snap-center self-center overflow-visible"
-          : "mx-auto my-2 sm:my-3 max-w-full",
+          ? cn(
+              "mx-2.5 my-auto shrink-0 snap-center self-center overflow-visible",
+              isActivePage
+                ? "opacity-100 scale-100"
+                : "opacity-45 scale-[0.95] hover:opacity-80"
+            )
+          : "mx-auto my-2.5 sm:my-4 max-w-full",
         fitMode === "fit-width" && "max-w-full overflow-hidden",
         isSnipActive && "cursor-crosshair"
       )}
@@ -1088,7 +1095,7 @@ export default function OriginalPdfViewer({
             </div>
 
             {/* Bottom floating action bar */}
-            <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-[#16151a] p-1 rounded-full border border-amber-400/60 shadow-2xl backdrop-blur-md z-50">
+            <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-[var(--study-surface-solid)] p-1 rounded-full border border-[var(--study-border-strong)] shadow-[var(--study-shadow-lg)] backdrop-blur-md z-50">
               <button
                 type="button"
                 onClick={() => handleSnipAction("morph")}
@@ -1101,7 +1108,7 @@ export default function OriginalPdfViewer({
               <button
                 type="button"
                 onClick={() => handleSnipAction("chat")}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-white/10 text-[color:var(--cream)] hover:bg-white/20 cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-[var(--study-surface-muted)] text-[var(--study-text)] hover:bg-[var(--study-glass-hover)] cursor-pointer"
                 title="Ask AI mentor about this specific diagram"
               >
                 <MessageSquare className="size-3" />
@@ -1110,7 +1117,7 @@ export default function OriginalPdfViewer({
               <button
                 type="button"
                 onClick={() => handleSnipAction("qbank")}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-white/10 text-[color:var(--cream)] hover:bg-white/20 cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-[var(--study-surface-muted)] text-[var(--study-text)] hover:bg-[var(--study-glass-hover)] cursor-pointer"
                 title="Generate clinical practice vignette from this diagram"
               >
                 <HelpCircle className="size-3" />
@@ -1119,7 +1126,7 @@ export default function OriginalPdfViewer({
               <button
                 type="button"
                 onClick={clearConfirmedSnip}
-                className="p-1 rounded-full text-white/60 hover:text-rose-400 hover:bg-white/10 cursor-pointer ml-1"
+                className="p-1 rounded-full text-[var(--study-text-muted)] hover:text-rose-500 hover:bg-[var(--study-glass-hover)] cursor-pointer ml-1"
                 title="Clear selected area"
               >
                 <Trash2 className="size-3" />
@@ -1212,21 +1219,23 @@ export default function OriginalPdfViewer({
 
   if (loading) {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-3 p-8 text-center bg-[#1c1b21] text-[color:var(--cream)]">
-        <div className="flex size-14 items-center justify-center rounded-2xl border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip animate-pulse">
-          <FileText className="size-7" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <h4 className="display text-base text-[color:var(--cream)]">
-            Loading Study Source PDF
-          </h4>
-          <p className="text-xs text-[color:var(--cream)]/65">
-            Synchronizing document engine and preparing interactive canvas...
-          </p>
-        </div>
-        <div className="flex items-center gap-2 pt-2 text-xs font-semibold text-[color:var(--orange)]">
-          <Loader2 className="size-4 animate-spin" />
-          <span>Synchronizing pages</span>
+      <div className="flex h-full w-full flex-col items-center justify-center p-6 bg-transparent">
+        <div className="study-floating-panel flex max-w-sm flex-col items-center justify-center gap-3 rounded-[22px] p-8 text-center">
+          <div className="flex size-14 items-center justify-center rounded-2xl border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip animate-pulse">
+            <FileText className="size-7" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <h4 className="display text-base text-[var(--study-text)]">
+              Loading Study Source PDF
+            </h4>
+            <p className="text-xs text-[var(--study-text-muted)]">
+              Synchronizing document engine and preparing interactive canvas...
+            </p>
+          </div>
+          <div className="flex items-center gap-2 pt-2 text-xs font-semibold text-[color:var(--orange)]">
+            <Loader2 className="size-4 animate-spin" />
+            <span>Synchronizing pages</span>
+          </div>
         </div>
       </div>
     );
@@ -1234,231 +1243,235 @@ export default function OriginalPdfViewer({
 
   if (error) {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-3 p-6 text-center bg-[#1c1b21]">
-        <div className="flex size-12 items-center justify-center rounded-full bg-red-500/10 text-red-500 border border-red-500/30">
-          <AlertCircle className="size-6" />
+      <div className="flex h-full w-full flex-col items-center justify-center p-6 bg-transparent">
+        <div className="study-floating-panel flex max-w-md flex-col items-center justify-center gap-3 rounded-[22px] p-6 text-center">
+          <div className="flex size-12 items-center justify-center rounded-full bg-red-500/10 text-red-500 border border-red-500/30">
+            <AlertCircle className="size-6" />
+          </div>
+          <h4 className="display text-base text-[var(--study-text)]">
+            Document Preview Unavailable
+          </h4>
+          <p className="max-w-md text-xs leading-relaxed text-[var(--study-text-muted)]">
+            {error}
+          </p>
         </div>
-        <h4 className="display text-base text-[color:var(--cream)]">
-          Document Preview Unavailable
-        </h4>
-        <p className="max-w-md text-xs leading-relaxed text-[color:var(--cream)]/70">
-          {error}
-        </p>
       </div>
     );
   }
 
   return (
-    <div className={cn("relative flex h-full flex-col overflow-hidden", className)}>
+    <div className={cn("relative flex h-full flex-col overflow-hidden bg-transparent", className)}>
       {/* ================================================================= */}
-      {/* COMPACT TOOLBAR: PAGE SYNC & SNIP TOOL                             */}
+      {/* FLOATING TOOLBAR PILL: PAGE SYNC, FIT, ZOOM & SNIP TOOL           */}
       {/* ================================================================= */}
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-black/20 bg-[#16151a] px-2 sm:px-3 text-xs text-[color:var(--cream)] z-30 gap-1 sm:gap-2 overflow-x-auto no-scrollbar flex-nowrap">
-        {/* Page Jumper */}
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => handleJumpToPage(activeVisiblePage - 1)}
-            disabled={activeVisiblePage <= 1}
-            className="flex size-6 cursor-pointer items-center justify-center rounded-md border border-white/10 bg-white/5 text-[color:var(--cream)] transition-colors hover:bg-white/15 disabled:opacity-30"
-            title="Previous Page"
-          >
-            <ChevronLeft className="size-3.5" />
-          </button>
-
-          {isEditingPage ? (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const p = parseInt(pageInputValue, 10);
-                if (!isNaN(p) && p >= 1 && p <= totalPages) {
-                  handleJumpToPage(p);
-                }
-                setIsEditingPage(false);
-              }}
-              className="flex items-center gap-1 font-mono text-[11px]"
+      <div className="shrink-0 z-30 flex justify-center px-2 sm:px-3 pt-2 pb-1.5 pointer-events-none">
+        <div className="pointer-events-auto flex h-10 max-w-full items-center justify-between rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] backdrop-blur-xl px-2.5 sm:px-3.5 text-xs text-[var(--study-text)] shadow-[var(--study-shadow)] gap-1.5 sm:gap-2.5 overflow-x-auto no-scrollbar flex-nowrap">
+          {/* Page Jumper */}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => handleJumpToPage(activeVisiblePage - 1)}
+              disabled={activeVisiblePage <= 1}
+              className="flex size-6 cursor-pointer items-center justify-center rounded-full border border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text)] transition-colors hover:bg-[var(--study-glass-hover)] disabled:opacity-30"
+              title="Previous Page"
             >
-              <input
-                ref={pageInputRef}
-                autoFocus
-                type="number"
-                min={1}
-                max={totalPages}
-                value={pageInputValue}
-                onChange={(e) => setPageInputValue(e.target.value)}
-                onBlur={() => {
+              <ChevronLeft className="size-3.5" />
+            </button>
+
+            {isEditingPage ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
                   const p = parseInt(pageInputValue, 10);
                   if (!isNaN(p) && p >= 1 && p <= totalPages) {
                     handleJumpToPage(p);
                   }
                   setIsEditingPage(false);
                 }}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
+                className="flex items-center gap-1 font-mono text-[11px]"
+              >
+                <input
+                  ref={pageInputRef}
+                  autoFocus
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  value={pageInputValue}
+                  onChange={(e) => setPageInputValue(e.target.value)}
+                  onBlur={() => {
+                    const p = parseInt(pageInputValue, 10);
+                    if (!isNaN(p) && p >= 1 && p <= totalPages) {
+                      handleJumpToPage(p);
+                    }
                     setIsEditingPage(false);
-                  }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setIsEditingPage(false);
+                    }
+                  }}
+                  className="w-12 rounded-md border border-[color:var(--orange)] bg-[var(--study-surface-solid)] px-1 py-0.5 text-center font-bold text-[color:var(--orange)] outline-none shadow-inner"
+                />
+                <span className="opacity-40">/</span>
+                <span className="opacity-70">{totalPages}</span>
+              </form>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setPageInputValue(String(activeVisiblePage));
+                  setIsEditingPage(true);
                 }}
-                className="w-12 rounded border border-[color:var(--orange)] bg-[color:var(--ink)] px-1 py-0.5 text-center font-bold text-[color:var(--orange)] outline-none shadow-inner"
-              />
-              <span className="opacity-40">/</span>
-              <span className="opacity-70">{totalPages}</span>
-            </form>
-          ) : (
+                className="group flex cursor-pointer items-center gap-1 rounded-full px-1.5 py-0.5 font-mono text-[11px] transition-colors hover:bg-[var(--study-glass-hover)] hover:ring-1 hover:ring-[color:var(--orange)]/50"
+                title="Click to jump to a page number"
+              >
+                <span className="font-bold text-[color:var(--orange)] underline decoration-dotted underline-offset-2 group-hover:decoration-solid">
+                  {activeVisiblePage}
+                </span>
+                <span className="opacity-40">/</span>
+                <span className="opacity-70">{totalPages}</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => handleJumpToPage(activeVisiblePage + 1)}
+              disabled={activeVisiblePage >= totalPages}
+              className="flex size-6 cursor-pointer items-center justify-center rounded-full border border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text)] transition-colors hover:bg-[var(--study-glass-hover)] disabled:opacity-30"
+              title="Next Page"
+            >
+              <ChevronRight className="size-3.5" />
+            </button>
+          </div>
+
+          {/* View Mode & Fit Options (Mobile & Desktop Responsive) */}
+          <div className="flex items-center gap-1 shrink-0">
+            {/* Fit Width / Fit Page Controls */}
+            <div className="flex items-center rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-0.5 text-[10px]">
+              <button
+                type="button"
+                onClick={handleTriggerFitWidth}
+                className={cn(
+                  "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 font-bold transition-all whitespace-nowrap",
+                  activeFitMode === "fit-width"
+                    ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs"
+                    : "text-[var(--study-text-muted)] hover:text-[var(--study-text)]"
+                )}
+                title="Fit to Screen Width (No Horizontal Overflow)"
+              >
+                <span className="sm:hidden">Width</span>
+                <span className="hidden sm:inline">Fit Width</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleTriggerFitPage}
+                className={cn(
+                  "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 font-bold transition-all whitespace-nowrap",
+                  activeFitMode === "fit-page"
+                    ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs"
+                    : "text-[var(--study-text-muted)] hover:text-[var(--study-text)]"
+                )}
+                title="Fit Full Page to Screen"
+              >
+                <span className="sm:hidden">Page</span>
+                <span className="hidden sm:inline">Fit Page</span>
+              </button>
+            </div>
+
+            {/* Zoom In/Out Pill */}
+            <div className="flex items-center rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-0.5 text-[10px]">
+              <button
+                type="button"
+                onClick={handleTriggerZoomOut}
+                className="flex size-5 cursor-pointer items-center justify-center rounded-full text-[var(--study-text-muted)] hover:bg-[var(--study-glass-hover)] hover:text-[var(--study-text)]"
+                title="Zoom Out"
+              >
+                <ZoomOut className="size-2.5 sm:size-3" />
+              </button>
+              <button
+                type="button"
+                onClick={handleTriggerZoomReset}
+                className="px-1 text-[9.5px] sm:text-[10px] font-mono font-bold text-[var(--study-text)] hover:text-[color:var(--orange)] cursor-pointer"
+                title="Click to reset zoom"
+              >
+                {activeFitMode === "normal" ? `${activeZoomLevel}%` : "Auto"}
+              </button>
+              <button
+                type="button"
+                onClick={handleTriggerZoomIn}
+                className="flex size-5 cursor-pointer items-center justify-center rounded-full text-[var(--study-text-muted)] hover:bg-[var(--study-glass-hover)] hover:text-[var(--study-text)]"
+                title="Zoom In"
+              >
+                <ZoomIn className="size-2.5 sm:size-3" />
+              </button>
+            </div>
+          </div>
+
+          {/* Tools: Scroll Orientation & Snip Diagram */}
+          <div className="flex items-center gap-1.5">
+            {/* Scroll Orientation Toggle: Vertical vs Horizontal */}
+            <button
+              type="button"
+              onClick={handleToggleScrollOrientation}
+              className={cn(
+                "flex cursor-pointer items-center gap-1 rounded-full border px-2 py-1 text-[10.5px] font-bold transition-all shadow-xs",
+                scrollOrientation === "horizontal"
+                  ? "border-[var(--study-teal-border)] bg-[var(--study-teal-bg)] text-[var(--study-teal-text)]"
+                  : "border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text-soft)] hover:border-[var(--study-border-strong)] hover:bg-[var(--study-glass-hover)]"
+              )}
+              title={`Switch to ${scrollOrientation === "vertical" ? "Horizontal" : "Vertical"
+                } page scroll`}
+            >
+              {scrollOrientation === "horizontal" ? (
+                <>
+                  <ArrowLeftRight className="size-3 text-[var(--study-teal-text)]" />
+                  <span className="hidden sm:inline">Horizontal</span>
+                </>
+              ) : (
+                <>
+                  <ArrowDownUp className="size-3 text-[var(--study-text-muted)]" />
+                  <span className="hidden sm:inline">Vertical</span>
+                </>
+              )}
+            </button>
+
+            {confirmedSnip && (
+              <button
+                type="button"
+                onClick={clearConfirmedSnip}
+                className="inline-flex items-center gap-1 rounded-full border border-[var(--study-amber-border)] bg-[var(--study-amber-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--study-amber-text)] hover:brightness-105 cursor-pointer"
+              >
+                <Check className="size-2.5" />
+                <span>Diagram Selected</span>
+                <X className="size-2.5 ml-0.5 opacity-70" />
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => {
-                setPageInputValue(String(activeVisiblePage));
-                setIsEditingPage(true);
+                setIsSnipActive((prev) => !prev);
+                setSnipStart(null);
+                setSnipCurrent(null);
               }}
-              className="group flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] transition-colors hover:bg-white/10 hover:ring-1 hover:ring-[color:var(--orange)]/50"
-              title="Click to jump to a page number"
-            >
-              <span className="font-bold text-[color:var(--orange)] underline decoration-dotted underline-offset-2 group-hover:decoration-solid">
-                {activeVisiblePage}
-              </span>
-              <span className="opacity-40">/</span>
-              <span className="opacity-70">{totalPages}</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={() => handleJumpToPage(activeVisiblePage + 1)}
-            disabled={activeVisiblePage >= totalPages}
-            className="flex size-6 cursor-pointer items-center justify-center rounded-md border border-white/10 bg-white/5 text-[color:var(--cream)] transition-colors hover:bg-white/15 disabled:opacity-30"
-            title="Next Page"
-          >
-            <ChevronRight className="size-3.5" />
-          </button>
-        </div>
-
-        {/* View Mode & Fit Options (Mobile & Desktop Responsive) */}
-        <div className="flex items-center gap-1 shrink-0">
-          {/* Fit Width / Fit Page Controls */}
-          <div className="flex items-center rounded-full border border-white/20 bg-white/5 p-0.5 text-[10px]">
-            <button
-              type="button"
-              onClick={handleTriggerFitWidth}
               className={cn(
-                "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 font-bold transition-all whitespace-nowrap",
-                activeFitMode === "fit-width"
-                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs"
-                  : "text-[color:var(--cream)]/70 hover:text-white"
+                "flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-[10.5px] font-bold transition-all shadow-xs",
+                isSnipActive
+                  ? "border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] animate-pulse"
+                  : "border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text-soft)] hover:border-[color:var(--orange)] hover:bg-[var(--study-glass-hover)]"
               )}
-              title="Fit to Screen Width (No Horizontal Overflow)"
+              title="Drag a box to capture an anatomical diagram, ECG, or chart for AI analysis"
             >
-              <span className="sm:hidden">Width</span>
-              <span className="hidden sm:inline">Fit Width</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleTriggerFitPage}
-              className={cn(
-                "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 font-bold transition-all whitespace-nowrap",
-                activeFitMode === "fit-page"
-                  ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs"
-                  : "text-[color:var(--cream)]/70 hover:text-white"
-              )}
-              title="Fit Full Page to Screen"
-            >
-              <span className="sm:hidden">Page</span>
-              <span className="hidden sm:inline">Fit Page</span>
+              <Crop className="size-3" />
+              <span>{isSnipActive ? "Cancel Snip" : "Snip Diagram"}</span>
             </button>
           </div>
-
-          {/* Zoom In/Out Pill */}
-          <div className="flex items-center rounded-full border border-white/20 bg-white/5 p-0.5 text-[10px]">
-            <button
-              type="button"
-              onClick={handleTriggerZoomOut}
-              className="flex size-5 cursor-pointer items-center justify-center rounded-full text-[color:var(--cream)]/80 hover:bg-white/10 hover:text-white"
-              title="Zoom Out"
-            >
-              <ZoomOut className="size-2.5 sm:size-3" />
-            </button>
-            <button
-              type="button"
-              onClick={handleTriggerZoomReset}
-              className="px-1 text-[9.5px] sm:text-[10px] font-mono font-bold text-[color:var(--cream)] hover:text-[color:var(--orange)] cursor-pointer"
-              title="Click to reset zoom"
-            >
-              {activeFitMode === "normal" ? `${activeZoomLevel}%` : "Auto"}
-            </button>
-            <button
-              type="button"
-              onClick={handleTriggerZoomIn}
-              className="flex size-5 cursor-pointer items-center justify-center rounded-full text-[color:var(--cream)]/80 hover:bg-white/10 hover:text-white"
-              title="Zoom In"
-            >
-              <ZoomIn className="size-2.5 sm:size-3" />
-            </button>
-          </div>
-        </div>
-
-        {/* Tools: Scroll Orientation & Snip Diagram */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Scroll Orientation Toggle: Vertical vs Horizontal */}
-          <button
-            type="button"
-            onClick={handleToggleScrollOrientation}
-            className={cn(
-              "flex cursor-pointer items-center gap-1 rounded-full border px-2 py-1 text-[10.5px] font-bold transition-all shadow-sm",
-              scrollOrientation === "horizontal"
-                ? "border-[#43a08f] bg-[#43a08f]/20 text-[#7fd8c9]"
-                : "border-white/15 bg-white/5 text-[color:var(--cream)] hover:border-white/30 hover:bg-white/10"
-            )}
-            title={`Switch to ${scrollOrientation === "vertical" ? "Horizontal" : "Vertical"
-              } page scroll`}
-          >
-            {scrollOrientation === "horizontal" ? (
-              <>
-                <ArrowLeftRight className="size-3 text-[#7fd8c9]" />
-                <span className="hidden sm:inline">Horizontal</span>
-              </>
-            ) : (
-              <>
-                <ArrowDownUp className="size-3 text-[color:var(--cream)]/70" />
-                <span className="hidden sm:inline">Vertical</span>
-              </>
-            )}
-          </button>
-
-          {confirmedSnip && (
-            <button
-              type="button"
-              onClick={clearConfirmedSnip}
-              className="inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300 hover:bg-amber-500/30 cursor-pointer"
-            >
-              <Check className="size-2.5 text-amber-300" />
-              <span>Diagram Selected</span>
-              <X className="size-2.5 ml-0.5 opacity-70" />
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={() => {
-              setIsSnipActive((prev) => !prev);
-              setSnipStart(null);
-              setSnipCurrent(null);
-            }}
-            className={cn(
-              "flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-[10.5px] font-bold transition-all shadow-sm",
-              isSnipActive
-                ? "border-[color:var(--orange)] bg-[color:var(--orange)] text-[color:var(--ink)] animate-pulse"
-                : "border-white/15 bg-white/5 text-[color:var(--cream)] hover:border-[color:var(--orange)] hover:bg-white/10"
-            )}
-            title="Drag a box to capture an anatomical diagram, ECG, or chart for AI analysis"
-          >
-            <Crop className="size-3" />
-            <span>{isSnipActive ? "Cancel Snip" : "Snip Diagram"}</span>
-          </button>
         </div>
       </div>
 
       {/* SNIP ACTIVE BANNER */}
       {isSnipActive && (
-        <div className="flex shrink-0 items-center justify-between border-b border-[color:var(--orange)]/40 bg-[color:var(--orange)]/15 px-3 py-1.5 text-[11px] text-[color:var(--cream)] z-30">
+        <div className="mx-auto mb-1 flex shrink-0 items-center justify-between gap-3 rounded-full border-[1.5px] border-[color:var(--orange)] bg-[var(--study-surface)] backdrop-blur-md px-3.5 py-1 text-[11px] text-[var(--study-text)] shadow-[var(--study-shadow)] z-30">
           <span className="flex items-center gap-1.5 font-medium">
             <Camera className="size-3 text-[color:var(--orange)]" />
             <span>Click and drag a box over any diagram, equation, or figure on the page</span>
@@ -1466,7 +1479,7 @@ export default function OriginalPdfViewer({
           <button
             type="button"
             onClick={() => setIsSnipActive(false)}
-            className="rounded p-0.5 hover:bg-black/20 cursor-pointer"
+            className="rounded-full p-0.5 hover:bg-[var(--study-glass-hover)] cursor-pointer"
           >
             <X className="size-3" />
           </button>
@@ -1474,7 +1487,7 @@ export default function OriginalPdfViewer({
       )}
 
       {/* ================================================================= */}
-      {/* SCROLL CONTAINER FOR PAGES                                        */}
+      {/* SCROLL CONTAINER FOR PAGES (FLOATING DIRECTLY OVER DOTTED CANVAS) */}
       {/* ================================================================= */}
       <div
         ref={containerRef}
@@ -1482,12 +1495,10 @@ export default function OriginalPdfViewer({
         onMouseUp={handleSelectionCheck}
         onTouchEnd={handleSelectionCheck}
         className={cn(
-          "custom-scrollbar relative flex-1 transition-colors select-text",
+          "study-scrollbar relative flex-1 bg-transparent transition-colors select-text",
           scrollOrientation === "horizontal"
-            ? "overflow-x-auto overflow-y-hidden overscroll-x-contain p-1.5 sm:p-4 flex items-center snap-x snap-mandatory"
-            : "p-1 sm:p-4 overflow-y-auto overflow-x-auto overscroll-y-contain w-full max-w-full",
-          theme === "paper" && "bg-[#2b2a31]",
-          theme === "ink" && "bg-[#111014]",
+            ? "overflow-x-auto overflow-y-hidden overscroll-x-contain p-2 sm:p-4 flex items-center snap-x snap-mandatory"
+            : "p-1.5 sm:p-3 overflow-y-auto overflow-x-auto overscroll-y-contain w-full max-w-full",
           isSnipActive && "cursor-crosshair select-none"
         )}
       >
@@ -1495,7 +1506,7 @@ export default function OriginalPdfViewer({
           className={cn(
             "flex items-center",
             scrollOrientation === "horizontal"
-              ? "flex-row flex-nowrap gap-4 h-full min-w-max px-4 py-2"
+              ? "flex-row flex-nowrap gap-6 sm:gap-8 h-full min-w-max px-6 py-2"
               : "flex-col w-full"
           )}
         >
@@ -1508,6 +1519,7 @@ export default function OriginalPdfViewer({
               fitMode={fitMode}
               scrollOrientation={scrollOrientation}
               defaultPageSize={docPageSize}
+              isActivePage={pageNum === activeVisiblePage}
               isSnipActive={isSnipActive}
               onSnipMouseDown={handleSnipMouseDown}
               onSnipMouseMove={handleSnipMouseMove}
@@ -1520,7 +1532,7 @@ export default function OriginalPdfViewer({
         </div>
       </div>
 
-      {/* HORIZONTAL PAGE NAVIGATION ARROWS (Borders of Left Panel / Over Book) */}
+      {/* HORIZONTAL PAGE NAVIGATION ARROWS (FLOATING OVER CANVAS) */}
       {scrollOrientation === "horizontal" && totalPages > 1 && (
         <>
           {/* Previous Page (Left Arrow) */}
@@ -1532,13 +1544,13 @@ export default function OriginalPdfViewer({
             }}
             disabled={activeVisiblePage <= 1}
             className={cn(
-              "group/arrow absolute left-3 top-1/2 -translate-y-1/2 z-30 flex size-11 items-center justify-center rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] text-[color:var(--ink)] shadow-frame transition-all duration-200 cursor-pointer hover:scale-110 hover:bg-[color:var(--orange)] active:scale-95 disabled:pointer-events-none disabled:opacity-0",
-              activeVisiblePage <= 1 ? "opacity-0 pointer-events-none" : "opacity-90 hover:opacity-100"
+              "group/arrow absolute left-3 top-1/2 -translate-y-1/2 z-30 flex size-11 items-center justify-center rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] backdrop-blur-xl text-[var(--study-text)] shadow-[var(--study-shadow-lg)] transition-all duration-200 cursor-pointer hover:scale-110 hover:bg-[color:var(--orange)] hover:text-[#0f0e10] active:scale-95 disabled:pointer-events-none disabled:opacity-0",
+              activeVisiblePage <= 1 ? "opacity-0 pointer-events-none" : "opacity-95 hover:opacity-100"
             )}
             title={`Previous Page (${activeVisiblePage - 1})`}
             aria-label="Previous Page"
           >
-            <ChevronLeft className="size-6 stroke-[3] transition-transform group-hover/arrow:-translate-x-0.5" />
+            <ChevronLeft className="size-6 stroke-[2.75] transition-transform group-hover/arrow:-translate-x-0.5" />
           </button>
 
           {/* Next Page (Right Arrow) */}
@@ -1550,13 +1562,13 @@ export default function OriginalPdfViewer({
             }}
             disabled={activeVisiblePage >= totalPages}
             className={cn(
-              "group/arrow absolute right-3 top-1/2 -translate-y-1/2 z-30 flex size-11 items-center justify-center rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--cream)] text-[color:var(--ink)] shadow-frame transition-all duration-200 cursor-pointer hover:scale-110 hover:bg-[color:var(--orange)] active:scale-95 disabled:pointer-events-none disabled:opacity-0",
-              activeVisiblePage >= totalPages ? "opacity-0 pointer-events-none" : "opacity-90 hover:opacity-100"
+              "group/arrow absolute right-3 top-1/2 -translate-y-1/2 z-30 flex size-11 items-center justify-center rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] backdrop-blur-xl text-[var(--study-text)] shadow-[var(--study-shadow-lg)] transition-all duration-200 cursor-pointer hover:scale-110 hover:bg-[color:var(--orange)] hover:text-[#0f0e10] active:scale-95 disabled:pointer-events-none disabled:opacity-0",
+              activeVisiblePage >= totalPages ? "opacity-0 pointer-events-none" : "opacity-95 hover:opacity-100"
             )}
             title={`Next Page (${activeVisiblePage + 1})`}
             aria-label="Next Page"
           >
-            <ChevronRight className="size-6 stroke-[3] transition-transform group-hover/arrow:translate-x-0.5" />
+            <ChevronRight className="size-6 stroke-[2.75] transition-transform group-hover/arrow:translate-x-0.5" />
           </button>
         </>
       )}

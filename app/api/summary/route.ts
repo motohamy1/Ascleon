@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
+import {
+  clearModelCooldown,
+  GEMINI_MODEL_CHAIN,
+  markModelCooldownFromError,
+  orderModelsByHealth,
+} from "@/lib/ai/model-cooldown";
+
+export const maxDuration = 60;
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
 import {
   calculateDynamicCreditCost,
@@ -107,36 +115,52 @@ Return ONLY the JSON object.
 
 ${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
-        const generatePromise = ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0.2,
-            thinkingConfig: {
-              thinkingBudget: 0,
-            },
-          },
-        });
+        const summaryModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
+        for (let idx = 0; idx < summaryModels.length; idx++) {
+          const candidateModel = summaryModels[idx];
+          const timeoutMs = idx === 0 ? 16_000 : 12_000;
+          const abortCtrl = new AbortController();
+          const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
+          try {
+            const generatePromise = ai.models.generateContent({
+              model: candidateModel,
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              config: {
+                responseMimeType: "application/json",
+                temperature: 0.2,
+                abortSignal: abortCtrl.signal,
+                thinkingConfig: {
+                  thinkingBudget: 0,
+                },
+              },
+            });
 
-        // 30-second timeout guard to prevent premature dropouts
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Gemini Summary timed out after 30s")), 30000)
-        );
+            const timeoutPromise = new Promise<never>((_, reject) =>
+              abortCtrl.signal.addEventListener("abort", () =>
+                reject(new Error(`Summary ${candidateModel} timed out after ${timeoutMs}ms`))
+              )
+            );
 
-        const response: any = await Promise.race([generatePromise, timeoutPromise]);
-
-        const text = response.text?.trim() || "";
-        if (text) {
-          const parsed = JSON.parse(text);
-          return NextResponse.json({
-            success: true,
-            summary: parsed,
-            source: "gemini-3-flash-preview",
-            creditsCharged: dynamicCost.total,
-            creditsRemaining: creditCheck.remaining,
-            creditBreakdown: dynamicCost.summary,
-          });
+            const response: any = await Promise.race([generatePromise, timeoutPromise]);
+            const text = response.text?.trim() || "";
+            if (text) {
+              const parsed = JSON.parse(text);
+              clearModelCooldown(`gemini:${candidateModel}`);
+              return NextResponse.json({
+                success: true,
+                summary: parsed,
+                source: candidateModel,
+                creditsCharged: dynamicCost.total,
+                creditsRemaining: creditCheck.remaining,
+                creditBreakdown: dynamicCost.summary,
+              });
+            }
+          } catch (modelErr) {
+            markModelCooldownFromError(`gemini:${candidateModel}`, modelErr);
+            console.warn(`[Summary] ${candidateModel} failed:`, modelErr);
+          } finally {
+            clearTimeout(timer);
+          }
         }
       } catch (aiErr) {
         console.warn("AI Summary generation warning, using fallback:", aiErr);

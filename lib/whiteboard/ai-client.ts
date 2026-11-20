@@ -274,7 +274,7 @@ export async function callStructuredJson<T>(params: {
 
   const attempts: ProviderAttempt[] = [];
   if (hasGemini && geminiKey) {
-    for (const model of ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]) {
+    for (const model of ["gemini-4-hydrogen", "gemini-3.8-flash", "gemini-3.5-flash-lite"]) {
       attempts.push({
         key: `gc:${model}`,
         run: () =>

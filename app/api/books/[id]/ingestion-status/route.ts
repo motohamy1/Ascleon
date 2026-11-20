@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import mongoose from "mongoose";
 import { connectToDatabase } from "@/database/mongoose";
 import Book from "@/database/models/book.model";
 
@@ -10,6 +11,10 @@ export async function GET(
     const { id } = await params;
     if (!id) {
       return NextResponse.json({ error: "Missing book ID" }, { status: 400 });
+    }
+
+    if (!mongoose.isValidObjectId(id)) {
+      return NextResponse.json({ error: "Book not found" }, { status: 404 });
     }
 
     await connectToDatabase();

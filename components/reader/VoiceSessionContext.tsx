@@ -193,8 +193,8 @@ export function NoisyPlaceQuickToggle() {
       onClick={() => setNoisyPlace(!noisyPlace)}
       className={`flex w-full cursor-pointer items-center justify-between rounded-lg border px-2.5 py-1.5 text-[10.5px] font-bold transition-colors ${
         noisyPlace
-          ? "border-[#ff4c00]/70 bg-[#ff4c00]/20 text-[#f6d7a1]"
-          : "border-white/15 bg-white/5 text-[#f6d7a1]/80 hover:bg-white/10"
+          ? "border-[var(--study-active-border)] bg-[var(--study-active-bg)] text-[var(--study-active-text)]"
+          : "border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text-soft)] hover:bg-[var(--study-glass-hover)]"
       }`}
       title="Enable hold-to-talk when studying in a noisy place"
     >
@@ -214,7 +214,7 @@ export function ActiveVoiceMiniBar({ onReturnToVoice }: { onReturnToVoice: () =>
   if (!isActiveOrConnecting) return null;
 
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-white/10 bg-[#ff4c00]/15 px-3 py-1.5 text-xs text-[#f6d7a1]">
+    <div className="flex items-center justify-between gap-2 border-b border-[var(--study-border)] bg-[#ff4c00]/15 px-4 sm:px-6 py-1.5 text-xs text-[var(--study-text)]">
       <button
         type="button"
         onClick={onReturnToVoice}
@@ -222,7 +222,7 @@ export function ActiveVoiceMiniBar({ onReturnToVoice }: { onReturnToVoice: () =>
       >
         <span
           className={`size-2 shrink-0 rounded-full ${
-            status === "speaking" ? "bg-[#7fd8c9]" : "bg-[#ff4c00] animate-pulse"
+            status === "speaking" ? "bg-[#43a08f]" : "bg-[#ff4c00] animate-pulse"
           }`}
         />
         <span className="truncate font-bold">
@@ -235,8 +235,8 @@ export function ActiveVoiceMiniBar({ onReturnToVoice }: { onReturnToVoice: () =>
           onClick={toggleMute}
           className={`flex size-7 cursor-pointer items-center justify-center rounded-full border ${
             isMuted
-              ? "border-red-400/60 bg-red-500/20 text-red-200"
-              : "border-white/20 bg-white/10 text-[#f6d7a1]"
+              ? "border-[var(--study-red-border)] bg-[var(--study-red-bg)] text-[var(--study-red-text)]"
+              : "border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text)]"
           }`}
           title={isMuted ? "Unmute mic" : "Mute mic"}
         >

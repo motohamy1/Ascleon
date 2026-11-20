@@ -416,27 +416,51 @@ export function WhiteboardVideoStudio({
       }
 
       setIsGeneratingMore(true);
+      let hitBillingLimit = false;
 
-      // Section 0 runs first to lock the single pinned TTS model for the whole lesson
+      // Section 0 runs first to lock the single pinned TTS model for the whole lesson.
+      // Never block opening the Living Board if TTS fails — useLessonAudioEngine provides
+      // a deterministic virtual reading-cadence clock fallback.
       if (pending.includes(0)) {
-        const res0 = await synthesizeLessonSection(
-          currentLesson.id,
-          0,
-          voiceId,
-          signal
-        );
-        currentLesson = res0.lesson;
+        try {
+          const res0 = await synthesizeLessonSection(
+            currentLesson.id,
+            0,
+            voiceId,
+            signal
+          );
+          currentLesson = res0.lesson;
+        } catch (err) {
+          if (err instanceof BillingLimitError) {
+            hitBillingLimit = true;
+            setIsBillingLimitError(true);
+            setErrorMsg(err.message);
+            toast.error(err.message, {
+              action: {
+                label: "Upgrade Plan",
+                onClick: () => window.location.assign("/subscriptions?reason=limit"),
+              },
+            });
+          } else if (!signal.aborted) {
+            console.warn(
+              "[LessonBoard] Section 0 audio failed; opening board with virtual pacing clock:",
+              err
+            );
+            toast.info("Voiceover unavailable right now — playing with adaptive board pacing.");
+          }
+        }
       }
 
-      // Open the board immediately once Section 0 is ready
+      if (signal.aborted) return;
+
+      // Open the Living Board immediately once Section 0 finishes or falls back
       setIsConfiguring(false);
 
       // Process remaining sections sequentially/bounded and handle model re-pinning cleanly
       let guard = 0;
-      let hitBillingLimit = false;
       while (!signal.aborted && !hitBillingLimit && guard < 3) {
         guard++;
-        pending = getPending(currentLesson);
+        pending = getPending(currentLesson).filter((idx) => idx !== 0 || guard > 1);
         if (pending.length === 0) break;
 
         let sawRepin = false;
@@ -510,6 +534,12 @@ export function WhiteboardVideoStudio({
         });
       }
 
+      let timedOut = false;
+      const planTimeoutId = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, 45_000);
+
       try {
         const res = await fetch("/api/whiteboard/lessons", {
           method: "POST",
@@ -526,6 +556,7 @@ export function WhiteboardVideoStudio({
             scope: effectiveScope,
           }),
         });
+        clearTimeout(planTimeoutId);
 
         const data = await res.json();
         if (res.status === 402 || data?.isBillingError) {
@@ -547,16 +578,19 @@ export function WhiteboardVideoStudio({
           controller.signal
         );
       } catch (err) {
-        if (controller.signal.aborted) return;
+        clearTimeout(planTimeoutId);
+        if (controller.signal.aborted && !timedOut) return;
         setIsPlanning(false);
         setIsGeneratingMore(false);
         if (err instanceof BillingLimitError) {
           setIsBillingLimitError(true);
         }
         setErrorMsg(
-          err instanceof Error
-            ? err.message
-            : "Could not generate whiteboard lesson."
+          timedOut
+            ? "Whiteboard generation timed out on slow network. Please tap Retry."
+            : err instanceof Error
+              ? err.message
+              : "Could not generate whiteboard lesson."
         );
       }
     },
@@ -951,9 +985,7 @@ export function WhiteboardVideoStudio({
 
   const canResumeLesson =
     USE_LESSON_BOARD_V2 &&
-    lesson &&
-    lesson.voiceTracks?.[lesson.activeVoiceId]?.sections?.[0]?.status ===
-      "ready";
+    Boolean(lesson && lesson.sections.length > 0);
   const canResumeLegacy =
     !USE_LESSON_BOARD_V2 &&
     video &&
@@ -962,23 +994,23 @@ export function WhiteboardVideoStudio({
   return (
     <div
       className={cn(
-        "flex flex-col h-full bg-[color:var(--ink-soft)] text-[color:var(--ink)] overflow-y-auto overflow-x-hidden p-3 sm:p-5",
+        "flex flex-col h-full bg-transparent text-[var(--study-text)] overflow-y-auto overflow-x-hidden p-3 sm:p-5",
         className
       )}
     >
-      <div className="mx-auto w-full min-w-0 max-w-xl my-auto rounded-[22px] border-2 border-[color:var(--ink)] bg-[color:var(--cream)] p-4 sm:p-6 shadow-[4px_4px_0px_#0f0e10] flex flex-col gap-4 overflow-hidden">
+      <div className="mx-auto w-full min-w-0 max-w-xl my-auto rounded-[22px] border-2 border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-xl p-4 sm:p-6 shadow-[var(--study-shadow-lg)] flex flex-col gap-4 overflow-hidden">
         {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b-2 border-[color:var(--ink)]/15">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[var(--study-border)]">
           <div>
-            <div className="font-mono text-[9.5px] font-black uppercase tracking-wider text-[color:var(--ink)]/70">
-              ASCLEON WHITEBOARD LESSON
+            <div className="font-mono text-[9.5px] font-black uppercase tracking-wider text-[var(--study-text-muted)]">
+              ASCLEON LIVING BOARD STUDIO
             </div>
-            <h2 className="font-sans text-sm sm:text-base font-black text-[color:var(--ink)]">
-              Build Connected Whiteboard Lesson
+            <h2 className="font-sans text-sm sm:text-base font-black text-[var(--study-text)]">
+              2D Handwritten Whiteboard + 3D Lab
             </h2>
           </div>
 
-          <div className="flex items-center gap-1 rounded-full border border-[color:var(--ink)] bg-[color:var(--panel)] p-0.5">
+          <div className="flex items-center gap-1 rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface-muted)] p-0.5">
             {(["en", "ar", "mixed"] as StudyLanguage[]).map((lang) => (
               <button
                 key={lang}
@@ -987,8 +1019,8 @@ export function WhiteboardVideoStudio({
                 className={cn(
                   "cursor-pointer px-2.5 py-0.5 rounded-full font-mono text-[9.5px] font-black uppercase transition-all",
                   studyLanguage === lang
-                    ? "bg-[color:var(--orange)] text-[color:var(--ink)]"
-                    : "text-[color:var(--ink)]/60 hover:text-[color:var(--ink)]"
+                    ? "bg-[color:var(--orange)] text-[#0f0e10]"
+                    : "text-[var(--study-text-muted)] hover:text-[var(--study-text)]"
                 )}
               >
                 {lang === "en" ? "EN" : lang === "ar" ? "عربي" : "MIX"}
@@ -1000,16 +1032,16 @@ export function WhiteboardVideoStudio({
         {/* 1. Source Scope */}
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]/80">
+            <span className="font-mono text-[10px] font-black uppercase tracking-wider text-[var(--study-text-soft)]">
               1. Source Scope
             </span>
             <div className="flex items-center gap-1.5">
-              <span className="rounded-full border border-[color:var(--ink)]/30 bg-[color:var(--panel)] px-2 py-0.5 font-mono text-[9.5px] font-bold text-[color:var(--ink)]">
+              <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-2 py-0.5 font-mono text-[9.5px] font-bold text-[var(--study-text)]">
                 {dynamicEstimateText}
               </span>
               <span
                 title="0 credits if already cached; +1 credit per newly synthesized audio section"
-                className="rounded-full border border-[color:var(--ink)]/30 bg-[color:var(--orange)]/25 px-2 py-0.5 font-mono text-[9.5px] font-black text-[color:var(--ink)]"
+                className="rounded-full border border-[color:var(--orange)]/45 bg-[color:var(--orange)]/18 px-2 py-0.5 font-mono text-[9.5px] font-black text-[var(--study-text)]"
               >
                 {estimatedPlanCredits} cr plan + 1 cr/audio (0 if cached)
               </span>
@@ -1022,17 +1054,17 @@ export function WhiteboardVideoStudio({
                 type="button"
                 onClick={() => setScopeType("selection")}
                 className={cn(
-                  "cursor-pointer text-left rounded-[14px] border-2 p-2.5 transition-all",
+                  "cursor-pointer text-left rounded-[14px] border-[1.5px] p-2.5 transition-all",
                   scopeType === "selection"
-                    ? "border-[color:var(--ink)] bg-[color:var(--orange)]/20 shadow-chip"
-                    : "border-[color:var(--ink)]/25 bg-[color:var(--panel)] hover:border-[color:var(--ink)]"
+                    ? "border-[var(--study-panel-border)] bg-[color:var(--orange)]/20 shadow-[var(--study-glass-shadow)]"
+                    : "border-[var(--study-border)] bg-[var(--study-surface-muted)] hover:border-[var(--study-pill-border)]"
                 )}
               >
-                <div className="flex items-center gap-1.5 font-sans text-xs font-black">
+                <div className="flex items-center gap-1.5 font-sans text-xs font-black text-[var(--study-text)]">
                   <Highlighter className="size-3.5 text-[color:var(--orange)]" />
                   <span>Highlighted Passage</span>
                 </div>
-                <p className="mt-1 text-[11px] text-[color:var(--ink)]/75 line-clamp-1 italic">
+                <p className="mt-1 text-[11px] text-[var(--study-text-muted)] line-clamp-1 italic">
                   &ldquo;{selectedText}&rdquo;
                 </p>
               </button>
@@ -1042,22 +1074,22 @@ export function WhiteboardVideoStudio({
               type="button"
               onClick={() => setScopeType("topic")}
               className={cn(
-                "cursor-pointer text-left rounded-[14px] border-2 p-2.5 transition-all",
+                "cursor-pointer text-left rounded-[14px] border-[1.5px] p-2.5 transition-all",
                 scopeType === "topic"
-                  ? "border-[color:var(--ink)] bg-[color:var(--orange)]/20 shadow-chip"
-                  : "border-[color:var(--ink)]/25 bg-[color:var(--panel)] hover:border-[color:var(--ink)]"
+                  ? "border-[var(--study-panel-border)] bg-[color:var(--orange)]/20 shadow-[var(--study-glass-shadow)]"
+                  : "border-[var(--study-border)] bg-[var(--study-surface-muted)] hover:border-[var(--study-pill-border)]"
               )}
             >
-              <div className="flex items-center justify-between gap-1 font-sans text-xs font-black">
+              <div className="flex items-center justify-between gap-1 font-sans text-xs font-black text-[var(--study-text)]">
                 <span className="flex items-center gap-1.5 truncate">
                   <Layers className="size-3.5 text-[color:var(--orange)] shrink-0" />
                   <span className="truncate">Topic: {activeTopic.title}</span>
                 </span>
-                <span className="font-mono text-[9px] shrink-0">
+                <span className="font-mono text-[9px] shrink-0 text-[var(--study-text-muted)]">
                   p.{activeTopic.startPage}–{activeTopic.endPage}
                 </span>
               </div>
-              <p className="mt-1 text-[11px] text-[color:var(--ink)]/75 line-clamp-1">
+              <p className="mt-1 text-[11px] text-[var(--study-text-muted)] line-clamp-1">
                 Pages {activeTopic.startPage}–{activeTopic.endPage}
               </p>
             </button>
@@ -1066,17 +1098,17 @@ export function WhiteboardVideoStudio({
               type="button"
               onClick={() => setScopeType("page")}
               className={cn(
-                "cursor-pointer text-left rounded-[14px] border-2 p-2.5 transition-all",
+                "cursor-pointer text-left rounded-[14px] border-[1.5px] p-2.5 transition-all",
                 scopeType === "page"
-                  ? "border-[color:var(--ink)] bg-[color:var(--orange)]/20 shadow-chip"
-                  : "border-[color:var(--ink)]/25 bg-[color:var(--panel)] hover:border-[color:var(--ink)]"
+                  ? "border-[var(--study-panel-border)] bg-[color:var(--orange)]/20 shadow-[var(--study-glass-shadow)]"
+                  : "border-[var(--study-border)] bg-[var(--study-surface-muted)] hover:border-[var(--study-pill-border)]"
               )}
             >
-              <div className="flex items-center gap-1.5 font-sans text-xs font-black">
+              <div className="flex items-center gap-1.5 font-sans text-xs font-black text-[var(--study-text)]">
                 <BookOpen className="size-3.5 text-[color:var(--orange)]" />
                 <span>Active Page (p.{currentPageNumber})</span>
               </div>
-              <p className="mt-1 text-[11px] text-[color:var(--ink)]/75">
+              <p className="mt-1 text-[11px] text-[var(--study-text-muted)]">
                 Focus strictly on Page {currentPageNumber}
               </p>
             </button>
@@ -1085,24 +1117,24 @@ export function WhiteboardVideoStudio({
               type="button"
               onClick={() => setScopeType("range")}
               className={cn(
-                "cursor-pointer text-left rounded-[14px] border-2 p-2.5 transition-all",
+                "cursor-pointer text-left rounded-[14px] border-[1.5px] p-2.5 transition-all",
                 scopeType === "range"
-                  ? "border-[color:var(--ink)] bg-[color:var(--orange)]/20 shadow-chip"
-                  : "border-[color:var(--ink)]/25 bg-[color:var(--panel)] hover:border-[color:var(--ink)]"
+                  ? "border-[var(--study-panel-border)] bg-[color:var(--orange)]/20 shadow-[var(--study-glass-shadow)]"
+                  : "border-[var(--study-border)] bg-[var(--study-surface-muted)] hover:border-[var(--study-pill-border)]"
               )}
             >
-              <div className="flex items-center gap-1.5 font-sans text-xs font-black">
+              <div className="flex items-center gap-1.5 font-sans text-xs font-black text-[var(--study-text)]">
                 <Hash className="size-3.5 text-[color:var(--orange)]" />
                 <span>Custom Page Range</span>
               </div>
-              <p className="mt-1 text-[11px] text-[color:var(--ink)]/75">
+              <p className="mt-1 text-[11px] text-[var(--study-text-muted)]">
                 Pages {rangeStart} to {rangeEnd}
               </p>
             </button>
           </div>
 
           {scopeType === "range" && (
-            <div className="flex items-center gap-2 rounded-[12px] border border-[color:var(--ink)]/30 bg-[color:var(--panel)] px-3 py-2 text-xs">
+            <div className="flex items-center gap-2 rounded-[12px] border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-3 py-2 text-xs text-[var(--study-text)]">
               <span className="font-mono text-[10px] font-bold">From Page</span>
               <input
                 type="number"
@@ -1112,7 +1144,7 @@ export function WhiteboardVideoStudio({
                 onChange={(e) =>
                   setRangeStart(Math.max(1, Number(e.target.value) || 1))
                 }
-                className="w-16 rounded border border-[color:var(--ink)]/40 bg-white px-2 py-0.5 font-mono text-xs font-bold"
+                className="w-16 rounded border border-[var(--study-border-strong)] bg-[var(--study-surface-solid)] text-[var(--study-text)] px-2 py-0.5 font-mono text-xs font-bold"
               />
               <span className="font-mono text-[10px] font-bold">to</span>
               <input
@@ -1131,7 +1163,7 @@ export function WhiteboardVideoStudio({
                     )
                   )
                 }
-                className="w-16 rounded border border-[color:var(--ink)]/40 bg-white px-2 py-0.5 font-mono text-xs font-bold"
+                className="w-16 rounded border border-[var(--study-border-strong)] bg-[var(--study-surface-solid)] text-[var(--study-text)] px-2 py-0.5 font-mono text-xs font-bold"
               />
             </div>
           )}
@@ -1148,7 +1180,7 @@ export function WhiteboardVideoStudio({
                   onNavigateToPage?.(chosen.startPage);
                 }
               }}
-              className="w-full cursor-pointer rounded-[12px] border border-[color:var(--ink)]/30 bg-[color:var(--panel)] px-3 py-1.5 font-sans text-xs font-bold"
+              className="w-full cursor-pointer rounded-[12px] border border-[var(--study-border)] bg-[var(--study-surface-solid)] text-[var(--study-text)] px-3 py-1.5 font-sans text-xs font-bold"
             >
               {blueprintTopics.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -1162,10 +1194,10 @@ export function WhiteboardVideoStudio({
         {/* 2. Voice & Depth */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
           <div className="space-y-1.5 min-w-0">
-            <span className="block font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]/80">
+            <span className="block font-mono text-[10px] font-black uppercase tracking-wider text-[var(--study-text-soft)]">
               2. Lesson Depth
             </span>
-            <div className="grid grid-cols-3 gap-1 rounded-[12px] border border-[color:var(--ink)]/30 bg-[color:var(--panel)] p-1">
+            <div className="grid grid-cols-3 gap-1 rounded-[12px] border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-1">
               {(
                 [
                   { id: "auto", label: "Auto" },
@@ -1180,8 +1212,8 @@ export function WhiteboardVideoStudio({
                   className={cn(
                     "cursor-pointer rounded-lg py-1 font-mono text-[10px] font-black uppercase transition-colors",
                     pacing === opt.id
-                      ? "bg-[color:var(--orange)] text-[color:var(--ink)]"
-                      : "text-[color:var(--ink)]/65 hover:text-[color:var(--ink)]"
+                      ? "bg-[color:var(--orange)] text-[#0f0e10]"
+                      : "text-[var(--study-text-muted)] hover:text-[var(--study-text)]"
                   )}
                 >
                   {opt.label}
@@ -1191,14 +1223,14 @@ export function WhiteboardVideoStudio({
           </div>
 
           <div className="space-y-1.5 min-w-0">
-            <span className="block font-mono text-[10px] font-black uppercase tracking-wider text-[color:var(--ink)]/80">
+            <span className="block font-mono text-[10px] font-black uppercase tracking-wider text-[var(--study-text-soft)]">
               3. Tutor Voice
             </span>
             <div className="flex min-w-0 items-center gap-1.5">
               <select
                 value={selectedVoice}
                 onChange={(e) => setSelectedVoice(e.target.value)}
-                className="min-w-0 w-full flex-1 truncate cursor-pointer rounded-[12px] border border-[color:var(--ink)]/40 bg-[color:var(--panel)] px-2.5 py-1.5 font-sans text-xs font-bold"
+                className="min-w-0 w-full flex-1 truncate cursor-pointer rounded-[12px] border border-[var(--study-border-strong)] bg-[var(--study-surface-solid)] text-[var(--study-text)] px-2.5 py-1.5 font-sans text-xs font-bold"
               >
                 {WHITEBOARD_NARRATOR_VOICES.map((v) => (
                   <option key={v.id} value={v.id}>
@@ -1211,7 +1243,7 @@ export function WhiteboardVideoStudio({
                 onClick={() => handlePreviewVoice(selectedVoice)}
                 disabled={previewingVoiceId === selectedVoice}
                 title="Listen to tutor voice sample"
-                className="shrink-0 cursor-pointer flex items-center justify-center rounded-[12px] border border-[color:var(--ink)] bg-[color:var(--panel)] px-2.5 py-1.5 hover:bg-[color:var(--orange)] disabled:opacity-50"
+                className="shrink-0 cursor-pointer flex items-center justify-center rounded-[12px] border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface-muted)] text-[var(--study-text)] px-2.5 py-1.5 hover:bg-[color:var(--orange)] hover:text-[#0f0e10] disabled:opacity-50"
               >
                 {previewingVoiceId === selectedVoice ? (
                   <Loader2 className="size-3.5 animate-spin" />
@@ -1225,13 +1257,13 @@ export function WhiteboardVideoStudio({
 
         {/* Status / Error Banner */}
         {errorMsg && (
-          <div className="flex flex-wrap items-center gap-2 rounded-[14px] border-2 border-red-600 bg-red-50 px-3 py-2 text-xs font-bold text-red-900">
-            <AlertCircle className="size-4 shrink-0 text-red-600" />
+          <div className="flex flex-wrap items-center gap-2 rounded-[14px] border-2 border-[var(--study-red-border)] bg-[var(--study-red-bg)] px-3 py-2 text-xs font-bold text-[var(--study-red-text)]">
+            <AlertCircle className="size-4 shrink-0" />
             <span className="flex-1">{errorMsg}</span>
             {isBillingLimitError ? (
               <Link
                 href="/subscriptions?reason=limit"
-                className="rounded-full border border-[color:var(--ink)] bg-[color:var(--orange)] px-3 py-1 font-mono text-[10px] font-black uppercase text-[color:var(--ink)]"
+                className="rounded-full border border-[var(--study-panel-border)] bg-[color:var(--orange)] px-3 py-1 font-mono text-[10px] font-black uppercase text-[#0f0e10]"
               >
                 Upgrade Plan
               </Link>
@@ -1239,7 +1271,7 @@ export function WhiteboardVideoStudio({
               <button
                 type="button"
                 onClick={() => startGeneration(false)}
-                className="cursor-pointer rounded-full border border-red-700 bg-white px-2.5 py-0.5 font-mono text-[10px] font-black uppercase"
+                className="cursor-pointer rounded-full border border-[var(--study-red-border)] bg-[var(--study-surface-solid)] text-[var(--study-text)] px-2.5 py-0.5 font-mono text-[10px] font-black uppercase"
               >
                 Retry
               </button>
@@ -1249,7 +1281,7 @@ export function WhiteboardVideoStudio({
 
         {/* Planning / Recording Progress */}
         {(isPlanning || isGeneratingMore) && (
-          <div className="flex items-center gap-2.5 rounded-[14px] border-2 border-[color:var(--ink)] bg-[color:var(--panel)] px-3 py-2.5 text-xs font-bold">
+          <div className="flex items-center gap-2.5 rounded-[14px] border-[1.5px] border-[var(--study-panel-border)] bg-[var(--study-surface-muted)] px-3 py-2.5 text-xs font-bold text-[var(--study-text)]">
             <Loader2 className="size-4 animate-spin text-[color:var(--orange)] shrink-0" />
             <span>
               {isPlanning
@@ -1262,12 +1294,12 @@ export function WhiteboardVideoStudio({
         )}
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2 pt-2 border-t-2 border-[color:var(--ink)]/15">
+        <div className="flex items-center gap-2 pt-2 border-t border-[var(--study-border)]">
           {(canResumeLesson || canResumeLegacy) && (
             <button
               type="button"
               onClick={() => setIsConfiguring(false)}
-              className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] px-3.5 py-2 font-mono text-[10px] font-black uppercase hover:bg-[color:var(--cream)]"
+              className="cursor-pointer rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface-muted)] text-[var(--study-text)] px-3.5 py-2 font-mono text-[10px] font-black uppercase hover:bg-[var(--study-glass-hover)]"
             >
               Resume Lesson
             </button>
@@ -1276,7 +1308,7 @@ export function WhiteboardVideoStudio({
             type="button"
             disabled={isPlanning || isGeneratingMore}
             onClick={() => startGeneration(false)}
-            className="flex-1 cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-5 py-2.5 font-sans text-xs font-black uppercase text-[color:var(--ink)] shadow-chip hover:scale-[1.01] transition-transform flex items-center justify-center gap-2 disabled:opacity-60"
+            className="flex-1 cursor-pointer rounded-full border-2 border-[var(--study-panel-border)] bg-[color:var(--orange)] px-5 py-2.5 font-sans text-xs font-black uppercase text-[#0f0e10] shadow-[var(--study-active-shadow)] hover:scale-[1.01] transition-transform flex items-center justify-center gap-2 disabled:opacity-60"
           >
             {isPlanning ? (
               <>
@@ -1291,7 +1323,7 @@ export function WhiteboardVideoStudio({
             ) : (
               <>
                 <Play className="size-4 stroke-[2.5] fill-current" />
-                <span>Generate Whiteboard Lesson</span>
+                <span>Launch Living Board</span>
               </>
             )}
           </button>
@@ -1301,7 +1333,7 @@ export function WhiteboardVideoStudio({
               disabled={isPlanning || isGeneratingMore}
               onClick={() => startGeneration(true)}
               title="Force regenerate fresh lesson"
-              className="cursor-pointer rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--panel)] p-2.5 hover:bg-[color:var(--orange)] disabled:opacity-50"
+              className="cursor-pointer rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface-muted)] text-[var(--study-text)] p-2.5 hover:bg-[color:var(--orange)] hover:text-[#0f0e10] disabled:opacity-50"
             >
               <RefreshCw className="size-4 stroke-[2.5]" />
             </button>

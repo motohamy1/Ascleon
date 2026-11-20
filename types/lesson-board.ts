@@ -53,6 +53,228 @@ export type LessonLinkKind = "leads_to" | "causes" | "contrasts" | "treats";
 export type LessonStatus = "planning" | "rendering" | "completed" | "partial" | "failed";
 export type LessonSectionAudioStatus = "planned" | "generating" | "ready" | "failed";
 
+// =============================================================================
+// RICH 2D HANDWRITTEN OPS VOCABULARY (1000 x 625 Virtual Paper Space)
+// =============================================================================
+
+export type BoardWashTone =
+  | "sky"
+  | "mint"
+  | "sand"
+  | "coral"
+  | "lilac"
+  | "head"
+  | "zebra";
+
+export type BoardOp =
+  | {
+      t: "title";
+      text: string;
+      subtitle?: string;
+      tone?: LessonTone;
+      nodeId?: string;
+    }
+  | {
+      t: "write";
+      text: string;
+      tone?: LessonTone;
+      wash?: BoardWashTone;
+      emphasis?: "underline" | "box" | "highlight" | "none";
+      nodeId?: string;
+    }
+  | {
+      t: "bullets";
+      heading?: string;
+      items: string[];
+      tone?: LessonTone;
+      wash?: BoardWashTone;
+      nodeId?: string;
+    }
+  | {
+      t: "term";
+      term: string;
+      definition: string;
+      tone?: LessonTone;
+      wash?: BoardWashTone;
+      nodeId?: string;
+    }
+  | {
+      t: "flow";
+      steps: Array<{ label: string; sub?: string; tone?: LessonTone; nodeId?: string }>;
+      direction?: "row" | "col";
+    }
+  | {
+      t: "compare";
+      leftTitle: string;
+      rightTitle: string;
+      rows: Array<{ left: string; right: string }>;
+      leftTone?: LessonTone;
+      rightTone?: LessonTone;
+    }
+  | {
+      t: "cycle";
+      title?: string;
+      nodes: Array<{ label: string; tone?: LessonTone; nodeId?: string }>;
+    }
+  | {
+      t: "timeline";
+      events: Array<{ time: string; label: string; tone?: LessonTone; nodeId?: string }>;
+    }
+  | {
+      t: "formula";
+      tex: string;
+      label?: string;
+      wash?: BoardWashTone;
+      nodeId?: string;
+    }
+  | {
+      t: "pointer";
+      targetNodeId?: string;
+      label?: string;
+      style?: "circle" | "underline" | "arrow";
+    };
+
+// =============================================================================
+// 4-TIER NEVER-BLANK 3D & INTERACTIVE LAB SCENE DESCRIPTORS
+// =============================================================================
+
+export const ANATOMY_RIG_MODELS = [
+  "shoulder",
+  "elbow",
+  "knee",
+  "spine",
+  "hip",
+  "heart",
+  "lung",
+  "brain",
+  "nephron",
+  "eye",
+] as const;
+
+export type AnatomyRigModelId = (typeof ANATOMY_RIG_MODELS)[number];
+
+export const PROCEDURAL_3D_BLUEPRINTS = [
+  "glandular-acinus",
+  "tumor-architecture",
+  "immune-cascade",
+  "vessel-flow",
+  "receptor-membrane",
+  "compartment-exchange",
+  "molecular-lattice",
+  "3d-surface-field",
+  "vector-force-rig",
+  "action-potential-axon",
+] as const;
+
+export type Procedural3DBlueprintId = (typeof PROCEDURAL_3D_BLUEPRINTS)[number];
+
+export interface LabParamControl {
+  name: string;
+  label: string;
+  min: number;
+  max: number;
+  step?: number;
+  value: number;
+  unit?: string;
+}
+
+export interface LabCurveSpec {
+  fx: string;
+  label: string;
+  color?: string;
+}
+
+export interface LabLabelPoint {
+  id: string;
+  label: string;
+  labelAr?: string;
+  tone?: LessonTone;
+  /** Normalized hint [-1..1] for procedural placement if not a rigged landmark */
+  pos?: [number, number, number];
+}
+
+export type LabCameraPreset = "front" | "side" | "iso" | "top";
+
+export type LabSceneDescriptor =
+  | {
+      tier: "anatomy-rig";
+      title: string;
+      model: AnatomyRigModelId;
+      cam?: LabCameraPreset;
+      pose?: Record<string, number>;
+      highlight?: string[];
+      testOverlay?: {
+        kind: "resist" | "palpate" | "stabilize" | "goniometer" | "auscultate";
+        target: string;
+        angleDeg?: number;
+        note?: string;
+      };
+      labels?: LabLabelPoint[];
+      controls?: LabParamControl[];
+    }
+  | {
+      tier: "procedural-3d";
+      title: string;
+      blueprint: Procedural3DBlueprintId;
+      cam?: LabCameraPreset;
+      highlight?: string[];
+      params?: LabParamControl[];
+      fxy?: string;
+      labels?: LabLabelPoint[];
+      statusNote?: string;
+    }
+  | {
+      tier: "interactive-sim";
+      title: string;
+      presetId?: string;
+      xLabel: string;
+      yLabel: string;
+      xRange: [number, number];
+      yRange: [number, number];
+      curves: LabCurveSpec[];
+      params: LabParamControl[];
+      readoutLabel?: string;
+    }
+  | {
+      tier: "smart-diagram-3d";
+      title: string;
+      cam?: LabCameraPreset;
+      subtitle?: string;
+      focusNodeIds?: string[];
+    };
+
+// =============================================================================
+// INTERACTIVE ON-BOARD CHALLENGE MODE
+// =============================================================================
+
+export type BoardChallenge =
+  | {
+      kind: "order-steps";
+      prompt: string;
+      items: Array<{ id: string; label: string }>;
+      correctOrder: string[];
+      explanation: string;
+    }
+  | {
+      kind: "clinical-choice";
+      prompt: string;
+      options: Array<{ id: string; label: string }>;
+      correctId: string;
+      explanation: string;
+    }
+  | {
+      kind: "predict-slider";
+      prompt: string;
+      paramName: string;
+      paramLabel: string;
+      min: number;
+      max: number;
+      unit?: string;
+      targetMin: number;
+      targetMax: number;
+      explanation: string;
+    };
+
 export interface BoardLimits {
   minSections: number;
   maxSections: number;
@@ -115,6 +337,7 @@ export function getBoardLimits(
 export interface LessonNodeSource {
   page: number;
   quote: string;
+  inferred?: boolean;
 }
 
 export interface LessonNode {
@@ -140,6 +363,12 @@ export interface LessonSection {
   kind: LessonSectionKind;
   nodes: LessonNode[];
   script: LessonSegment[];
+  /** Rich handwritten ops for the 1000x625 paper renderer */
+  ops?: BoardOp[];
+  /** Guaranteed 4-tier 3D / Interactive Lab descriptor */
+  labScene?: LabSceneDescriptor;
+  /** Optional interactive challenge for Active Recall mode */
+  challenge?: BoardChallenge;
 }
 
 export interface LessonLink {

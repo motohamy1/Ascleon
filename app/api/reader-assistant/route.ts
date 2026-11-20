@@ -19,6 +19,8 @@ import {
 
 import type { StudyScope } from "@/components/reader/StudyScopeBar";
 
+export const maxDuration = 60;
+
 interface ReaderAssistantRequestBody {
   bookId?: string;
   bookTitle?: string;
@@ -168,13 +170,18 @@ export async function POST(request: Request) {
   if (bookId) {
     try {
       const { retrieveFromBookRAG } = await import("@/lib/ai/rag/book-rag-retriever");
-      const ragRes = await retrieveFromBookRAG({
-        bookId: String(bookId),
-        query: cleanQuery,
-        scope: effectiveScope,
-        activePage: activePageNum,
-        topK: effectiveScope.type === "page" ? 2 : 6,
-      });
+      const ragRes = await Promise.race([
+        retrieveFromBookRAG({
+          bookId: String(bookId),
+          query: cleanQuery,
+          scope: effectiveScope,
+          activePage: activePageNum,
+          topK: effectiveScope.type === "page" ? 2 : 6,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Book RAG lookup timed out after 3s")), 3000)
+        ),
+      ]);
 
       if (ragRes.combinedContext) {
         ragCitedPages = ragRes.citedPages;

@@ -14,11 +14,20 @@ import { Menu, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { AscleonLogo } from '@/components/ui/AscleonLogo';
 
-const navItems = [
-  { href: '/', label: 'Progress', match: '/' },
+type NavItem = {
+  href: string;
+  label: string;
+  match: string;
+  extraMatch?: string;
+  disabled?: boolean;
+};
+
+const navItems: NavItem[] = [
+  { href: '/', label: 'Home', match: '/' },
   { href: '/space/active', label: 'Study Space', match: '/space/active', extraMatch: '/books' },
   { href: '/library', label: 'Library', match: '/library' },
-  { href: '/space/revision', label: 'Revision', match: '/space/revision' },
+  { href: '/progress', label: 'Progress', match: '/progress' },
+  { href: '/space/revision', label: 'Revision', match: '/space/revision', disabled: true },
 ];
 
 const isActiveRoute = (pathname: string, match: string, extraMatch?: string) =>
@@ -28,7 +37,7 @@ const isActiveRoute = (pathname: string, match: string, extraMatch?: string) =>
       (!!extraMatch && pathname.startsWith(extraMatch));
 
 // Tabs that require an account; guests get the sign-in modal instead
-const authRequired = new Set(['/space/active', '/space/revision', '/library']);
+const authRequired = new Set(['/space/active', '/library', '/progress']);
 
 const Navbar = () => {
   const pathname = usePathname();
@@ -101,24 +110,40 @@ const Navbar = () => {
         >
           {navItems.map((item) => {
             const active = isActiveRoute(pathname, item.match, item.extraMatch);
+            const soonBadge = item.href === '/space/revision' && (
+              <span className="rounded-full bg-[color:var(--orange)] px-2 py-0.5 text-[9.5px] font-black uppercase text-[color:var(--ink)]">
+                Soon
+              </span>
+            );
+
+            if (item.disabled) {
+              return (
+                <span
+                  key={item.href}
+                  aria-disabled="true"
+                  title={`${item.label} is coming soon`}
+                  className="flex cursor-not-allowed items-center gap-2 rounded-full px-4 py-2.5 text-[11.5px] font-bold uppercase tracking-wider text-[color:var(--cream)]/40 xl:px-5 xl:text-[13px]"
+                >
+                  <span>{item.label}</span>
+                  {soonBadge}
+                </span>
+              );
+            }
+
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 onClick={(e) => guardClick(e, item.href)}
                 className={cn(
-                  'rounded-full px-5 py-2.5 text-xs sm:text-[13px] font-bold tracking-wider transition-all uppercase flex items-center gap-2',
+                  'rounded-full px-4 py-2.5 text-[11.5px] font-bold tracking-wider transition-all uppercase flex items-center gap-2 xl:px-5 xl:text-[13px]',
                   active
                     ? 'bg-[color:var(--cream)] text-[color:var(--ink)] shadow-xs'
                     : 'text-[color:var(--cream)]/75 hover:text-[color:var(--cream)] hover:bg-white/10'
                 )}
               >
                 <span>{item.label}</span>
-                {item.href === '/space/revision' && (
-                  <span className="rounded-full bg-[color:var(--orange)] px-2 py-0.5 text-[9.5px] font-black uppercase text-[color:var(--ink)]">
-                    Soon
-                  </span>
-                )}
+                {soonBadge}
               </Link>
             );
           })}
@@ -213,6 +238,26 @@ const Navbar = () => {
             <nav className="flex flex-col gap-1">
               {navItems.map((item) => {
                 const active = isActiveRoute(pathname, item.match, item.extraMatch);
+                const soonBadge = item.href === '/space/revision' && (
+                  <span className="rounded-full bg-[color:var(--orange)] px-2 py-0.5 text-[10px] font-black uppercase text-[color:var(--ink)]">
+                    Soon
+                  </span>
+                );
+
+                if (item.disabled) {
+                  return (
+                    <span
+                      key={item.href}
+                      aria-disabled="true"
+                      title={`${item.label} is coming soon`}
+                      className="flex cursor-not-allowed items-center justify-between rounded-xl px-3.5 py-2.5 text-sm font-semibold uppercase tracking-wider text-[color:var(--ink)]/40"
+                    >
+                      <span>{item.label}</span>
+                      {soonBadge}
+                    </span>
+                  );
+                }
+
                 return (
                   <Link
                     key={item.href}
@@ -229,11 +274,7 @@ const Navbar = () => {
                     )}
                   >
                     <span>{item.label}</span>
-                    {item.href === '/space/revision' && (
-                      <span className="rounded-full bg-[color:var(--orange)] px-2 py-0.5 text-[10px] font-black uppercase text-[color:var(--ink)]">
-                        Soon
-                      </span>
-                    )}
+                    {soonBadge}
                   </Link>
                 );
               })}

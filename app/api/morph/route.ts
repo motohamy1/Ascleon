@@ -8,6 +8,14 @@ import { synthesizeMorphBlocks } from "@/lib/morph/synthesizer";
 import { auth } from "@clerk/nextjs/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
+import {
+  clearModelCooldown,
+  GEMINI_MODEL_CHAIN,
+  markModelCooldownFromError,
+  orderModelsByHealth,
+} from "@/lib/ai/model-cooldown";
+
+export const maxDuration = 60;
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
 import {
   calculateDynamicCreditCost,
@@ -284,31 +292,39 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
         }
 
         let response: any = null;
-        try {
-          const generatePromise = ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: [{ role: "user", parts: userParts }],
-            config: {
-              responseMimeType: "application/json",
-              temperature: 0.2,
-            },
-          });
+        const morphModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
+        for (let idx = 0; idx < morphModels.length; idx++) {
+          const candidateModel = morphModels[idx];
+          const timeoutMs = idx === 0 ? 20_000 : 14_000;
+          const abortCtrl = new AbortController();
+          const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
+          try {
+            const generatePromise = ai.models.generateContent({
+              model: candidateModel,
+              contents: [{ role: "user", parts: userParts }],
+              config: {
+                responseMimeType: "application/json",
+                temperature: 0.2,
+                abortSignal: abortCtrl.signal,
+              },
+            });
 
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("Gemini generation timed out after 28s")), 28000)
-          );
+            const timeoutPromise = new Promise<never>((_, reject) =>
+              abortCtrl.signal.addEventListener("abort", () =>
+                reject(new Error(`Morph ${candidateModel} timed out after ${timeoutMs}ms`))
+              )
+            );
 
-          response = await Promise.race([generatePromise, timeoutPromise]);
-        } catch (primaryErr) {
-          console.warn("Primary Gemini 3 Flash morph generation failed, attempting gemini-3.8-flash fallback:", primaryErr);
-          response = await ai.models.generateContent({
-            model: "gemini-3.8-flash",
-            contents: [{ role: "user", parts: userParts }],
-            config: {
-              responseMimeType: "application/json",
-              temperature: 0.2,
-            },
-          });
+            response = await Promise.race([generatePromise, timeoutPromise]);
+            clearModelCooldown(`gemini:${candidateModel}`);
+            break;
+          } catch (modelErr) {
+            markModelCooldownFromError(`gemini:${candidateModel}`, modelErr);
+            console.warn(`[Morph] ${candidateModel} failed:`, modelErr);
+            if (idx === morphModels.length - 1) throw modelErr;
+          } finally {
+            clearTimeout(timer);
+          }
         }
 
         const responseText = response.text?.trim() || "";

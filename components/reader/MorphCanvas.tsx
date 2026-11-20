@@ -113,12 +113,21 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
         y: 80,
       };
 
+      const categoryMap: Record<DiagramNode["category"], MindMapNode["category"]> = {
+        input: "pillar",
+        process: "mechanism",
+        decision: "diagnostic",
+        output: "clinical",
+        danger: "clinical",
+        safe: "pillar",
+      };
+
       const pillarNodes: MindMapNode[] = diagramBlock.diagramData.nodes.map((n, idx) => ({
         id: n.id,
         label: n.label,
         sublabel: n.sublabel,
         details: n.details || n.sublabel || `High-yield mechanism for ${n.label}`,
-        category: (n.category as any) || "pillar",
+        category: categoryMap[n.category] || "pillar",
         color: n.color || (idx % 2 === 0 ? "#43a08f" : "#ff4c00"),
         parent: rootId,
         level: 1,
@@ -171,36 +180,37 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
   const p2Offset = currentPreset?.waveformOffsets?.p2Offset ?? 264;
 
   return (
-    <div dir="auto" className="flex animate-in fade-in flex-col gap-4 duration-200">
-      {/* HEADER BANNER */}
-      <div className="flex flex-col gap-2.5 rounded-[20px] border-2 border-[color:var(--orange)]/30 bg-[color:var(--ink-soft)] p-4 shadow-chip">
+    <div dir="auto" className="flex animate-in fade-in flex-col gap-2.5 duration-200">
+      {/* COMPACT HEADER BANNER & VIEW CHIPS */}
+      <div className="flex flex-col gap-2 rounded-[16px] border-[1.5px] border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md text-[var(--study-text)] p-2.5 sm:p-3 shadow-[var(--study-shadow)]">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-[color:var(--orange)] text-[color:var(--ink)]">
-              <Sparkles className="size-4" />
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="flex size-6 shrink-0 items-center justify-center rounded-lg bg-[color:var(--orange)] text-[#0f0e10]">
+              <Sparkles className="size-3.5" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="truncate text-sm font-black tracking-tight text-[color:var(--cream)]">
+              <div className="flex items-center gap-1.5">
+                <h3 className="truncate text-xs sm:text-sm font-black tracking-tight text-[var(--study-text)]">
                   {artifact.focalConcept}
                 </h3>
-                <span className="shrink-0 rounded-full border border-[color:var(--teal)]/40 bg-[color:var(--teal)]/10 px-2 py-0.5 text-[10px] font-bold text-[#7fd8c9]">
+                <span className="shrink-0 rounded-full border border-[var(--study-teal-border)] bg-[var(--study-teal-bg)] px-2 py-0.5 text-[9.5px] font-bold text-[var(--study-teal-text)]">
                   Morphed
                 </span>
               </div>
-              <p className="truncate text-[11px] text-[color:var(--cream)]/60">
-                {artifact.contextSummary?.subsequentBridge ||
-                  "Contextual connections mapped across sections"}
-              </p>
+              {artifact.contextSummary?.subsequentBridge && (
+                <p className="truncate text-[10.5px] text-[var(--study-text-muted)]">
+                  {artifact.contextSummary.subsequentBridge}
+                </p>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             {onResetToBoot && (
               <button
                 type="button"
                 onClick={onResetToBoot}
-                className="flex cursor-pointer items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-bold text-[color:var(--cream)]/80 transition-colors hover:bg-white/10 hover:text-[color:var(--cream)]"
+                className="flex cursor-pointer items-center gap-1 rounded-full border border-[var(--study-pill-border)] bg-[var(--study-surface-muted)] px-2.5 py-0.5 text-[10.5px] font-bold text-[var(--study-text)] transition-colors hover:bg-[var(--study-glass-hover)]"
                 title="Re-generate morph"
               >
                 <RefreshCw className={cn("size-3", isLoading && "animate-spin")} />
@@ -211,19 +221,19 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
         </div>
 
         {/* VIEW SELECTOR CHIPS */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-white/10">
+        <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-[var(--study-border)]">
           {artifact.journey && (
             <button
               type="button"
               onClick={() => setActiveTab("journey")}
               className={cn(
-                "flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-black transition-all",
+                "flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10.5px] font-black transition-all",
                 activeTab === "journey"
-                  ? "bg-[#ff4c00] text-[#0f0e10] shadow-sm"
-                  : "bg-white/10 text-[#f6d7a1] hover:bg-white/20"
+                  ? "border-[var(--study-panel-border)] bg-[#ff4c00] text-[#0f0e10] shadow-xs"
+                  : "border-[var(--study-pill-border)]/60 bg-[var(--study-glass)] text-[var(--study-text-soft)] hover:bg-[var(--study-glass-hover)]"
               )}
             >
-              <Sparkles className="size-3.5 text-[#ff4c00]" />
+              <Sparkles className={cn("size-3", activeTab === "journey" ? "text-[#0f0e10]" : "text-[#ff4c00]")} />
               <span>Living Journey</span>
             </button>
           )}
@@ -232,10 +242,10 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
             type="button"
             onClick={() => setActiveTab("all")}
             className={cn(
-              "cursor-pointer rounded-full px-2.5 py-0.5 text-[10.5px] font-bold transition-all",
+              "cursor-pointer rounded-full border px-2.5 py-0.5 text-[10.5px] font-bold transition-all",
               activeTab === "all"
-                ? "bg-[color:var(--orange)] text-[color:var(--ink)]"
-                : "bg-white/5 text-[color:var(--cream)]/70 hover:bg-white/10"
+                ? "border-[var(--study-panel-border)] bg-[color:var(--orange)] text-[#0f0e10] font-black shadow-xs"
+                : "border-[var(--study-pill-border)]/60 bg-[var(--study-glass)] text-[var(--study-text-soft)] hover:bg-[var(--study-glass-hover)]"
             )}
           >
             Overview (All)
@@ -245,10 +255,10 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
               type="button"
               onClick={() => setActiveTab("diagram")}
               className={cn(
-                "flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-0.5 text-[10.5px] font-bold transition-all",
+                "flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10.5px] font-bold transition-all",
                 activeTab === "diagram"
-                  ? "bg-[#43a08f] text-[color:var(--ink)]"
-                  : "bg-white/5 text-[#7fd8c9] hover:bg-white/10"
+                  ? "border-[var(--study-panel-border)] bg-[#7fd8c9] text-[#0f0e10] font-black shadow-xs"
+                  : "border-[var(--study-teal-border)] bg-[var(--study-glass)] text-[var(--study-teal-text)] hover:bg-[var(--study-glass-hover)]"
               )}
             >
               <Workflow className="size-3" />
@@ -260,10 +270,10 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
               type="button"
               onClick={() => setActiveTab("anatomy")}
               className={cn(
-                "flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-0.5 text-[10.5px] font-bold transition-all",
+                "flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10.5px] font-bold transition-all",
                 activeTab === "anatomy"
-                  ? "bg-[#e0459a] text-[color:var(--ink)]"
-                  : "bg-white/5 text-[#f08dc7] hover:bg-white/10"
+                  ? "border-[var(--study-panel-border)] bg-[#e0459a] text-[#0f0e10] font-black shadow-xs"
+                  : "border-[#e0459a]/50 bg-[var(--study-glass)] text-[#e0459a] hover:bg-[var(--study-glass-hover)]"
               )}
             >
               <Compass className="size-3" />
@@ -275,10 +285,10 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
               type="button"
               onClick={() => setActiveTab("matrix")}
               className={cn(
-                "flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-0.5 text-[10.5px] font-bold transition-all",
+                "flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10.5px] font-bold transition-all",
                 activeTab === "matrix"
-                  ? "bg-[#f6d7a1] text-[color:var(--ink)]"
-                  : "bg-white/5 text-[color:var(--cream)] hover:bg-white/10"
+                  ? "border-[var(--study-panel-border)] bg-[#f6d7a1] text-[#0f0e10] font-black shadow-xs"
+                  : "border-[var(--study-pill-border)]/60 bg-[var(--study-glass)] text-[var(--study-text-soft)] hover:bg-[var(--study-glass-hover)]"
               )}
             >
               <Split className="size-3" />
@@ -290,10 +300,10 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
               type="button"
               onClick={() => setActiveTab("simulator")}
               className={cn(
-                "flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-0.5 text-[10.5px] font-bold transition-all",
+                "flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10.5px] font-bold transition-all",
                 activeTab === "simulator"
-                  ? "bg-[color:var(--teal)] text-[color:var(--ink)]"
-                  : "bg-white/5 text-[color:var(--cream)]/70 hover:bg-white/10"
+                  ? "border-[var(--study-panel-border)] bg-[#7fd8c9] text-[#0f0e10] font-black shadow-xs"
+                  : "border-[var(--study-teal-border)] bg-[var(--study-glass)] text-[var(--study-teal-text)] hover:bg-[var(--study-glass-hover)]"
               )}
             >
               <Activity className="size-3" />
@@ -331,23 +341,23 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
       {/* 2. PRECORDIAL ANATOMICAL MAP / DRAWING (MEDICAL/CHEST SILHOUETTE) */}
       {/* ========================================================================= */}
       {spatialBlock && spatialBlock.spatialLandmarks && (activeTab === "all" || activeTab === "anatomy") && (
-        <div className="flex flex-col gap-3 rounded-[20px] border-2 border-white/10 bg-[color:var(--ink-soft)] p-4 shadow-chip">
+        <div className="flex flex-col gap-3 rounded-[18px] border-[1.5px] border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md p-3.5 shadow-[var(--study-shadow)]">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[#e0459a]">
               <Compass className="size-4 text-[#e0459a]" />
               <span>{spatialBlock.title}</span>
             </div>
-            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9.5px] font-mono text-[color:var(--cream)]/60">
+            <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-2 py-0.5 text-[9.5px] font-mono text-[var(--study-text-muted)]">
               Interactive Torso Schematic
             </span>
           </div>
-          <p className="text-[11px] text-[color:var(--cream)]/70 -mt-1">
+          <p className="text-[11px] text-[var(--study-text-soft)] -mt-1">
             Click listening posts on the chest drawing to inspect valve radiation & acoustics
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-            {/* SVG Anatomical Torso Drawing */}
-            <div className="md:col-span-6 relative overflow-hidden rounded-[14px] border border-white/10 bg-black/60 p-2 flex items-center justify-center">
+            {/* SVG Anatomical Torso Drawing (kept dark oscilloscope stage for neon hotspots) */}
+            <div className="md:col-span-6 relative overflow-hidden rounded-[14px] border border-[var(--study-panel-border)] bg-[#0f0e10] p-2 flex items-center justify-center">
               <svg
                 viewBox="0 0 400 240"
                 className="h-auto w-full select-none"
@@ -407,7 +417,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                         cy={coords.y}
                         r="7"
                         fill={lm.color}
-                        stroke="#fff"
+                        stroke="#fbf7f0"
                         strokeWidth="1.5"
                       />
                       <text
@@ -437,11 +447,11 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                     className={cn(
                       "flex cursor-pointer flex-col gap-1 rounded-xl border p-2.5 text-xs transition-all",
                       isSelected
-                        ? "border-[color:var(--orange)] bg-[color:var(--orange)]/[0.08] shadow-chip"
-                        : "border-white/10 bg-black/30 hover:border-white/20"
+                        ? "border-[color:var(--orange)] bg-[color:var(--orange)]/[0.12] shadow-chip"
+                        : "border-[var(--study-border)] bg-[var(--study-surface-muted)] hover:border-[var(--study-panel-border)]"
                     )}
                   >
-                    <div className="flex items-center justify-between font-bold text-[color:var(--cream)]">
+                    <div className="flex items-center justify-between font-bold text-[var(--study-text)]">
                       <span className="flex items-center gap-1.5">
                         <span
                           className="size-2.5 rounded-full"
@@ -449,11 +459,11 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                         />
                         <span>{lm.name}</span>
                       </span>
-                      <span className="text-[10px] text-[color:var(--cream)]/60 font-mono">
+                      <span className="text-[10px] text-[var(--study-text-muted)] font-mono">
                         {lm.location}
                       </span>
                     </div>
-                    <p className="text-[11px] leading-relaxed text-[color:var(--cream)]/80">
+                    <p className="text-[11px] leading-relaxed text-[var(--study-text-soft)]">
                       {lm.notes}
                     </p>
                   </div>
@@ -468,38 +478,38 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
       {/* 3. SIDE-BY-SIDE CONTRAST MATRIX (CLEAN CODE VS DEBT / SLUM) */}
       {/* ========================================================================= */}
       {comparisonBlock && comparisonBlock.comparisonData && (activeTab === "all" || activeTab === "matrix") && (
-        <div className="flex flex-col gap-3 rounded-[20px] border-2 border-white/10 bg-[color:var(--ink-soft)] p-4 shadow-chip">
+        <div className="flex flex-col gap-3 rounded-[18px] border-[1.5px] border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md p-3.5 shadow-[var(--study-shadow)]">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[color:var(--cream)]">
+            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[var(--study-text)]">
               <Split className="size-4 text-[color:var(--orange)]" />
               <span>{comparisonBlock.title}</span>
             </div>
-            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9.5px] font-mono text-[color:var(--cream)]/60">
+            <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-2 py-0.5 text-[9.5px] font-mono text-[var(--study-text-muted)]">
               Pattern Battle
             </span>
           </div>
-          <p className="text-[11px] text-[color:var(--cream)]/70 -mt-1">
+          <p className="text-[11px] text-[var(--study-text-muted)] -mt-1">
             {comparisonBlock.subtitle}
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Left: Distinctive Accent Column (Orange Fill) */}
-            <div className="flex flex-col gap-2 rounded-[18px] border-2 border-[color:var(--ink)] bg-[#ff4c00] text-[color:var(--ink)] p-4 shadow-chip">
+            <div className="flex flex-col gap-2 rounded-[18px] border-2 border-[var(--study-panel-border)] bg-[#ff4c00] text-[#0f0e10] p-4 shadow-chip">
               <div className="flex items-center justify-between">
-                <span className="rounded-full bg-[color:var(--ink)] px-2.5 py-0.5 text-[10px] font-black text-[#f6d7a1] uppercase tracking-wider">
+                <span className="rounded-full bg-[#0f0e10] px-2.5 py-0.5 text-[10px] font-black text-[#f6d7a1] uppercase tracking-wider">
                   {comparisonBlock.comparisonData.left.badge}
                 </span>
-                <span className="text-[10px] font-mono font-bold text-[color:var(--ink)]/80 uppercase">Primary Focus</span>
+                <span className="text-[10px] font-mono font-bold text-[#0f0e10]/80 uppercase">Primary Focus</span>
               </div>
-              <h4 className="text-sm font-black text-[color:var(--ink)]">
+              <h4 className="text-sm font-black text-[#0f0e10]">
                 {comparisonBlock.comparisonData.left.title}
               </h4>
 
-              <div className="flex flex-col gap-1.5 pt-2 border-t border-[color:var(--ink)]/20 text-[11px]">
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-[#0f0e10]/20 text-[11px]">
                 {comparisonBlock.comparisonData.left.characteristics.map((c, i) => (
                   <div key={i} className="flex items-start gap-1.5 leading-snug">
-                    <span className="text-[color:var(--ink)] font-black">✦</span>
-                    <span className="text-[color:var(--ink)]">
+                    <span className="text-[#0f0e10] font-black">✦</span>
+                    <span className="text-[#0f0e10]">
                       <strong>{c.label}:</strong> {c.value}
                     </span>
                   </div>
@@ -507,29 +517,29 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
               </div>
 
               {comparisonBlock.comparisonData.left.visualSnippet && (
-                <div className="mt-2 rounded-lg bg-[color:var(--ink)] p-2 font-mono text-[10px] text-[#f6d7a1] border border-[color:var(--ink)] overflow-x-auto whitespace-pre">
+                <div className="mt-2 rounded-lg bg-[#0f0e10] p-2 font-mono text-[10px] text-[#f6d7a1] border border-[#0f0e10] overflow-x-auto whitespace-pre">
                   {comparisonBlock.comparisonData.left.visualSnippet}
                 </div>
               )}
             </div>
 
             {/* Right: Clean Standard Column (Mint/Teal Fill) */}
-            <div className="flex flex-col gap-2 rounded-[18px] border-2 border-[color:var(--ink)] bg-[#7fd8c9] text-[color:var(--ink)] p-4 shadow-chip">
+            <div className="flex flex-col gap-2 rounded-[18px] border-2 border-[var(--study-panel-border)] bg-[#7fd8c9] text-[#0f0e10] p-4 shadow-chip">
               <div className="flex items-center justify-between">
-                <span className="rounded-full bg-[color:var(--ink)] px-2.5 py-0.5 text-[10px] font-black text-[#7fd8c9] uppercase tracking-wider">
+                <span className="rounded-full bg-[#0f0e10] px-2.5 py-0.5 text-[10px] font-black text-[#7fd8c9] uppercase tracking-wider">
                   {comparisonBlock.comparisonData.right.badge}
                 </span>
-                <span className="text-[10px] font-mono font-bold text-[color:var(--ink)]/80 uppercase">Differential Target</span>
+                <span className="text-[10px] font-mono font-bold text-[#0f0e10]/80 uppercase">Differential Target</span>
               </div>
-              <h4 className="text-sm font-black text-[color:var(--ink)]">
+              <h4 className="text-sm font-black text-[#0f0e10]">
                 {comparisonBlock.comparisonData.right.title}
               </h4>
 
-              <div className="flex flex-col gap-1.5 pt-2 border-t border-[color:var(--ink)]/20 text-[11px]">
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-[#0f0e10]/20 text-[11px]">
                 {comparisonBlock.comparisonData.right.characteristics.map((c, i) => (
                   <div key={i} className="flex items-start gap-1.5 leading-snug">
-                    <span className="text-[color:var(--ink)] font-black">✓</span>
-                    <span className="text-[color:var(--ink)]">
+                    <span className="text-[#0f0e10] font-black">✓</span>
+                    <span className="text-[#0f0e10]">
                       <strong>{c.label}:</strong> {c.value}
                     </span>
                   </div>
@@ -537,7 +547,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
               </div>
 
               {comparisonBlock.comparisonData.right.visualSnippet && (
-                <div className="mt-2 rounded-lg bg-[color:var(--ink)] p-2 font-mono text-[10px] text-[#7fd8c9] border border-[color:var(--ink)] overflow-x-auto whitespace-pre">
+                <div className="mt-2 rounded-lg bg-[#0f0e10] p-2 font-mono text-[10px] text-[#7fd8c9] border border-[#0f0e10] overflow-x-auto whitespace-pre">
                   {comparisonBlock.comparisonData.right.visualSnippet}
                 </div>
               )}
@@ -552,11 +562,11 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
       {roadmapBlock && roadmapBlock.roadmapCards && (activeTab === "all" || activeTab === "cards") && (
         <div className="flex flex-col gap-2.5">
           <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[color:var(--cream)]">
+            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[var(--study-text)]">
               <Layers className="size-3.5 text-[color:var(--orange)]" />
               <span>{roadmapBlock.title}</span>
             </div>
-            <span className="text-[10px] text-[color:var(--cream)]/60">
+            <span className="text-[10px] text-[var(--study-text-muted)]">
               {roadmapBlock.subtitle}
             </span>
           </div>
@@ -569,30 +579,30 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
               const paletteCycle = ["accent-orange", "accent-cream", "accent-teal", "accent-magenta"];
               const effectiveBadgeType = card.badgeType || paletteCycle[cardIdx % paletteCycle.length];
 
-              let cardBg = "bg-[#ff4c00] text-[color:var(--ink)] border-2 border-[color:var(--ink)] shadow-chip";
-              let badgeStyle = "bg-[color:var(--ink)] text-[#f6d7a1] border-[color:var(--ink)]";
-              let bulletBullet = "text-[color:var(--ink)]";
-              let dividerStyle = "border-[color:var(--ink)]/20";
-              let subStyle = "text-[color:var(--ink)]/85";
+              let cardBg = "bg-[#ff4c00] text-[#0f0e10] border-2 border-[var(--study-panel-border)] shadow-chip";
+              let badgeStyle = "bg-[#0f0e10] text-[#f6d7a1] border-[#0f0e10]";
+              let bulletBullet = "text-[#0f0e10]";
+              let dividerStyle = "border-[#0f0e10]/20";
+              let subStyle = "text-[#0f0e10]/85";
 
               if (effectiveBadgeType === "accent-teal") {
-                cardBg = "bg-[#7fd8c9] text-[color:var(--ink)] border-2 border-[color:var(--ink)] shadow-chip";
-                badgeStyle = "bg-[color:var(--ink)] text-[#7fd8c9] border-[color:var(--ink)]";
-                bulletBullet = "text-[color:var(--ink)]";
-                dividerStyle = "border-[color:var(--ink)]/20";
-                subStyle = "text-[color:var(--ink)]/85";
+                cardBg = "bg-[#7fd8c9] text-[#0f0e10] border-2 border-[var(--study-panel-border)] shadow-chip";
+                badgeStyle = "bg-[#0f0e10] text-[#7fd8c9] border-[#0f0e10]";
+                bulletBullet = "text-[#0f0e10]";
+                dividerStyle = "border-[#0f0e10]/20";
+                subStyle = "text-[#0f0e10]/85";
               } else if (effectiveBadgeType === "accent-cream") {
-                cardBg = "bg-[#f6d7a1] text-[color:var(--ink)] border-2 border-[color:var(--ink)] shadow-chip";
-                badgeStyle = "bg-[#ff4c00] text-[color:var(--ink)] border-[color:var(--ink)]";
+                cardBg = "bg-[#f6d7a1] text-[#0f0e10] border-2 border-[var(--study-panel-border)] shadow-chip";
+                badgeStyle = "bg-[#ff4c00] text-[#0f0e10] border-[#0f0e10]";
                 bulletBullet = "text-[#ff4c00]";
-                dividerStyle = "border-[color:var(--ink)]/20";
-                subStyle = "text-[color:var(--ink)]/85";
+                dividerStyle = "border-[#0f0e10]/20";
+                subStyle = "text-[#0f0e10]/85";
               } else if (effectiveBadgeType === "accent-magenta") {
-                cardBg = "bg-[#e0459a] text-[color:var(--ink)] border-2 border-[color:var(--ink)] shadow-chip";
-                badgeStyle = "bg-[color:var(--ink)] text-[#f6d7a1] border-[color:var(--ink)]";
-                bulletBullet = "text-[color:var(--ink)]";
-                dividerStyle = "border-[color:var(--ink)]/20";
-                subStyle = "text-[color:var(--ink)]/90";
+                cardBg = "bg-[#e0459a] text-[#0f0e10] border-2 border-[var(--study-panel-border)] shadow-chip";
+                badgeStyle = "bg-[#0f0e10] text-[#f6d7a1] border-[#0f0e10]";
+                bulletBullet = "text-[#0f0e10]";
+                dividerStyle = "border-[#0f0e10]/20";
+                subStyle = "text-[#0f0e10]/90";
               }
 
               return (
@@ -603,7 +613,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                     "group relative flex cursor-pointer flex-col justify-between rounded-[18px] p-4 transition-all duration-200 min-w-0 overflow-hidden",
                     cardBg,
                     isSelected
-                      ? "ring-4 ring-[color:var(--ink)] -translate-y-1 scale-[1.01]"
+                      ? "ring-4 ring-[color:var(--orange)] -translate-y-1 scale-[1.01]"
                       : "hover:-translate-y-0.5",
                   )}
                 >
@@ -618,13 +628,13 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                         {card.badge}
                       </span>
                       {card.contextLink && (
-                        <span className="truncate text-[10px] font-mono font-bold text-[color:var(--ink)]/60">
+                        <span className="truncate text-[10px] font-mono font-bold text-[#0f0e10]/65">
                           Section {card.contextLink.targetPageOrSegment}
                         </span>
                       )}
                     </div>
 
-                    <h4 className="text-sm font-black leading-snug text-[color:var(--ink)] break-words">
+                    <h4 className="text-sm font-black leading-snug text-[#0f0e10] break-words">
                       <BiDiText text={card.title} />
                     </h4>
 
@@ -632,7 +642,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                       <BiDiText text={card.subtitle} />
                     </div>
 
-                    <ul className={cn("flex flex-col gap-1.5 pt-2 border-t text-[11px] font-medium text-[color:var(--ink)]", dividerStyle)}>
+                    <ul className={cn("flex flex-col gap-1.5 pt-2 border-t text-[11px] font-medium text-[#0f0e10]", dividerStyle)}>
                       {card.bulletPoints.map((pt, idx) => (
                         <li key={idx} className="flex items-start gap-1.5 leading-relaxed">
                           <span className={cn("shrink-0 font-black", bulletBullet)}>›</span>
@@ -645,16 +655,16 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
 
                     {/* Expanded Mechanism & Significance on Selection */}
                     {isSelected && (
-                      <div className="mt-2.5 pt-2.5 border-t border-[color:var(--ink)]/20 text-[11px] flex flex-col gap-2 animate-in fade-in duration-150">
+                      <div className="mt-2.5 pt-2.5 border-t border-[#0f0e10]/20 text-[11px] flex flex-col gap-2 animate-in fade-in duration-150">
                         {card.mechanismSteps && card.mechanismSteps.length > 0 && (
                           <div className="p-2 rounded-lg bg-black/10">
-                            <span className="text-[10px] font-black uppercase text-[color:var(--ink)] block mb-1">
+                            <span className="text-[10px] font-black uppercase text-[#0f0e10] block mb-1">
                               ✦ Mechanistic Progression:
                             </span>
                             <ul className="space-y-1">
                               {card.mechanismSteps.map((step, sIdx) => (
                                 <li key={sIdx} className="flex items-start gap-1">
-                                  <span className="font-bold text-[color:var(--ink)]">{sIdx + 1}.</span>
+                                  <span className="font-bold text-[#0f0e10]">{sIdx + 1}.</span>
                                   <BiDiText text={step} />
                                 </li>
                               ))}
@@ -662,7 +672,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                           </div>
                         )}
                         {card.clinicalSignificance && (
-                          <div className="text-[10.5px] italic text-[color:var(--ink)]/90">
+                          <div className="text-[10.5px] italic text-[#0f0e10]/90">
                             <strong>Significance:</strong> <BiDiText text={card.clinicalSignificance} />
                           </div>
                         )}
@@ -671,7 +681,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                   </div>
 
                   {card.contextLink && (
-                    <div className="mt-3 border-t border-[color:var(--ink)]/20 pt-2 text-[10px]">
+                    <div className="mt-3 border-t border-[#0f0e10]/20 pt-2 text-[10px]">
                       <button
                         type="button"
                         onClick={(e) => {
@@ -685,7 +695,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                             );
                           }
                         }}
-                        className="flex w-full items-center justify-between text-left text-[color:var(--ink)] font-bold hover:underline transition-colors cursor-pointer"
+                        className="flex w-full items-center justify-between text-left text-[#0f0e10] font-bold hover:underline transition-colors cursor-pointer"
                       >
                         <span className="font-bold flex items-center gap-1 truncate">
                           <span>🔗</span>
@@ -706,13 +716,13 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
       {/* 5. ANIMATED SIMULATOR / SYSTEM METRICS */}
       {/* ========================================================================= */}
       {simulatorBlock && (activeTab === "all" || activeTab === "simulator") && (
-        <div className="flex flex-col gap-3 rounded-[20px] border-2 border-white/10 bg-[color:var(--ink-soft)] p-4 shadow-chip">
+        <div className="flex flex-col gap-3 rounded-[18px] border-[1.5px] border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md p-3.5 shadow-[var(--study-shadow)]">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[#7fd8c9]">
-              <Activity className="size-4 text-[color:var(--teal)]" />
+            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[var(--study-teal-text)]">
+              <Activity className="size-4 text-[var(--study-teal-text)]" />
               <span>{simulatorBlock.title}</span>
             </div>
-            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9.5px] font-bold text-[color:var(--cream)]/60">
+            <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-2 py-0.5 text-[9.5px] font-bold text-[var(--study-text-muted)]">
               Interactive Dynamics Engine
             </span>
           </div>
@@ -726,8 +736,8 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                 className={cn(
                   "cursor-pointer rounded-full px-3 py-1 text-[11px] font-bold transition-all",
                   activeSimulatorPreset === p.id
-                    ? "border-2 border-[color:var(--ink)] bg-[#43a08f] text-[color:var(--ink)] shadow-chip"
-                    : "border border-white/10 text-[color:var(--cream)]/70 hover:bg-white/5 hover:text-[color:var(--cream)]",
+                    ? "border-2 border-[var(--study-panel-border)] bg-[#7fd8c9] text-[#0f0e10] font-black shadow-chip"
+                    : "border border-[var(--study-pill-border)]/60 bg-[var(--study-surface-muted)] text-[var(--study-text-soft)] hover:border-[var(--study-panel-border)] hover:text-[var(--study-text)]",
                 )}
               >
                 {p.label}
@@ -737,7 +747,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
 
           {/* Cardiology Phonocardiogram OR Software Metrics */}
           {isPhono ? (
-            <div className="relative overflow-hidden rounded-[14px] border border-white/10 bg-black/60 p-3">
+            <div className="relative overflow-hidden rounded-[14px] border border-[var(--study-panel-border)] bg-[#0f0e10] p-3">
               <svg
                 viewBox="0 0 420 120"
                 className="h-auto w-full select-none"
@@ -769,7 +779,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                 </text>
 
                 {/* Systole */}
-                <text x="165" y="58" textAnchor="middle" fill="rgba(246, 215, 161, 0.4)" fontSize="9.5">
+                <text x="165" y="58" textAnchor="middle" fill="rgba(246, 215, 161, 0.55)" fontSize="9.5">
                   ← SYSTOLE →
                 </text>
 
@@ -799,39 +809,39 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
               </svg>
             </div>
           ) : (
-            <div className="rounded-[14px] border border-white/10 bg-black/60 p-4 flex flex-col gap-3">
+            <div className="rounded-[14px] border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-3.5 flex flex-col gap-3">
               <div className="grid grid-cols-3 gap-2">
-                <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-center flex flex-col items-center gap-1">
-                  <span className="text-[10px] uppercase font-mono text-[color:var(--cream)]/60">
+                <div className="rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-solid)] p-2.5 text-center flex flex-col items-center gap-1">
+                  <span className="text-[10px] uppercase font-mono text-[var(--study-text-muted)]">
                     Velocity
                   </span>
                   <span className={cn(
-                    "text-lg font-black",
-                    activeSimulatorPreset === "clean" ? "text-[#7fd8c9]" : activeSimulatorPreset === "hack" ? "text-[#ff6e33]" : "text-[color:var(--orange)]"
+                    "text-base sm:text-lg font-black",
+                    activeSimulatorPreset === "clean" ? "text-[var(--study-teal-text)]" : activeSimulatorPreset === "hack" ? "text-[#ff6e33]" : "text-[color:var(--orange)]"
                   )}>
                     {activeSimulatorPreset === "clean" ? "Steady" : activeSimulatorPreset === "hack" ? "Dropping" : "Rebounding"}
                   </span>
                 </div>
 
-                <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-center flex flex-col items-center gap-1">
-                  <span className="text-[10px] uppercase font-mono text-[color:var(--cream)]/60">
+                <div className="rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-solid)] p-2.5 text-center flex flex-col items-center gap-1">
+                  <span className="text-[10px] uppercase font-mono text-[var(--study-text-muted)]">
                     Tech Debt
                   </span>
                   <span className={cn(
-                    "text-lg font-black",
-                    activeSimulatorPreset === "clean" ? "text-[#7fd8c9]" : activeSimulatorPreset === "hack" ? "text-[#ff4c00]" : "text-[color:var(--cream)]"
+                    "text-base sm:text-lg font-black",
+                    activeSimulatorPreset === "clean" ? "text-[var(--study-teal-text)]" : activeSimulatorPreset === "hack" ? "text-[#ff4c00]" : "text-[var(--study-text)]"
                   )}>
                     {activeSimulatorPreset === "clean" ? "Low" : activeSimulatorPreset === "hack" ? "Critical" : "Controlled"}
                   </span>
                 </div>
 
-                <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-center flex flex-col items-center gap-1">
-                  <span className="text-[10px] uppercase font-mono text-[color:var(--cream)]/60">
+                <div className="rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-solid)] p-2.5 text-center flex flex-col items-center gap-1">
+                  <span className="text-[10px] uppercase font-mono text-[var(--study-text-muted)]">
                     Bug Friction
                   </span>
                   <span className={cn(
-                    "text-lg font-black",
-                    activeSimulatorPreset === "clean" ? "text-[#7fd8c9]" : activeSimulatorPreset === "hack" ? "text-[#ff4c00]" : "text-[color:var(--cream)]"
+                    "text-base sm:text-lg font-black",
+                    activeSimulatorPreset === "clean" ? "text-[var(--study-teal-text)]" : activeSimulatorPreset === "hack" ? "text-[#ff4c00]" : "text-[var(--study-text)]"
                   )}>
                     {activeSimulatorPreset === "clean" ? "Near Zero" : activeSimulatorPreset === "hack" ? "Severe" : "Low"}
                   </span>
@@ -841,10 +851,10 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
           )}
 
           {currentPreset && (
-            <div className="flex items-start gap-2 rounded-xl bg-black/40 p-3 text-xs leading-relaxed text-[color:var(--cream)]/90 border border-white/5">
-              <Info className="size-4 shrink-0 text-[#7fd8c9] mt-0.5" />
+            <div className="flex items-start gap-2 rounded-xl bg-[var(--study-surface-muted)] p-3 text-xs leading-relaxed text-[var(--study-text-soft)] border border-[var(--study-border)]">
+              <Info className="size-4 shrink-0 text-[var(--study-teal-text)] mt-0.5" />
               <div>
-                <strong className="text-[color:var(--cream)]">
+                <strong className="text-[var(--study-text)]">
                   {currentPreset.label}:{" "}
                 </strong>
                 <span>{currentPreset.caption}</span>

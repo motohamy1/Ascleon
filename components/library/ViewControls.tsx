@@ -156,11 +156,11 @@ export default function ViewControls({
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
               activeFilter === "cat_textbook"
-                ? "bg-[#663820] text-white border-[#663820]"
+                ? "bg-[#212A3B] text-white border-[#212A3B]"
                 : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
             )}
           >
-            <BookMarked className="w-3 h-3 text-[#d4a853]" />
+            <BookMarked className="w-3 h-3 text-[#ff4c00]" />
             <span>Textbooks</span>
             <span className="opacity-70 text-[10px]">({categoryCounts.textbook})</span>
           </button>
@@ -174,11 +174,11 @@ export default function ViewControls({
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
               activeFilter === "cat_lecture_notes"
-                ? "bg-[#2e6f68] text-white border-[#2e6f68]"
+                ? "bg-[#212A3B] text-white border-[#212A3B]"
                 : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
             )}
           >
-            <GraduationCap className="w-3 h-3 text-[#7fd8c9]" />
+            <GraduationCap className="w-3 h-3 text-[#ff4c00]" />
             <span>Lectures & Notes</span>
             <span className="opacity-70 text-[10px]">({categoryCounts.lecture_notes})</span>
           </button>
@@ -192,11 +192,11 @@ export default function ViewControls({
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
               activeFilter === "cat_clinical_sheet"
-                ? "bg-[#ff4c00] text-white border-[#ff4c00]"
+                ? "bg-[#212A3B] text-white border-[#212A3B]"
                 : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
             )}
           >
-            <FileText className="w-3 h-3" />
+            <FileText className="w-3 h-3 text-[#ff4c00]" />
             <span>Clinical Sheets</span>
             <span className="opacity-70 text-[10px]">({categoryCounts.clinical_sheet})</span>
           </button>
@@ -210,11 +210,11 @@ export default function ViewControls({
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
               activeFilter === "cat_guideline_paper"
-                ? "bg-[#a1156e] text-white border-[#a1156e]"
+                ? "bg-[#212A3B] text-white border-[#212A3B]"
                 : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
             )}
           >
-            <FileCheck2 className="w-3 h-3 text-[#f6d7a1]" />
+            <FileCheck2 className="w-3 h-3 text-[#ff4c00]" />
             <span>Guidelines</span>
             <span className="opacity-70 text-[10px]">({categoryCounts.guideline_paper})</span>
           </button>
@@ -228,11 +228,11 @@ export default function ViewControls({
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
               activeFilter === "cat_exam_review"
-                ? "bg-[#3d485e] text-white border-[#3d485e]"
+                ? "bg-[#212A3B] text-white border-[#212A3B]"
                 : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
             )}
           >
-            <Award className="w-3 h-3 text-[#d4a853]" />
+            <Award className="w-3 h-3 text-[#ff4c00]" />
             <span>Exam Review</span>
             <span className="opacity-70 text-[10px]">({categoryCounts.exam_review})</span>
           </button>
@@ -246,11 +246,11 @@ export default function ViewControls({
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
               activeFilter === "favorites"
-                ? "bg-[#d4a853] text-[#212A3B] font-bold border-[#d4a853]"
+                ? "bg-[#212A3B] text-white border-[#212A3B]"
                 : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
             )}
           >
-            <Star className="w-3 h-3 fill-current" />
+            <Star className="w-3 h-3 fill-current text-[#ff4c00]" />
             <span>Favourites</span>
             <span className="opacity-70 text-[10px]">({favoritesCount})</span>
           </button>
@@ -264,11 +264,11 @@ export default function ViewControls({
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
               activeFilter === "reading_now"
-                ? "bg-[#1E3B2C] text-white border-[#1E3B2C]"
+                ? "bg-[#212A3B] text-white border-[#212A3B]"
                 : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
             )}
           >
-            <BookmarkCheck className="w-3 h-3" />
+            <BookmarkCheck className="w-3 h-3 text-[#ff4c00]" />
             <span>Reading now</span>
             <span className="opacity-70 text-[10px]">({inProgressCount})</span>
           </button>
@@ -282,11 +282,11 @@ export default function ViewControls({
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border",
               activeFilter === "quick_reads"
-                ? "bg-[#29434E] text-white border-[#29434E]"
+                ? "bg-[#212A3B] text-white border-[#212A3B]"
                 : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
             )}
           >
-            <Clock className="w-3 h-3" />
+            <Clock className="w-3 h-3 text-[#ff4c00]" />
             <span>Under 15 min</span>
             <span className="opacity-70 text-[10px]">({quickReadsCount})</span>
           </button>
@@ -303,11 +303,11 @@ export default function ViewControls({
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer border",
                 activeFilter === filterKey
-                  ? "bg-[#533017] text-[#f5ebd7] border-[#533017]"
-                  : "bg-[#FAF4EB] text-[#533017] border-[#D8CBB8] hover:bg-[#EFE8DD]",
+                  ? "bg-[#212A3B] text-white border-[#212A3B]"
+                  : "bg-white text-[#524B43] border-[#E2D7C5] hover:bg-[#F8F4EE]",
               )}
             >
-              <Folder className="w-3 h-3 text-[#d4af37]" />
+              <Folder className="w-3 h-3 text-[#ff4c00]" />
               <span>{cat.name}</span>
               <span className="opacity-70 text-[10px]">({cat.count})</span>
             </button>

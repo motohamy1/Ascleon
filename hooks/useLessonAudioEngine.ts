@@ -15,6 +15,7 @@ export interface LessonAudioEngineState {
   sectionElapsedMs: number;
   isPlaying: boolean;
   isBuffering: boolean;
+  isVirtualClock: boolean;
   decodedReadyCount: number;
   togglePlay: () => void;
   restart: () => void;
@@ -22,10 +23,20 @@ export interface LessonAudioEngineState {
   pause: () => void;
 }
 
+function getSectionDurationMs(sec?: LessonVoiceSectionTrack): number {
+  if (!sec) return 10_000;
+  if (sec.audioDurationMs && sec.audioDurationMs > 500) return sec.audioDurationMs;
+  if (sec.cues && sec.cues.length > 0) {
+    const last = sec.cues[sec.cues.length - 1];
+    if (last.endMs > 500) return last.endMs;
+  }
+  return 10_000;
+}
+
 /**
- * Gapless Web Audio API engine for LessonBoard sections.
- * Decodes each section's WAV buffer once and schedules consecutive sections cleanly
- * on a single AudioContext clock with zero HTMLAudioElement end-of-track stutter.
+ * Gapless Web Audio API engine for LessonBoard sections with a resilient
+ * virtual reading-cadence clock fallback so playback NEVER hangs or freezes
+ * if TTS audio is still generating or failed due to rate limits.
  */
 export function useLessonAudioEngine({
   sections,
@@ -36,6 +47,7 @@ export function useLessonAudioEngine({
   const [activeSectionIndex, setActiveSectionIndex] = useState(0);
   const [sectionElapsedMs, setSectionElapsedMs] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isVirtualClock, setIsVirtualClock] = useState(false);
   const [wantAutoPlay, setWantAutoPlay] = useState(true);
   const [decodedReadyCount, setDecodedReadyCount] = useState(0);
 
@@ -45,6 +57,9 @@ export function useLessonAudioEngine({
   const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const sectionStartCtxTimeRef = useRef<number>(0);
   const offsetAtStartSecRef = useRef<number>(0);
+  const virtualLastTickMsRef = useRef<number>(0);
+  const virtualElapsedMsRef = useRef<number>(0);
+  const isVirtualClockRef = useRef<boolean>(false);
   const activeIndexRef = useRef<number>(0);
   const speedRef = useRef<number>(playbackSpeed);
   const isPlayingRef = useRef<boolean>(false);
@@ -121,7 +136,7 @@ export function useLessonAudioEngine({
           buffersRef.current.set(url, decoded);
           setDecodedReadyCount(buffersRef.current.size);
         } catch {
-          // Non-fatal: retry on next render
+          // Non-fatal: virtual clock handles playback smoothly
         } finally {
           fetchingRef.current.delete(url);
         }
@@ -136,69 +151,108 @@ export function useLessonAudioEngine({
   const startSectionPlayback = useCallback(
     (index: number, startOffsetSec = 0) => {
       const sec = sectionsRef.current[index];
-      const url = sec?.audioUrl;
-      const buf = url ? buffersRef.current.get(url) : undefined;
-      const ctx = ensureContext();
-
-      if (!sec || sec.status !== "ready" || !buf || !ctx) {
+      if (!sec) {
         stopCurrentSource();
         isPlayingRef.current = false;
+        isVirtualClockRef.current = false;
         setIsPlaying(false);
+        setIsVirtualClock(false);
         return false;
       }
 
+      const url = sec.audioUrl;
+      const buf = url ? buffersRef.current.get(url) : undefined;
+      const ctx = ensureContext();
+
       stopCurrentSource();
 
-      const safeOffset = Math.max(0, Math.min(buf.duration - 0.05, startOffsetSec));
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.playbackRate.value = speedRef.current;
-      src.connect(ctx.destination);
+      // Path A: Decoded real WAV audio available
+      if (sec.status === "ready" && buf && ctx) {
+        const safeOffset = Math.max(0, Math.min(buf.duration - 0.05, startOffsetSec));
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.playbackRate.value = speedRef.current;
+        src.connect(ctx.destination);
 
-      const when = ctx.currentTime;
-      sectionStartCtxTimeRef.current = when;
-      offsetAtStartSecRef.current = safeOffset;
-      activeIndexRef.current = index;
-      activeSourceRef.current = src;
-      isPlayingRef.current = true;
-      setActiveSectionIndex(index);
-      setSectionElapsedMs(Math.round(safeOffset * 1000));
-      setIsPlaying(true);
+        const when = ctx.currentTime;
+        sectionStartCtxTimeRef.current = when;
+        offsetAtStartSecRef.current = safeOffset;
+        activeIndexRef.current = index;
+        activeSourceRef.current = src;
+        isVirtualClockRef.current = false;
+        isPlayingRef.current = true;
+        setActiveSectionIndex(index);
+        setSectionElapsedMs(Math.round(safeOffset * 1000));
+        setIsVirtualClock(false);
+        setIsPlaying(true);
 
-      src.onended = () => {
-        if (activeSourceRef.current !== src) return;
-        activeSourceRef.current = null;
-        const nextIdx = index + 1;
-        if (nextIdx < sectionsRef.current.length) {
-          activeIndexRef.current = nextIdx;
-          setActiveSectionIndex(nextIdx);
-          setSectionElapsedMs(0);
-          offsetAtStartSecRef.current = 0;
-          const startedNext = startSectionPlayback(nextIdx, 0);
-          if (!startedNext) {
-            setWantAutoPlay(true);
+        src.onended = () => {
+          if (activeSourceRef.current !== src) return;
+          activeSourceRef.current = null;
+          const nextIdx = index + 1;
+          if (nextIdx < sectionsRef.current.length) {
+            activeIndexRef.current = nextIdx;
+            setActiveSectionIndex(nextIdx);
+            setSectionElapsedMs(0);
+            offsetAtStartSecRef.current = 0;
+            virtualElapsedMsRef.current = 0;
+            startSectionPlayback(nextIdx, 0);
+          } else {
+            isPlayingRef.current = false;
+            isVirtualClockRef.current = false;
+            setIsPlaying(false);
+            setIsVirtualClock(false);
+            setWantAutoPlay(false);
+            setSectionElapsedMs(Math.round(buf.duration * 1000));
+            onReachEndRef.current();
           }
-        } else {
-          isPlayingRef.current = false;
-          setIsPlaying(false);
-          setWantAutoPlay(false);
-          setSectionElapsedMs(Math.round(buf.duration * 1000));
-          onReachEndRef.current();
-        }
-      };
+        };
 
-      src.start(when, safeOffset);
-      return true;
+        src.start(when, safeOffset);
+        return true;
+      }
+
+      // Path B: Resilient Virtual Clock when audio failed or is still generating
+      if (sec.status === "failed" || !url) {
+        activeIndexRef.current = index;
+        virtualElapsedMsRef.current = Math.round(startOffsetSec * 1000);
+        virtualLastTickMsRef.current = performance.now();
+        isVirtualClockRef.current = true;
+        isPlayingRef.current = true;
+        setActiveSectionIndex(index);
+        setSectionElapsedMs(virtualElapsedMsRef.current);
+        setIsVirtualClock(true);
+        setIsPlaying(true);
+        return true;
+      }
+
+      // Audio URL exists and is still decoding; wait briefly or fall back after timeout
+      isPlayingRef.current = false;
+      setIsPlaying(false);
+      return false;
     },
     [ensureContext, stopCurrentSource]
   );
 
-  // Auto-start active section when its decoded AudioBuffer arrives and wantAutoPlay is true
+  // Auto-start active section when its decoded AudioBuffer arrives (or switch from virtual clock)
   useEffect(() => {
-    if (!wantAutoPlay || isOverview || isPlayingRef.current) return;
+    if (!wantAutoPlay || isOverview) return;
     const sec = sections[activeSectionIndex];
     const url = sec?.audioUrl;
-    if (sec?.status === "ready" && url && buffersRef.current.has(url)) {
+    if (
+      sec?.status === "ready" &&
+      url &&
+      buffersRef.current.has(url) &&
+      (!isPlayingRef.current || isVirtualClockRef.current)
+    ) {
+      const resumeSec = isVirtualClockRef.current
+        ? virtualElapsedMsRef.current / 1000
+        : offsetAtStartSecRef.current;
+      startSectionPlayback(activeSectionIndex, resumeSec);
+    } else if (
+      sec?.status === "failed" &&
+      !isPlayingRef.current
+    ) {
       startSectionPlayback(activeSectionIndex, offsetAtStartSecRef.current);
     }
   }, [
@@ -214,7 +268,7 @@ export function useLessonAudioEngine({
   useEffect(() => {
     const src = activeSourceRef.current;
     const ctx = ctxRef.current;
-    if (src && ctx && isPlayingRef.current) {
+    if (src && ctx && isPlayingRef.current && !isVirtualClockRef.current) {
       const elapsedSec =
         offsetAtStartSecRef.current +
         (ctx.currentTime - sectionStartCtxTimeRef.current) * src.playbackRate.value;
@@ -224,7 +278,7 @@ export function useLessonAudioEngine({
     }
   }, [playbackSpeed]);
 
-  // 60fps master clock loop
+  // 60fps master clock loop (AudioContext clock OR Virtual Reading Clock)
   useEffect(() => {
     if (!isPlaying) {
       if (rafRef.current !== null) {
@@ -234,19 +288,51 @@ export function useLessonAudioEngine({
       return;
     }
 
-    const tick = () => {
-      const ctx = ctxRef.current;
-      const src = activeSourceRef.current;
-      if (ctx && src && isPlayingRef.current) {
-        const elapsedSec =
-          offsetAtStartSecRef.current +
-          (ctx.currentTime - sectionStartCtxTimeRef.current) * speedRef.current;
-        const durMs = (src.buffer?.duration || 10) * 1000;
-        setSectionElapsedMs(Math.max(0, Math.min(durMs, Math.round(elapsedSec * 1000))));
+    const tick = (now: number) => {
+      if (isVirtualClockRef.current && isPlayingRef.current) {
+        const dt = Math.max(0, Math.min(100, now - virtualLastTickMsRef.current));
+        virtualLastTickMsRef.current = now;
+        const sec = sectionsRef.current[activeIndexRef.current];
+        const totalMs = getSectionDurationMs(sec);
+        virtualElapsedMsRef.current += dt * speedRef.current;
+
+        if (virtualElapsedMsRef.current >= totalMs) {
+          const nextIdx = activeIndexRef.current + 1;
+          if (nextIdx < sectionsRef.current.length) {
+            activeIndexRef.current = nextIdx;
+            virtualElapsedMsRef.current = 0;
+            offsetAtStartSecRef.current = 0;
+            setActiveSectionIndex(nextIdx);
+            setSectionElapsedMs(0);
+            startSectionPlayback(nextIdx, 0);
+          } else {
+            isPlayingRef.current = false;
+            isVirtualClockRef.current = false;
+            setIsPlaying(false);
+            setIsVirtualClock(false);
+            setWantAutoPlay(false);
+            setSectionElapsedMs(totalMs);
+            onReachEndRef.current();
+            return;
+          }
+        } else {
+          setSectionElapsedMs(Math.round(virtualElapsedMsRef.current));
+        }
+      } else {
+        const ctx = ctxRef.current;
+        const src = activeSourceRef.current;
+        if (ctx && src && isPlayingRef.current) {
+          const elapsedSec =
+            offsetAtStartSecRef.current +
+            (ctx.currentTime - sectionStartCtxTimeRef.current) * speedRef.current;
+          const durMs = (src.buffer?.duration || 10) * 1000;
+          setSectionElapsedMs(Math.max(0, Math.min(durMs, Math.round(elapsedSec * 1000))));
+        }
       }
       rafRef.current = requestAnimationFrame(tick);
     };
 
+    virtualLastTickMsRef.current = performance.now();
     rafRef.current = requestAnimationFrame(tick);
     return () => {
       if (rafRef.current !== null) {
@@ -254,7 +340,7 @@ export function useLessonAudioEngine({
         rafRef.current = null;
       }
     };
-  }, [isPlaying]);
+  }, [isPlaying, startSectionPlayback]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -270,7 +356,10 @@ export function useLessonAudioEngine({
 
   const pause = useCallback(() => {
     setWantAutoPlay(false);
-    if (ctxRef.current && isPlayingRef.current) {
+    if (isVirtualClockRef.current && isPlayingRef.current) {
+      offsetAtStartSecRef.current = virtualElapsedMsRef.current / 1000;
+      setSectionElapsedMs(Math.round(virtualElapsedMsRef.current));
+    } else if (ctxRef.current && isPlayingRef.current) {
       const elapsedSec =
         offsetAtStartSecRef.current +
         (ctxRef.current.currentTime - sectionStartCtxTimeRef.current) * speedRef.current;
@@ -279,7 +368,9 @@ export function useLessonAudioEngine({
     }
     stopCurrentSource();
     isPlayingRef.current = false;
+    isVirtualClockRef.current = false;
     setIsPlaying(false);
+    setIsVirtualClock(false);
   }, [stopCurrentSource]);
 
   const togglePlay = useCallback(() => {
@@ -289,20 +380,32 @@ export function useLessonAudioEngine({
       return;
     }
     setWantAutoPlay(true);
-    const sec = sectionsRef.current[activeIndexRef.current];
-    const url = sec?.audioUrl;
-    if (sec?.status === "ready" && url && buffersRef.current.has(url)) {
-      startSectionPlayback(activeIndexRef.current, offsetAtStartSecRef.current);
+    const started = startSectionPlayback(
+      activeIndexRef.current,
+      offsetAtStartSecRef.current
+    );
+    if (!started) {
+      // Fallback immediately to virtual clock if user pressed Play while audio is pending
+      activeIndexRef.current = activeSectionIndex;
+      virtualElapsedMsRef.current = Math.round(offsetAtStartSecRef.current * 1000);
+      virtualLastTickMsRef.current = performance.now();
+      isVirtualClockRef.current = true;
+      isPlayingRef.current = true;
+      setIsVirtualClock(true);
+      setIsPlaying(true);
     }
-  }, [ensureContext, pause, startSectionPlayback]);
+  }, [ensureContext, pause, startSectionPlayback, activeSectionIndex]);
 
   const restart = useCallback(() => {
     ensureContext();
     stopCurrentSource();
     isPlayingRef.current = false;
+    isVirtualClockRef.current = false;
     setIsPlaying(false);
+    setIsVirtualClock(false);
     activeIndexRef.current = 0;
     offsetAtStartSecRef.current = 0;
+    virtualElapsedMsRef.current = 0;
     setActiveSectionIndex(0);
     setSectionElapsedMs(0);
     setWantAutoPlay(true);
@@ -314,9 +417,12 @@ export function useLessonAudioEngine({
       ensureContext();
       stopCurrentSource();
       isPlayingRef.current = false;
+      isVirtualClockRef.current = false;
       setIsPlaying(false);
+      setIsVirtualClock(false);
       activeIndexRef.current = index;
       offsetAtStartSecRef.current = 0;
+      virtualElapsedMsRef.current = 0;
       setActiveSectionIndex(index);
       setSectionElapsedMs(0);
       setWantAutoPlay(true);
@@ -334,13 +440,14 @@ export function useLessonAudioEngine({
     wantAutoPlay &&
     !isOverview &&
     !activeReady &&
-    activeSec?.status !== "failed";
+    activeSec?.status === "generating";
 
   return {
     activeSectionIndex,
     sectionElapsedMs,
     isPlaying,
     isBuffering,
+    isVirtualClock,
     decodedReadyCount,
     togglePlay,
     restart,

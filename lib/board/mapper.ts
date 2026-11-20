@@ -13,7 +13,7 @@ import {
   LessonVoiceTrack,
 } from "@/types/lesson-board";
 
-export const LESSON_PIPELINE_VERSION = 1;
+export const LESSON_PIPELINE_VERSION = 2;
 
 export function buildEmptyLessonVoiceTrack(
   voiceId: string,

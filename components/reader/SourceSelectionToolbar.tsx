@@ -64,9 +64,9 @@ export function SourceSelectionToolbar({
         left: `${Math.max(16, Math.min(position.x, 420))}px`,
         top: `${Math.max(12, position.y - 56)}px`,
       }}
-      className="animate-in fade-in zoom-in-95 absolute z-50 flex flex-col gap-1.5 rounded-2xl border-2 border-[color:var(--ink)] bg-[#16151a] p-2 text-[color:var(--cream)] shadow-2xl duration-150"
+      className="animate-in fade-in zoom-in-95 absolute z-50 flex flex-col gap-1.5 rounded-2xl border border-[var(--study-border-strong)] bg-[var(--study-surface-solid)] backdrop-blur-xl p-2 text-[var(--study-text)] shadow-[var(--study-shadow-lg)] duration-150"
     >
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-1.5 pb-1 text-[10px]">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--study-border)] px-1.5 pb-1 text-[10px]">
         <span className="flex items-center gap-1 font-bold text-[color:var(--orange)]">
           <ScanSearch className="size-3" />
           <span>Target Selection ({selectedText.split(/\s+/).length} words)</span>
@@ -75,15 +75,15 @@ export function SourceSelectionToolbar({
           <button
             type="button"
             onClick={handleCopy}
-            className="rounded p-0.5 text-[color:var(--cream)]/60 hover:bg-white/10 hover:text-[color:var(--cream)]"
+            className="rounded p-0.5 text-[var(--study-text-muted)] hover:bg-[var(--study-glass-hover)] hover:text-[var(--study-text)] cursor-pointer"
             title="Copy selection"
           >
-            {copied ? <Check className="size-3 text-[#43a08f]" /> : <Copy className="size-3" />}
+            {copied ? <Check className="size-3 text-[var(--study-teal-text)]" /> : <Copy className="size-3" />}
           </button>
           <button
             type="button"
             onClick={onClearSelection}
-            className="rounded p-0.5 text-[color:var(--cream)]/60 hover:bg-white/10 hover:text-[color:var(--cream)]"
+            className="rounded p-0.5 text-[var(--study-text-muted)] hover:bg-[var(--study-glass-hover)] hover:text-[var(--study-text)] cursor-pointer"
             title="Clear selection"
           >
             <X className="size-3" />
@@ -108,11 +108,11 @@ export function SourceSelectionToolbar({
             type="button"
             disabled
             title="Whiteboard — Coming Soon"
-            className="flex cursor-not-allowed items-center gap-1 rounded-xl border border-white/15 bg-white/10 px-2.5 py-1.5 text-[11px] font-bold text-[color:var(--cream)]/65 opacity-70"
+            className="flex cursor-not-allowed items-center gap-1 rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--study-text-muted)] opacity-75"
           >
             <Tv className="size-3" />
             <span>Whiteboard</span>
-            <span className="rounded-full border border-white/20 bg-white/10 px-1.5 py-0.5 text-[8.5px] font-black uppercase tracking-wider text-[color:var(--cream)]/90">
+            <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-glass)] px-1.5 py-0.5 text-[8.5px] font-black uppercase tracking-wider text-[var(--study-text-soft)]">
               Soon
             </span>
           </button>
@@ -122,9 +122,9 @@ export function SourceSelectionToolbar({
         <button
           type="button"
           onClick={() => onAskAI()}
-          className="flex cursor-pointer items-center gap-1 rounded-xl border border-white/15 bg-white/[0.07] px-2.5 py-1.5 text-[11px] font-bold text-[color:var(--cream)] transition-colors hover:border-[color:var(--orange)] hover:bg-[color:var(--orange)]/15"
+          className="flex cursor-pointer items-center gap-1 rounded-xl border border-[var(--study-border)] bg-[var(--study-glass)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--study-text)] transition-colors hover:border-[color:var(--orange)] hover:bg-[color:var(--orange)]/15"
         >
-          <MessageSquare className="size-3 text-[#7fd8c9]" />
+          <MessageSquare className="size-3 text-[var(--study-teal-text)]" />
           <span>Explain</span>
         </button>
 
@@ -132,7 +132,7 @@ export function SourceSelectionToolbar({
         <button
           type="button"
           onClick={onVoiceViva}
-          className="flex cursor-pointer items-center gap-1 rounded-xl border border-white/15 bg-white/[0.07] px-2.5 py-1.5 text-[11px] font-bold text-[color:var(--cream)] transition-colors hover:border-[#43a08f] hover:bg-[#43a08f]/20"
+          className="flex cursor-pointer items-center gap-1 rounded-xl border border-[var(--study-border)] bg-[var(--study-glass)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--study-text)] transition-colors hover:border-[var(--study-teal-border)] hover:bg-[var(--study-teal-bg)]"
         >
           <Mic className="size-3 text-[color:var(--magenta)]" />
           <span>Viva</span>
@@ -142,9 +142,9 @@ export function SourceSelectionToolbar({
         <button
           type="button"
           onClick={onQuizSelection}
-          className="flex cursor-pointer items-center gap-1 rounded-xl border border-white/15 bg-white/[0.07] px-2.5 py-1.5 text-[11px] font-bold text-[color:var(--cream)] transition-colors hover:border-[color:var(--orange)] hover:bg-white/15"
+          className="flex cursor-pointer items-center gap-1 rounded-xl border border-[var(--study-border)] bg-[var(--study-glass)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--study-text)] transition-colors hover:border-[color:var(--orange)] hover:bg-[var(--study-glass-hover)]"
         >
-          <HelpCircle className="size-3 text-amber-400" />
+          <HelpCircle className="size-3 text-[var(--study-amber-text)]" />
           <span>QBank</span>
         </button>
 
@@ -152,7 +152,7 @@ export function SourceSelectionToolbar({
         <button
           type="button"
           onClick={onPinToBoard}
-          className="flex cursor-pointer items-center gap-1 rounded-xl border border-[#43a08f]/40 bg-[#43a08f]/15 px-2.5 py-1.5 text-[11px] font-bold text-[#7fd8c9] transition-colors hover:bg-[#43a08f]/30"
+          className="flex cursor-pointer items-center gap-1 rounded-xl border border-[var(--study-teal-border)] bg-[var(--study-teal-bg)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--study-teal-text)] transition-colors hover:brightness-105"
           title="Extract & Pin to Study Vault"
         >
           <BookmarkPlus className="size-3" />

@@ -88,11 +88,11 @@ const BookCard = ({
             e.stopPropagation();
             onDelete();
           }}
-          className="absolute top-2 left-2 z-20 p-1.5 bg-white/90 hover:bg-rose-50 text-gray-400 hover:text-rose-600 rounded-full shadow-xs opacity-0 group-hover:opacity-100 transition-all cursor-pointer border border-gray-200"
+          className="absolute top-1.5 left-1.5 z-20 flex size-11 items-center justify-center rounded-full border border-[#D8CBB8] bg-white/95 text-[#5A544C] opacity-0 shadow-xs transition-colors hover:bg-rose-50 hover:text-rose-700 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 cursor-pointer"
           title="Remove from library"
           aria-label="Remove book"
         >
-          <Trash2 className="w-3.5 h-3.5" />
+          <Trash2 className="w-4 h-4" />
         </button>
       )}
     </div>
