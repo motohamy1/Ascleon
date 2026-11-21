@@ -99,7 +99,7 @@ const STUDIO_MODES: Array<{
   { id: "voice", label: "Ascleon Voice", subtitle: "Live oral mentor", icon: Mic },
   { id: "chat", label: "AI Chat", subtitle: "Grounded Q&A", icon: MessageSquare },
   { id: "morph", label: "Morph", subtitle: "Interactive map", icon: Sparkles },
-  { id: "whiteboard", label: "Living Board", subtitle: "2D Board + 3D Lab", icon: Tv },
+  { id: "whiteboard", label: "Living Board", subtitle: "2D Board + 3D Lab", icon: Tv, soon: true },
   { id: "quiz", label: "Qbanks", subtitle: "Board practice", icon: HelpCircle },
   { id: "summary", label: "Summary", subtitle: "Pearls & mnemonics", icon: FileText },
 ];
@@ -325,18 +325,18 @@ export function StudioMenuDrawer({
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        onWhiteboardSelection();
-                        onClose();
-                      }}
-                      title="Create Living Board from selected text"
+                      disabled
+                      title="Living Board — Coming Soon"
                       className={cn(
                         GLASS_BUTTON_BASE,
-                        "flex items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] font-bold"
+                        "flex items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] font-bold opacity-55 cursor-not-allowed active:scale-100"
                       )}
                     >
-                      <Tv className="size-3 text-[color:var(--orange)]" />
+                      <Tv className="size-3 text-[var(--study-text-muted)]" />
                       <span>Living Board</span>
+                      <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-glass)] px-1.5 py-0.5 text-[8px] font-black uppercase">
+                        Soon
+                      </span>
                     </button>
                     <button
                       type="button"

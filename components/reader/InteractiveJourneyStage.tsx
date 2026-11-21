@@ -363,7 +363,7 @@ export default function InteractiveJourneyStage({
               Journey {currentStageIdx + 1}/{journey.stages.length}
             </span>
             <h2 className="truncate text-xs sm:text-sm font-black font-serif text-[var(--study-text)]">
-              {journey.title}
+              <BiDiText text={journey.title} />
             </h2>
           </div>
 
@@ -474,9 +474,9 @@ export default function InteractiveJourneyStage({
                           ✕
                         </button>
                       </div>
-                      <p className="text-[#fbf7f0] leading-relaxed text-[11px]">
+                      <BiDiText as="p" className="text-[#fbf7f0] leading-relaxed text-[11px]">
                         {hs.description}
-                      </p>
+                      </BiDiText>
                     </div>
                   );
                 })()}
@@ -525,7 +525,7 @@ export default function InteractiveJourneyStage({
 
             {/* Narrative Explanation with BiDi Protection */}
             <div className="mt-2.5">
-              <BiDiText className="text-xs leading-relaxed text-[var(--study-text-soft)] font-medium">
+              <BiDiText as="p" className="text-xs leading-relaxed text-[var(--study-text-soft)] font-medium">
                 {currentStage.description}
               </BiDiText>
             </div>
@@ -572,9 +572,9 @@ export default function InteractiveJourneyStage({
           </h3>
         </div>
 
-        <p className="text-xs font-bold leading-relaxed mb-2.5 text-[var(--study-text)]">
+        <BiDiText as="p" className="text-xs font-bold leading-relaxed mb-2.5 text-[var(--study-text)]">
           {currentStage.checkpoint.prompt}
-        </p>
+        </BiDiText>
 
         {/* Options */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2.5">
@@ -590,7 +590,7 @@ export default function InteractiveJourneyStage({
                 disabled={hasSubmittedCheckpoint && isCorrect}
                 onClick={() => setSelectedOption(optIdx)}
                 className={cn(
-                  "p-2.5 rounded-xl text-left text-xs border-[1.5px] transition-all cursor-pointer",
+                  "p-2.5 rounded-xl text-start text-xs border-[1.5px] transition-all cursor-pointer",
                   isAnswer
                     ? "border-[var(--study-panel-border)] bg-[#7fd8c9] text-[#0f0e10] font-black shadow-xs"
                     : isWrongSelection
@@ -601,10 +601,10 @@ export default function InteractiveJourneyStage({
                 )}
               >
                 <div className="flex items-start gap-2">
-                  <span className="font-mono font-black text-[11px] shrink-0">
+                  <span dir="ltr" className="font-mono font-black text-[11px] shrink-0">
                     {String.fromCharCode(65 + optIdx)}.
                   </span>
-                  <BiDiText text={opt} />
+                  <BiDiText as="span" className="flex-1 text-start" text={opt} />
                 </div>
               </button>
             );
