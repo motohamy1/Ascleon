@@ -9,6 +9,7 @@ import {
   getBookDomainContext,
 } from "@/lib/ai/knowledge/sample-book-data";
 import { MorphCanvas } from "@/components/reader/MorphCanvas";
+import { BiDiText } from "@/components/ui/BiDiText";
 import { AscleonVoiceStudio } from "@/components/reader/AscleonVoiceStudio";
 import {
   VoiceSessionProvider,
@@ -2085,17 +2086,15 @@ export default function LivingReader({
 
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setSelectedText(para);
-                                    setWhiteboardSelectionSeq((n) => n + 1);
-                                    setActiveIntent("whiteboard");
-                                    setMobileActivePane("studio");
-                                  }}
-                                  className="flex cursor-pointer items-center gap-1 rounded-full border border-current/20 bg-current/5 px-2 py-0.5 font-bold hover:bg-current/15"
-                                  title="Create Living Board from this block"
+                                  disabled
+                                  className="flex cursor-not-allowed items-center gap-1 rounded-full border border-current/15 bg-current/5 px-2 py-0.5 font-bold opacity-60"
+                                  title="Living Board — Coming Soon"
                                 >
                                   <Tv className="size-2.5" />
                                   <span>Living Board</span>
+                                  <span className="rounded-full bg-current/10 px-1 text-[8px] font-black uppercase">
+                                    Soon
+                                  </span>
                                 </button>
 
                                 <button
@@ -2663,16 +2662,19 @@ export default function LivingReader({
 
                 <button
                   type="button"
-                  onClick={() => setActiveIntent("whiteboard")}
-                  title="Ascleon Living Board — 2D Handwritten Whiteboard + 3D Lab"
-                  aria-label="Living Board"
+                  disabled
+                  title="Ascleon Living Board — Coming Soon"
+                  aria-label="Living Board (Coming Soon)"
                   className={cn(
-                    activeIntent === "whiteboard" ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
-                    "flex items-center justify-center gap-1 rounded-full py-1.5 px-1.5 font-bold whitespace-nowrap"
+                    GLASS_BUTTON_BASE,
+                    "flex items-center justify-center gap-1 rounded-full py-1.5 px-1.5 font-bold whitespace-nowrap opacity-60 cursor-not-allowed active:scale-100"
                   )}
                 >
                   <Tv className="size-3 shrink-0" />
                   <span className="hidden truncate sm:inline">Living Board</span>
+                  <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-1 py-0 text-[8px] font-black uppercase tracking-wider text-[var(--study-text-muted)]">
+                    Soon
+                  </span>
                 </button>
 
                 <button
@@ -3161,9 +3163,9 @@ export default function LivingReader({
                             <RichStudyMessage content={m.text} />
                           </div>
                         ) : (
-                          <p dir="auto" className="ascleon-bidi whitespace-pre-line font-bold text-[color:var(--ink)]">
+                          <BiDiText as="p" className="ascleon-bidi whitespace-pre-line font-bold text-[color:var(--ink)]">
                             {m.text}
-                          </p>
+                          </BiDiText>
                         )}
 
                         {/* Transparency Pills: Tools Used & Citations */}
@@ -3342,26 +3344,26 @@ export default function LivingReader({
                 </div>
               )}
 
-              {/* TAB 3: ASCLEON GENERATIVE WHITEBOARD VIDEO */}
+              {/* TAB 3: ASCLEON GENERATIVE WHITEBOARD VIDEO (LOCKED — COMING SOON) */}
               {activeIntent === "whiteboard" && (
-                <div className="flex animate-in fade-in flex-col h-full duration-150">
-                  <WhiteboardVideoStudio
-                    book={book}
-                    currentPageNumber={currentPageNumber}
-                    activePageLiveText={
-                      (book.fileURL && activePageLiveText)
-                        ? activePageLiveText
-                        : (currentSegment?.content || "")
-                    }
-                    selectedText={selectedText || undefined}
-                    studyLanguage={studyLanguage}
-                    onStudyLanguageChange={setStudyLanguage}
-                    studyScope={studyScope}
-                    onStudyScopeChange={setStudyScope}
-                    onNavigateToPage={goToSourcePage}
-                    onWhiteboardExpandChange={setIsWhiteboardExpanded}
-                    selectionTriggerSeq={whiteboardSelectionSeq}
-                  />
+                <div className="flex animate-in fade-in flex-col items-center justify-center gap-3 rounded-[18px] border-2 border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md py-10 px-5 text-center text-[var(--study-text)] shadow-[var(--study-shadow)] duration-150">
+                  <div className="flex size-12 items-center justify-center rounded-full border-2 border-[var(--study-panel-border)] bg-[var(--study-surface-muted)] text-[color:var(--orange)] shadow-xs">
+                    <Tv className="size-6" />
+                  </div>
+                  <span className="rounded-full border border-[var(--study-border)] bg-[color:var(--orange)]/15 px-3 py-0.5 text-[10px] font-black uppercase tracking-widest text-[color:var(--orange)]">
+                    Coming Soon
+                  </span>
+                  <h3 className="text-sm font-black">Ascleon Living Board</h3>
+                  <p className="max-w-xs text-xs font-medium leading-relaxed text-[var(--study-text-muted)]">
+                    The interactive 2D handwritten whiteboard and 3D lab studio is currently locked while we finalize it. Use AI Chat, Morph, Voice, or Qbanks in the meantime.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveIntent("chat")}
+                    className="mt-1 cursor-pointer rounded-full border-2 border-[var(--study-panel-border)] bg-[#ff4c00] px-4 py-1.5 text-xs font-black text-[color:var(--ink)] shadow-xs transition-all hover:brightness-105"
+                  >
+                    Back to AI Chat
+                  </button>
                 </div>
               )}
 
@@ -3414,12 +3416,12 @@ export default function LivingReader({
                       </span>
                       <span className="text-[10px] font-mono font-bold text-[color:var(--ink)]/60">Page {currentSegment?.pageNumber || currentIdx + 1}</span>
                     </div>
-                    <p className="font-semibold text-[color:var(--ink)] leading-relaxed">
+                    <BiDiText as="p" className="font-semibold text-[color:var(--ink)] leading-relaxed">
                       {dynamicSummary?.executiveSummary ||
                         (currentSegment?.content
                           ? `${currentSegment.content.slice(0, 240)}...`
                           : "Extracting core thesis for this page...")}
-                    </p>
+                    </BiDiText>
                   </div>
 
                   {/* Key Takeaways */}
@@ -3431,7 +3433,7 @@ export default function LivingReader({
                       <ul className="flex flex-col gap-1.5 list-disc list-inside font-medium text-[color:var(--ink)]">
                         {dynamicSummary.keyTakeaways.map((point: string, i: number) => (
                           <li key={i} className="leading-relaxed">
-                            {point}
+                            <BiDiText text={point} />
                           </li>
                         ))}
                       </ul>
@@ -3446,7 +3448,7 @@ export default function LivingReader({
                       </span>
                       {dynamicSummary.proTips.map((tip: string, i: number) => (
                         <p key={i} className="leading-relaxed text-[11.5px] font-semibold">
-                          ✦ {tip}
+                          ✦ <BiDiText text={tip} />
                         </p>
                       ))}
                     </div>
@@ -3464,9 +3466,9 @@ export default function LivingReader({
                         className="flex flex-col gap-1 rounded-xl border border-[var(--study-pill-border)]/45 bg-[var(--study-surface-solid)] p-3 text-[var(--study-text)] shadow-xs"
                       >
                         <span className="font-black text-[#ff4c00]">
-                          • {mn.mnemonic}: <span className="font-bold text-[var(--study-text)]">{mn.expansion}</span>
+                          • <BiDiText text={mn.mnemonic} />: <span className="font-bold text-[var(--study-text)]"><BiDiText text={mn.expansion} /></span>
                         </span>
-                        <span className="text-[11px] font-medium text-[var(--study-text-muted)]">{mn.notes || mn.rule}</span>
+                        <BiDiText as="span" className="text-[11px] font-medium text-[var(--study-text-muted)]" text={mn.notes || mn.rule} />
                       </div>
                     ))}
                   </div>
@@ -3505,28 +3507,27 @@ export default function LivingReader({
                   {dynamicQBankList.length > 0 ? (
                     <>
                       <div className="flex items-center justify-between gap-2 rounded-[14px] border border-[var(--study-pill-border)]/45 bg-[var(--study-surface)] backdrop-blur-md px-3 py-2 text-[11px] font-bold text-[var(--study-text)]" dir="auto">
-                        <span dir="auto" className="text-[var(--study-text)] text-start [unicode-bidi:isolate]">
-                          {dynamicQBankList[activeQBankIdx]?.topic || `Question on Page ${currentPageNumber}`}
-                        </span>
+                        <BiDiText as="span" className="text-[var(--study-text)] text-start [unicode-bidi:isolate]" text={dynamicQBankList[activeQBankIdx]?.topic || `Question on Page ${currentPageNumber}`} />
                         <span dir="ltr" className="shrink-0 rounded-full border border-[var(--study-panel-border)] bg-[#ff4c00] px-2.5 py-0.5 text-[10px] font-black text-[color:var(--ink)] shadow-xs">
                           Case {((activeQBankIdx % dynamicQBankList.length) + 1)} / {dynamicQBankList.length}
                         </span>
                       </div>
 
                       {/* Vignette Presentation */}
-                      <div className="rounded-[16px] border-2 border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md p-4 shadow-[var(--study-shadow)]" dir="auto">
-                        <p dir="auto" className="font-serif text-xs leading-relaxed text-[var(--study-text)] font-medium text-start [unicode-bidi:plaintext] select-text">
-                          {dynamicQBankList[activeQBankIdx]?.vignette}
-                        </p>
+                      <div className="rounded-[16px] border-2 border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md p-4 shadow-[var(--study-shadow)]">
+                        <BiDiText
+                          as="p"
+                          className="font-serif text-xs leading-relaxed text-[var(--study-text)] font-medium select-text"
+                          text={dynamicQBankList[activeQBankIdx]?.vignette}
+                        />
                       </div>
 
                       {/* Multiple Choice Options */}
-                      <div className="flex flex-col gap-2" dir="auto">
+                      <div className="flex flex-col gap-2">
                         {(dynamicQBankList[activeQBankIdx]?.options || []).map((option, idx) => (
                           <button
                             key={idx}
                             type="button"
-                            dir="auto"
                             onClick={() => !quizSubmitted && setQuizAnswer(idx)}
                             className={cn(
                               "flex cursor-pointer items-start gap-2.5 rounded-[14px] border-[1.5px] border-[var(--study-panel-border)] p-3 text-start text-xs transition-all shadow-xs backdrop-blur-md",
@@ -3542,9 +3543,11 @@ export default function LivingReader({
                             <bdi dir="ltr" className="shrink-0 font-mono font-black select-none">
                               {String.fromCharCode(65 + idx)}.
                             </bdi>
-                            <span dir="auto" className="flex-1 font-medium text-start [unicode-bidi:isolate]">
-                              {option}
-                            </span>
+                            <BiDiText
+                              as="span"
+                              className="flex-1 font-medium text-start [unicode-bidi:isolate]"
+                              text={option}
+                            />
                           </button>
                         ))}
                       </div>
@@ -3599,9 +3602,11 @@ export default function LivingReader({
                                   <bdi dir="ltr" className="shrink-0 font-black select-none">
                                     ({String.fromCharCode(65 + Number(optIdx))}):
                                   </bdi>
-                                  <span dir="auto" className="flex-1 leading-relaxed text-start [unicode-bidi:isolate]">
-                                    {rationale}
-                                  </span>
+                                  <BiDiText
+                                    as="span"
+                                    className="flex-1 leading-relaxed text-start [unicode-bidi:isolate]"
+                                    text={String(rationale)}
+                                  />
                                 </div>
                               ))}
                             </div>
@@ -3614,9 +3619,11 @@ export default function LivingReader({
                                 🎯 {studyLanguage === "ar" ? "اللؤلؤة الامتحانية المركزة:" : "High-Yield Exam Takeaway:"}
                               </span>
                             </div>
-                            <p dir="auto" className="font-medium text-start leading-relaxed [unicode-bidi:plaintext]">
-                              {dynamicQBankList[activeQBankIdx]?.highYieldTakeaway}
-                            </p>
+                            <BiDiText
+                              as="p"
+                              className="font-medium leading-relaxed"
+                              text={dynamicQBankList[activeQBankIdx]?.highYieldTakeaway}
+                            />
                           </div>
 
                           {/* Question Navigation Controls */}

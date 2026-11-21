@@ -463,9 +463,9 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                         {lm.location}
                       </span>
                     </div>
-                    <p className="text-[11px] leading-relaxed text-[var(--study-text-soft)]">
+                    <BiDiText as="p" className="text-[11px] leading-relaxed text-[var(--study-text-soft)]">
                       {lm.notes}
-                    </p>
+                    </BiDiText>
                   </div>
                 );
               })}
@@ -510,7 +510,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                   <div key={i} className="flex items-start gap-1.5 leading-snug">
                     <span className="text-[#0f0e10] font-black">✦</span>
                     <span className="text-[#0f0e10]">
-                      <strong>{c.label}:</strong> {c.value}
+                      <strong><BiDiText text={c.label} />:</strong> <BiDiText text={c.value} />
                     </span>
                   </div>
                 ))}
@@ -540,7 +540,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                   <div key={i} className="flex items-start gap-1.5 leading-snug">
                     <span className="text-[#0f0e10] font-black">✓</span>
                     <span className="text-[#0f0e10]">
-                      <strong>{c.label}:</strong> {c.value}
+                      <strong><BiDiText text={c.label} />:</strong> <BiDiText text={c.value} />
                     </span>
                   </div>
                 ))}
