@@ -938,7 +938,7 @@ export default function LivingReader({
     const timeoutId = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, 35_000);
+    }, 55_000);
 
     try {
       let effectiveScope = studyScope;
@@ -1051,7 +1051,7 @@ export default function LivingReader({
     const timeoutId = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, 25_000);
+    }, 55_000);
     try {
       const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
       const existingTopics = dynamicQBankList.map((q) => q.topic).filter(Boolean);
@@ -1131,7 +1131,7 @@ export default function LivingReader({
     const timeoutId = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, 22_000);
+    }, 50_000);
     try {
       const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
 
@@ -1302,7 +1302,7 @@ export default function LivingReader({
     const timeoutId = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, 28_000);
+    }, 55_000);
 
     setIsAiLoading(true);
     try {
@@ -1553,10 +1553,12 @@ export default function LivingReader({
 
   const handleFitWidth = () => {
     setFitMode("fit-width");
+    setZoomLevel(100);
   };
 
   const handleFitPage = () => {
     setFitMode("fit-page");
+    setZoomLevel(100);
   };
 
   return (

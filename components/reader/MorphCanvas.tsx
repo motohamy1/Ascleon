@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   MorphArtifactData,
   RoadmapCardItem,
@@ -59,6 +59,11 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
   const [activeTab, setActiveTab] = useState<
     "journey" | "all" | "cards" | "diagram" | "anatomy" | "matrix" | "simulator"
   >(artifact.journey ? "journey" : "all");
+
+  // Always default to the Interactive Journey when a fresh AI-synthesized artifact arrives
+  useEffect(() => {
+    setActiveTab(artifact.journey ? "journey" : "all");
+  }, [artifact]);
   const [activeSimulatorPreset, setActiveSimulatorPreset] =
     useState<string>("clean");
   const [selectedCard, setSelectedCard] = useState<RoadmapCardItem | null>(null);

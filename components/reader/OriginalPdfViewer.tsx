@@ -556,32 +556,79 @@ export default function OriginalPdfViewer({
   const [activeSnipPage, setActiveSnipPage] = useState<number>(1);
   const [confirmedSnip, setConfirmedSnip] = useState<ConfirmedSnip | null>(null);
 
-  // 1. Debounced ResizeObserver to prevent continuous canvas invalidation during splitter drags
+  // 1. ResizeObserver attached once scroll container mounts (after loading finishes)
   useEffect(() => {
+    if (loading || error) return;
     const el = containerRef.current;
     if (!el) return;
 
     let resizeTimer: NodeJS.Timeout | null = null;
+
+    const measureNow = () => {
+      const style = window.getComputedStyle(el);
+      const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+      const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+      const nextW = Math.max(0, el.clientWidth - padX);
+      const nextH = Math.max(0, el.clientHeight - padY);
+      if (nextW > 0 && nextH > 0) {
+        setContainerSize((prev) =>
+          Math.abs(prev.width - nextW) < 1 && Math.abs(prev.height - nextH) < 1
+            ? prev
+            : { width: nextW, height: nextH }
+        );
+      }
+    };
+
+    // Measure immediately on mount so Fit Page never uses a stale fallback height
+    measureNow();
 
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (entry) {
         if (resizeTimer) clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
-          setContainerSize({
-            width: entry.contentRect.width,
-            height: entry.contentRect.height,
-          });
-        }, 120);
+          const nextW = Math.max(0, entry.contentRect.width);
+          const nextH = Math.max(0, entry.contentRect.height);
+          if (nextW > 0 && nextH > 0) {
+            setContainerSize((prev) =>
+              Math.abs(prev.width - nextW) < 1 && Math.abs(prev.height - nextH) < 1
+                ? prev
+                : { width: nextW, height: nextH }
+            );
+          }
+        }, 80);
       }
     });
 
     ro.observe(el);
+    window.addEventListener("resize", measureNow);
     return () => {
       if (resizeTimer) clearTimeout(resizeTimer);
+      window.removeEventListener("resize", measureNow);
       ro.disconnect();
     };
-  }, []);
+  }, [loading, error]);
+
+  // 1b. Keep docPageSize synced to the active page's true intrinsic dimensions
+  useEffect(() => {
+    if (!pdfDoc || !activeVisiblePage) return;
+    let cancelled = false;
+    pdfDoc
+      .getPage(activeVisiblePage)
+      .then((page: any) => {
+        if (cancelled) return;
+        const vp = page.getViewport({ scale: 1.0 });
+        setDocPageSize((prev) =>
+          Math.abs(prev.width - vp.width) > 2 || Math.abs(prev.height - vp.height) > 2
+            ? { width: vp.width, height: vp.height }
+            : prev
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfDoc, activeVisiblePage]);
 
   // 2. Initialize and Load Document
   useEffect(() => {
@@ -716,42 +763,51 @@ export default function OriginalPdfViewer({
   const computedScale = useMemo(() => {
     const windowW = typeof window !== "undefined" ? window.innerWidth : 375;
     const windowH = typeof window !== "undefined" ? window.innerHeight : 667;
-    const defaultW = Math.max(280, Math.min(windowW - 16, 760));
-    const defaultH = Math.max(300, windowH - 120);
+    const defaultW = Math.max(280, Math.min(windowW - 24, 760));
+    const defaultH = Math.max(280, windowH - 200);
 
-    const w = containerSize.width || containerRef.current?.clientWidth || defaultW;
-    const h = containerSize.height || containerRef.current?.clientHeight || defaultH;
+    const w = containerSize.width > 0 ? containerSize.width : defaultW;
+    const h = containerSize.height > 0 ? containerSize.height : defaultH;
 
     const pageWidth = docPageSize.width || 595;
     const pageHeight = docPageSize.height || 842;
 
-    const padX = w < 480 ? 8 : 20;
-    const padY = h < 600 ? 16 : 30;
+    // Reserve inner wrapper padding & subtle shadow clearance so Fit Page never clips
+    const padX =
+      scrollOrientation === "horizontal"
+        ? w < 640
+          ? 28
+          : 56
+        : w < 480
+          ? 8
+          : 16;
+    const padY =
+      scrollOrientation === "horizontal"
+        ? h < 600
+          ? 16
+          : 24
+        : h < 600
+          ? 20
+          : 32;
 
-    if (scrollOrientation === "horizontal") {
-      const availableH = Math.max(100, h - padY);
-      const scaleH = availableH / pageHeight;
-      return Math.max(0.15, Math.min(3.2, scaleH * (activeZoomLevel / 100)));
+    const availableW = Math.max(100, w - padX);
+    const availableH = Math.max(100, h - padY);
+    const scaleW = availableW / pageWidth;
+    const scaleH = availableH / pageHeight;
+
+    if (activeFitMode === "fit-page") {
+      // Fit the entire page (both width AND height) cleanly inside the visible viewport
+      return Math.max(0.15, Math.min(3.2, Math.min(scaleW, scaleH)));
     }
 
     if (activeFitMode === "fit-width") {
-      const availableW = Math.max(100, w - padX);
-      const scaleW = availableW / pageWidth;
-      return Math.max(0.15, Math.min(3.2, scaleW * (activeZoomLevel / 100)));
+      return Math.max(0.15, Math.min(3.2, scaleW));
     }
 
-    if (activeFitMode === "fit-page") {
-      const availableW = Math.max(100, w - padX);
-      const availableH = Math.max(100, h - padY);
-      const scaleW = availableW / pageWidth;
-      const scaleH = availableH / pageHeight;
-      return Math.max(0.15, Math.min(3.2, Math.min(scaleW, scaleH) * (activeZoomLevel / 100)));
-    }
-
-    // Normal mode: proportional to container width ratio
-    const availableW = Math.max(100, w - padX);
-    const widthRatio = availableW / pageWidth;
-    return Math.max(0.15, Math.min(3.2, widthRatio * (activeZoomLevel / 100)));
+    // Normal mode: respect explicit zoomLevel relative to the natural base fit
+    const baseScale =
+      scrollOrientation === "horizontal" ? Math.min(scaleW, scaleH) : scaleW;
+    return Math.max(0.15, Math.min(3.2, baseScale * (activeZoomLevel / 100)));
   }, [activeZoomLevel, activeFitMode, containerSize, docPageSize, scrollOrientation]);
 
   // 4. Register Canvas Callback for Page Items (stable reference)
@@ -1000,12 +1056,20 @@ export default function OriginalPdfViewer({
         const sourceW = width * scaleX;
         const sourceH = height * scaleY;
 
+        // Cap max dimension to 960px and encode as compact JPEG (~35-90KB) so Gemini multimodal uploads never stall on slower links
+        const MAX_SNIP_DIM = 960;
+        const downscale = Math.min(1, MAX_SNIP_DIM / Math.max(sourceW, sourceH, 1));
+        const targetW = Math.max(1, Math.round(sourceW * downscale));
+        const targetH = Math.max(1, Math.round(sourceH * downscale));
+
         const snippetCanvas = document.createElement("canvas");
-        snippetCanvas.width = sourceW;
-        snippetCanvas.height = sourceH;
+        snippetCanvas.width = targetW;
+        snippetCanvas.height = targetH;
         const ctx = snippetCanvas.getContext("2d");
 
         if (ctx) {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, targetW, targetH);
           ctx.drawImage(
             canvas,
             sourceX,
@@ -1014,11 +1078,14 @@ export default function OriginalPdfViewer({
             sourceH,
             0,
             0,
-            sourceW,
-            sourceH
+            targetW,
+            targetH
           );
 
-          const dataUrl = snippetCanvas.toDataURL("image/png");
+          let dataUrl = snippetCanvas.toDataURL("image/jpeg", 0.72);
+          if (dataUrl.length > 140_000) {
+            dataUrl = snippetCanvas.toDataURL("image/jpeg", 0.55);
+          }
 
           // Keep selection box visibly confirmed on canvas!
           setConfirmedSnip({
@@ -1495,9 +1562,9 @@ export default function OriginalPdfViewer({
         onMouseUp={handleSelectionCheck}
         onTouchEnd={handleSelectionCheck}
         className={cn(
-          "study-scrollbar relative flex-1 bg-transparent transition-colors select-text",
+          "study-scrollbar relative flex-1 min-h-0 bg-transparent transition-colors select-text",
           scrollOrientation === "horizontal"
-            ? "overflow-x-auto overflow-y-hidden overscroll-x-contain p-2 sm:p-4 flex items-center snap-x snap-mandatory"
+            ? "overflow-x-auto overflow-y-auto overscroll-contain p-2 sm:p-3 flex items-start snap-x snap-mandatory"
             : "p-1.5 sm:p-3 overflow-y-auto overflow-x-auto overscroll-y-contain w-full max-w-full",
           isSnipActive && "cursor-crosshair select-none"
         )}
@@ -1506,7 +1573,7 @@ export default function OriginalPdfViewer({
           className={cn(
             "flex items-center",
             scrollOrientation === "horizontal"
-              ? "flex-row flex-nowrap gap-6 sm:gap-8 h-full min-w-max px-6 py-2"
+              ? "flex-row flex-nowrap gap-6 sm:gap-8 min-h-full min-w-max px-3 sm:px-6 py-1.5 sm:py-2"
               : "flex-col w-full"
           )}
         >
@@ -1516,7 +1583,7 @@ export default function OriginalPdfViewer({
               pageNum={pageNum}
               pdfDoc={pdfDoc}
               scale={computedScale}
-              fitMode={fitMode}
+              fitMode={activeFitMode}
               scrollOrientation={scrollOrientation}
               defaultPageSize={docPageSize}
               isActivePage={pageNum === activeVisiblePage}
