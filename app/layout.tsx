@@ -10,41 +10,44 @@ const ibmPlexSerif = IBM_Plex_Serif({
     variable: "--font-ibm-plex-serif",
     subsets: ['latin'],
     weight: ['400', '500', '600', '700'],
-    display: 'swap'
+    display: 'swap',
+    adjustFontFallback: false,
 });
 
 const monaSans = Mona_Sans({
     variable: '--font-mona-sans',
     subsets: ['latin'],
-    display: 'swap'
+    display: 'swap',
+    adjustFontFallback: false,
 });
 
 const caveat = Caveat({
     variable: '--font-caveat',
     subsets: ['latin'],
-    weight: ['500', '600', '700'],
-    display: 'swap'
+    display: 'swap',
+    adjustFontFallback: false,
 });
 
 const marhey = Marhey({
     variable: '--font-marhey',
     subsets: ['arabic', 'latin'],
-    weight: ['400', '500', '600', '700'],
-    display: 'swap'
+    display: 'swap',
+    adjustFontFallback: false,
 });
 
 const kalam = Kalam({
     variable: '--font-kalam',
     subsets: ['latin'],
     weight: ['400', '700'],
-    display: 'swap'
+    display: 'swap',
+    adjustFontFallback: false,
 });
 
 const playpenArabic = Playpen_Sans_Arabic({
     variable: '--font-playpen-arabic',
     subsets: ['arabic', 'latin'],
     display: 'swap',
-    adjustFontFallback: false
+    adjustFontFallback: false,
 });
 
 
