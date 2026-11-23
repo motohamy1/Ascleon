@@ -14,32 +14,32 @@ import {
 const features = [
   {
     n: '01',
-    title: 'Upload anything',
-    desc: 'Drop a PDF. Ascleon splits it into chapters and preps the conversation.',
+    title: 'Lectures & textbooks',
+    desc: 'Drop any medical lecture or textbook PDF. Highlight passages or snip diagrams straight into your studio.',
     card: 'bg-[color:var(--panel)] text-[color:var(--ink)]',
     dim: 'text-[color:var(--ink)]/75',
     body: 'text-[color:var(--ink)]/80',
   },
   {
     n: '02',
-    title: 'Talk it out',
-    desc: 'Voice sessions that question, argue and re-explain until it clicks.',
+    title: 'Live bilingual mentor',
+    desc: 'Talk it out in English, Egyptian Arabic, or Mix—grounded in the exact page you are studying.',
     card: 'bg-[#7fd8c9] text-[color:var(--ink)]',
     dim: 'text-[color:var(--ink)]/75',
     body: 'text-[color:var(--ink)]/85',
   },
   {
     n: '03',
-    title: 'Get past the hard part',
-    desc: 'The AI co-reader moves at your pace. No chapter gets left behind.',
+    title: 'See it, don’t cram it',
+    desc: 'Morph tough chapters into diagnostic roadmaps, differential tables, and live physiology simulators.',
     card: 'bg-[color:var(--orange)] text-[color:var(--ink)]',
     dim: 'text-[color:var(--ink)]/75',
     body: 'text-[color:var(--ink)]/85',
   },
   {
     n: '04',
-    title: 'Keep what sticks',
-    desc: 'Return to anything you marked, in Revision, days or weeks later.',
+    title: 'Exam-ready mastery',
+    desc: 'Turn any section into clinical case QBanks, high-yield pearls, and mnemonics before exam day.',
     card: 'bg-[color:var(--ink)] text-[color:var(--cream)]',
     dim: 'text-[color:var(--cream)]/75',
     body: 'text-[color:var(--cream)]/80',
@@ -49,18 +49,18 @@ const features = [
 const steps = [
   {
     n: '1',
-    title: 'Upload a PDF',
-    desc: 'Any book you have been avoiding for a while.',
+    title: 'Upload your lecture or book',
+    desc: 'Any med-school PDF, slide deck, or dense reference chapter.',
   },
   {
     n: '2',
-    title: 'Start a session',
-    desc: 'Talk it through, out loud, with your AI co-reader.',
+    title: 'Study it live',
+    desc: 'Talk it through by voice, snip diagrams, or morph it into visual maps.',
   },
   {
     n: '3',
-    title: 'Return & retain',
-    desc: 'Revisit what you marked in Revision.',
+    title: 'Prove mastery',
+    desc: 'Drill case-based QBanks and track your progress to exam day.',
   },
 ];
 
@@ -117,7 +117,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
     clientUser?.fullName ||
     clientUser?.username ||
     clientUser?.primaryEmailAddress?.emailAddress?.split('@')[0] ||
-    'Reader';
+    'Student';
 
   const displayName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
   const studyHref = currentActiveStudy
@@ -141,7 +141,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                 className="shadow-xs transition-transform duration-200 hover:scale-105"
               />
               <p className="meta-label text-[color:var(--ink)]/80">
-                Ascleon® · reading, out loud
+                Ascleon® · your medical study companion
               </p>
             </div>
             <div className="barcode h-8 w-24 shrink-0 text-[color:var(--ink)]" />
@@ -159,20 +159,21 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
             </Show>
 
             <h1 className="display text-[color:var(--ink)] text-[clamp(3.6rem,8.5vw,7.6rem)] leading-[0.93]">
-              Talk to
+              Never study
               <br />
-              your books.
+              alone.
             </h1>
             <p className="mt-5 max-w-xl text-[16px] sm:text-lg leading-relaxed text-[color:var(--ink-soft)]">
-              Upload any stubborn book, light or med-school dense. Ascleon
-              turns its chapters into live conversations with an AI co-reader,
-              so the hard parts finally open up.
+              Drop any medical lecture or dense textbook PDF. Ascleon walks with
+              you from first page to exam day—with live voice tutoring, visual
+              roadmaps, physiology simulators, and case-based QBanks in English
+              or Arabic.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-4">
               <Show when="signed-out">
                 <SignInButton mode="modal">
                   <button className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-colors hover:bg-[#ff621f]">
-                    Start reading
+                    Start studying
                     <ArrowUpRight className="size-4.5" />
                   </button>
                 </SignInButton>
@@ -182,7 +183,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                   href={studyHref}
                   className="flex cursor-pointer items-center gap-2 rounded-full border-2 border-[color:var(--ink)] bg-[color:var(--orange)] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)] shadow-chip transition-colors hover:bg-[#ff621f]"
                 >
-                  {currentActiveStudy ? 'Continue reading' : 'Start reading'}
+                  {currentActiveStudy ? 'Continue studying' : 'Start studying'}
                   <ArrowUpRight className="size-4.5" />
                 </Link>
               </Show>
@@ -224,10 +225,11 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                 <h2 className="display mt-4 text-[42px] sm:text-[48px] leading-[1.02] text-[color:var(--ink)]">
                   One PDF,
                   <br />
-                  one conversation.
+                  full study studio.
                 </h2>
                 <p className="mt-3 pr-14 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85">
-                  Live voice sessions with your book, up to 60 minutes.
+                  Snip diagrams, talk it out in Arabic or English, and drill
+                  QBank cases—page by page.
                 </p>
                 <ArrowUpRight className="absolute right-6 bottom-5 size-12 text-[color:var(--ink)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:translate-x-1" />
               </div>
@@ -240,7 +242,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                   <>
                     <div className="flex items-center justify-between gap-2">
                       <p className="meta-label text-[color:var(--ink)]/80">
-                        Continue reading
+                        Continue studying
                       </p>
                       <span className="rounded-full border border-[color:var(--ink)]/30 bg-[color:var(--cream)]/80 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-[color:var(--ink)]">
                         Target: 15 min
@@ -298,10 +300,11 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                     <h2 className="display mt-4 text-[42px] sm:text-[48px] leading-[1.02] text-[color:var(--ink)]">
                       One PDF,
                       <br />
-                      one conversation.
+                      full study studio.
                     </h2>
                     <p className="mt-3 pr-14 text-sm sm:text-[15px] font-bold text-[color:var(--ink)]/85">
-                      Live voice sessions with your book, up to 60 minutes.
+                      Snip diagrams, talk it out in Arabic or English, and drill
+                      QBank cases—page by page.
                     </p>
                   </>
                 )}
@@ -317,15 +320,15 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                   Format
                 </p>
                 <p className="display mt-1.5 text-[26px] text-[color:var(--ink)]">
-                  PDF → Voice
+                  PDF → Mastery
                 </p>
               </div>
               <div className="barcode h-9 w-22 shrink-0 text-[color:var(--ink)]" />
             </div>
             <div className="swatch-ramp mt-4 h-9 rounded-full border-2 border-[color:var(--ink)]" />
             <div className="meta-label mt-2 flex justify-between text-[color:var(--ink)]/75 text-xs">
-              <span>Magenta sample</span>
-              <span>Read · Re-read</span>
+              <span>EN · عربي · Mix</span>
+              <span>Voice · Visual · QBank</span>
             </div>
           </div>
         </div>
@@ -379,9 +382,9 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
               The point
             </p>
             <p className="display mt-2.5 text-[28px] sm:text-[32px] leading-[1.08] text-[color:var(--cream)]">
-              Not a summary.
+              Not another chatbot.
               <br />
-              A conversation.
+              A study companion.
             </p>
           </div>
           <div className="chrome-sphere-violet size-14 shrink-0" />
@@ -391,7 +394,7 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
       <div className="mt-4 flex items-center justify-center gap-2">
         <AscleonLogo size={18} />
         <p className="meta-label text-center text-[color:var(--ink)]/60">
-          Ascleon® · built for stubborn readers
+          Ascleon® · with you through every lecture &amp; book
         </p>
       </div>
     </div>
