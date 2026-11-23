@@ -50,7 +50,7 @@ const playpenArabic = Playpen_Sans_Arabic({
 
 export const metadata: Metadata = {
   title: "Ascleon",
-  description: "Talk to your books. Ascleon turns any difficult book into a live conversation with an AI co-reader.",
+  description: "Your AI study companion for medical lectures and textbooks. Study side-by-side with a live bilingual voice mentor, diagnostic roadmaps, physiology simulators, and case-based QBanks.",
   icons: {
     icon: [
       { url: '/icon.svg', type: 'image/svg+xml' },

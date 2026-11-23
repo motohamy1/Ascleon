@@ -118,7 +118,8 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
         const summaryModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
         for (let idx = 0; idx < summaryModels.length; idx++) {
           const candidateModel = summaryModels[idx];
-          const timeoutMs = idx === 0 ? 16_000 : 12_000;
+          const timeoutMs = idx === 0 ? 22_000 : 14_000;
+          const supportsThinking = !candidateModel.includes("lite");
           const abortCtrl = new AbortController();
           const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
           try {
@@ -129,9 +130,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                 responseMimeType: "application/json",
                 temperature: 0.2,
                 abortSignal: abortCtrl.signal,
-                thinkingConfig: {
-                  thinkingBudget: 0,
-                },
+                ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 128 } } : {}),
               },
             });
 

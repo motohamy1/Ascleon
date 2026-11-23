@@ -1,14 +1,15 @@
 /**
  * Shared Gemini model selection & per-model cooldown registry.
- * Primary: gemini-4-hydrogen (lower cost, higher reasoning & speed).
- * Fallbacks: gemini-3.8-flash, gemini-3.5-flash-lite.
+ * Primary: gemini-4-hydrogen (highest Gemini 4 reasoning enabled on API key).
+ * Fallbacks: full-intelligence Flash models (gemini-3.6-flash, gemini-3.8-flash, gemini-3.5-flash) — no -lite models.
  * Prevents cascading 30s-300s hangs when a model hits 429/503/timeout.
  */
 
 export const PRIMARY_GEMINI_MODEL = "gemini-4-hydrogen";
 export const FALLBACK_GEMINI_MODELS = [
+  "gemini-3.6-flash",
   "gemini-3.8-flash",
-  "gemini-3.5-flash-lite",
+  "gemini-3.5-flash",
 ] as const;
 
 export const GEMINI_MODEL_CHAIN = [

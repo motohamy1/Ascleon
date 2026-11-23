@@ -40,20 +40,25 @@ export function resolveTextDirection(raw: string): 'rtl' | 'ltr' {
 /**
  * Regex matching continuous LTR runs inside Arabic prose:
  * - Latin words, medical acronyms, numbers, units (e.g. 37.2°C, 140/85 mmHg, 95 bpm)
- * - Comma/slash-separated lists of Latin/number tokens (e.g. II, III, aVF or S1, S2)
- * - Trailing sentence punctuation (. ,) is intentionally excluded so it stays in the RTL stream.
+ * - Multi-word medical phrases, hyphenated/slashed terms, and parenthesized acronyms
+ *   (e.g. Acute Coronary Syndrome (ACS), first-degree relatives, micro/macrovascular damage)
+ * - Parenthesized Arabic text like "Unmodifiable (حاجة)" is NOT swallowed because `(`
+ *   only matches when immediately followed by a Latin/numeric character.
+ * - Trailing sentence punctuation (. , : ;) is trimmed so it stays in the RTL stream.
  */
-const LTR_RUN_REGEX =
-  /[A-Za-z0-9][A-Za-z0-9+\-*/%°²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉.:_()]*?(?:(?:\s+|,\s*)[A-Za-z0-9][A-Za-z0-9+\-*/%°²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉.:_()]*)*?(?=[A-Za-z0-9%°²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉)]|$|[\s\u0600-\u06FF.,،؛؟!?:])/;
+const LTR_TOKEN_PATTERN =
+  String.raw`(?:\([A-Za-z0-9][A-Za-z0-9+\-*/%&°²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉._'\s,/:;-]*\)|[A-Za-z0-9][A-Za-z0-9+\-*/%&°²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉._':/-]*)`;
 
-const LTR_GLOBAL_REGEX =
-  /[A-Za-z0-9][A-Za-z0-9+\-*/%°²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉.:_()]*?(?:(?:\s+|,\s*)[A-Za-z0-9+\-*/%°²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉.:_()]*)*/g;
+const LTR_GLOBAL_REGEX = new RegExp(
+  `${LTR_TOKEN_PATTERN}(?:(?:\\s+|,\\s*|\\s*[&→←↔⇒]\\s*)${LTR_TOKEN_PATTERN})*`,
+  'g'
+);
 
 function trimTrailingPunctuation(token: string): { core: string; trailing: string } {
   let end = token.length;
   while (end > 0) {
     const ch = token[end - 1];
-    if (ch === '.' || ch === ',' || ch === ':' || ch === ' ') {
+    if (ch === '.' || ch === ',' || ch === ':' || ch === ';' || ch === ' ' || ch === '-') {
       end--;
     } else {
       break;
@@ -100,7 +105,7 @@ export function renderBidiNodes(rawString: string, keyPrefix = 'bdi'): React.Rea
       <bdi
         key={`${keyPrefix}-${keyIdx++}`}
         dir="ltr"
-        className="inline-block mx-[0.12em] font-sans [unicode-bidi:isolate]"
+        className="font-sans [unicode-bidi:isolate]"
       >
         {core}
       </bdi>

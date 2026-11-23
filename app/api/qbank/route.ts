@@ -395,152 +395,115 @@ Produce a JSON object containing an array of 3 distinct questions matching this 
 Return ONLY valid JSON.
 ${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
-    // 4. FAST MULTI-PROVIDER CONCURRENT EXECUTION
-    // Race Groq (ultra-fast ~3.5s) and Gemini (strong multimodal) concurrently with robust timeouts!
-    const groqKey = process.env.GROQ_API_KEY;
+    // 4. PREMIUM GEMINI-FIRST EXECUTION (Full Gemini model chain before any secondary fallback)
     const geminiKey = process.env.GEMINI_API_KEY;
+    const groqKey = process.env.GROQ_API_KEY;
     const openRouterKey = process.env.OPENROUTER_API_KEY;
 
-    const candidateTasks: Promise<{ questions: any[]; source: string }>[] = [];
-
-    // Candidate A: Groq (openai/gpt-oss-120b - 120B parameter elite model, ~3.5s response time)
-    if (groqKey && groqKey !== "your_groq_api_key_here") {
-      candidateTasks.push(
-        (async () => {
-          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${groqKey}`,
-            },
-            signal: AbortSignal.timeout(12000),
-            body: JSON.stringify({
-              model: "openai/gpt-oss-120b",
-              messages: [
-                { role: "system", content: "You are an elite academic board exam question generator. Return valid JSON only." },
-                { role: "user", content: prompt },
-              ],
-              response_format: { type: "json_object" },
-              temperature: 0.35,
-            }),
-          });
-          if (!res.ok) throw new Error(`Groq 120b HTTP ${res.status}`);
-          const data = await res.json();
-          const content = data.choices?.[0]?.message?.content || "";
-          const parsed = parseQuestionsJSON(content);
-          if (parsed && parsed.length > 0) {
-            return { questions: parsed.map(shuffleQuestionOptions), source: "groq:openai/gpt-oss-120b" };
-          }
-          throw new Error("Invalid Groq 120b QBank JSON");
-        })()
-      );
-    }
-
-    // Candidate B: Google Gemini (gemini-4-hydrogen primary with cooldown-aware fallback)
     if (geminiKey && geminiKey !== "your_gemini_api_key_here") {
-      const qbankGeminiModel = orderModelsByHealth(GEMINI_MODEL_CHAIN)[0] || "gemini-4-hydrogen";
-      candidateTasks.push(
-        (async () => {
-          const ai = new GoogleGenAI({ apiKey: geminiKey });
-          const userParts: any[] = [{ text: prompt }];
+      const ai = new GoogleGenAI({ apiKey: geminiKey });
+      const userParts: any[] = [{ text: prompt }];
 
-          if (snippedDiagram && typeof snippedDiagram === "string" && snippedDiagram.startsWith("data:image")) {
-            const cleanBase64 = snippedDiagram.replace(/^data:image\/\w+;base64,/, "");
-            userParts.push({
-              inlineData: {
-                mimeType: "image/png",
-                data: cleanBase64,
+      if (snippedDiagram && typeof snippedDiagram === "string" && snippedDiagram.startsWith("data:image")) {
+        const mimeMatch = snippedDiagram.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+        const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+        const cleanBase64 = snippedDiagram.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
+        userParts.push({
+          inlineData: {
+            mimeType,
+            data: cleanBase64,
+          },
+        });
+      }
+
+      const qbankGeminiModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
+      for (let idx = 0; idx < qbankGeminiModels.length; idx++) {
+        const candidateModel = qbankGeminiModels[idx];
+        const timeoutMs = idx === 0 ? 22_000 : 14_000;
+        const supportsThinking = !candidateModel.includes("lite");
+        const abortCtrl = new AbortController();
+        const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
+        try {
+          const resp: any = await Promise.race([
+            ai.models.generateContent({
+              model: candidateModel,
+              contents: [{ role: "user", parts: userParts }],
+              config: {
+                responseMimeType: "application/json",
+                temperature: 0.35,
+                abortSignal: abortCtrl.signal,
+                ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 128 } } : {}),
               },
+            }),
+            new Promise((_, reject) =>
+              abortCtrl.signal.addEventListener("abort", () =>
+                reject(new Error(`Gemini ${candidateModel} timeout ${Math.round(timeoutMs / 1000)}s`))
+              )
+            ),
+          ]);
+
+          const text = resp.text?.trim() || "";
+          const parsed = parseQuestionsJSON(text);
+          if (parsed && parsed.length > 0) {
+            clearModelCooldown(`gemini:${candidateModel}`);
+            return NextResponse.json({
+              success: true,
+              questions: parsed.map(shuffleQuestionOptions),
+              citedPages,
+              source: `gemini:${candidateModel}`,
+              creditsCharged: dynamicCost.total,
+              creditsRemaining: creditCheck.remaining,
+              creditBreakdown: dynamicCost.summary,
             });
           }
-
-          const abortCtrl = new AbortController();
-          const timer = setTimeout(() => abortCtrl.abort(), 14000);
-          try {
-            const resp: any = await Promise.race([
-              ai.models.generateContent({
-                model: qbankGeminiModel,
-                contents: [{ role: "user", parts: userParts }],
-                config: {
-                  responseMimeType: "application/json",
-                  temperature: 0.35,
-                  abortSignal: abortCtrl.signal,
-                },
-              }),
-              new Promise((_, reject) =>
-                abortCtrl.signal.addEventListener("abort", () =>
-                  reject(new Error(`Gemini ${qbankGeminiModel} timeout 14s`))
-                )
-              ),
-            ]);
-
-            const text = resp.text?.trim() || "";
-            const parsed = parseQuestionsJSON(text);
-            if (parsed && parsed.length > 0) {
-              clearModelCooldown(`gemini:${qbankGeminiModel}`);
-              return { questions: parsed.map(shuffleQuestionOptions), source: `gemini:${qbankGeminiModel}` };
-            }
-            throw new Error(`Invalid Gemini ${qbankGeminiModel} QBank JSON`);
-          } catch (err) {
-            markModelCooldownFromError(`gemini:${qbankGeminiModel}`, err);
-            throw err;
-          } finally {
-            clearTimeout(timer);
-          }
-        })()
-      );
+          throw new Error(`Invalid Gemini ${candidateModel} QBank JSON`);
+        } catch (err) {
+          markModelCooldownFromError(`gemini:${candidateModel}`, err);
+          console.warn(`[QBank API] Gemini ${candidateModel} failed:`, err);
+        } finally {
+          clearTimeout(timer);
+        }
+      }
     }
 
-    // Candidate C: Groq Backup (openai/gpt-oss-20b - ultra fast ~2.5s)
+    // Emergency fallback only if ALL Gemini models failed
     if (groqKey && groqKey !== "your_groq_api_key_here") {
-      candidateTasks.push(
-        (async () => {
-          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${groqKey}`,
-            },
-            signal: AbortSignal.timeout(10000),
-            body: JSON.stringify({
-              model: "openai/gpt-oss-20b",
-              messages: [
-                { role: "system", content: "You are an elite academic board exam question generator. Return valid JSON only." },
-                { role: "user", content: prompt },
-              ],
-              response_format: { type: "json_object" },
-              temperature: 0.35,
-            }),
-          });
-          if (!res.ok) throw new Error(`Groq 20b HTTP ${res.status}`);
+      try {
+        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${groqKey}`,
+          },
+          signal: AbortSignal.timeout(15000),
+          body: JSON.stringify({
+            model: "openai/gpt-oss-120b",
+            messages: [
+              { role: "system", content: "You are an elite academic board exam question generator. Return valid JSON only." },
+              { role: "user", content: prompt },
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.35,
+          }),
+        });
+        if (res.ok) {
           const data = await res.json();
           const content = data.choices?.[0]?.message?.content || "";
           const parsed = parseQuestionsJSON(content);
           if (parsed && parsed.length > 0) {
-            return { questions: parsed.map(shuffleQuestionOptions), source: "groq:openai/gpt-oss-20b" };
+            return NextResponse.json({
+              success: true,
+              questions: parsed.map(shuffleQuestionOptions),
+              citedPages,
+              source: "groq:openai/gpt-oss-120b",
+              creditsCharged: dynamicCost.total,
+              creditsRemaining: creditCheck.remaining,
+              creditBreakdown: dynamicCost.summary,
+            });
           }
-          throw new Error("Invalid Groq 20b JSON");
-        })()
-      );
-    }
-
-    // Execute fastest working candidate
-    if (candidateTasks.length > 0) {
-      try {
-        const fastestResult = await Promise.any(candidateTasks);
-        if (fastestResult && fastestResult.questions.length > 0) {
-          return NextResponse.json({
-            success: true,
-            questions: fastestResult.questions,
-            citedPages,
-            source: fastestResult.source,
-            creditsCharged: dynamicCost.total,
-            creditsRemaining: creditCheck.remaining,
-            creditBreakdown: dynamicCost.summary,
-          });
         }
-      } catch (raceErr) {
-        console.warn("[QBank API] Primary fast race failed, trying OpenRouter fallback:", raceErr);
+      } catch (groqErr) {
+        console.warn("[QBank API] Emergency Groq fallback failed:", groqErr);
       }
     }
 

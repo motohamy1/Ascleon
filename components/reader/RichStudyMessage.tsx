@@ -12,15 +12,33 @@ interface RichStudyMessageProps {
   className?: string;
 }
 
+function extractPlainText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(extractPlainText).join("");
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    return extractPlainText(node.props?.children);
+  }
+  return "";
+}
+
 function wrapBidiChildren(children: React.ReactNode, prefix = "md"): React.ReactNode {
   return React.Children.map(children, (child, idx) => {
     if (typeof child === "string") {
       return renderBidiNodes(child, `${prefix}-${idx}`);
     }
-    if (React.isValidElement<{ children?: React.ReactNode }>(child) && child.props?.children) {
-      // Do not rewrite code blocks or explicit LTR elements
+    if (
+      React.isValidElement<{ children?: React.ReactNode }>(child) &&
+      child.props?.children &&
+      typeof child.type === "string"
+    ) {
+      // Do not rewrite code blocks, existing <bdi> nodes, or explicit LTR elements
       const propsAny = child.props as Record<string, unknown>;
-      if (child.type === "code" || child.type === "pre" || propsAny.dir === "ltr") {
+      if (
+        child.type === "code" ||
+        child.type === "pre" ||
+        child.type === "bdi" ||
+        propsAny.dir === "ltr"
+      ) {
         return child;
       }
       return React.cloneElement(child, {
@@ -81,14 +99,25 @@ export default function RichStudyMessage({ content, className }: RichStudyMessag
               {wrapBidiChildren(children, "p")}
             </p>
           ),
-          strong: ({ children }) => (
-            <strong className="font-extrabold text-[#1a191b] bg-[#ff4c00]/10 px-1 py-0.5 rounded text-[12px] inline-block [unicode-bidi:isolate]">
-              {wrapBidiChildren(children, "strong")}
-            </strong>
-          ),
-          em: ({ children }) => (
-            <em className="italic text-[#1a191b]/85 [unicode-bidi:isolate]">{wrapBidiChildren(children, "em")}</em>
-          ),
+          strong: ({ children }) => {
+            const strongDir = resolveTextDirection(extractPlainText(children));
+            return (
+              <strong
+                dir={strongDir}
+                className="font-extrabold text-[#1a191b] bg-[#ff4c00]/10 px-1 py-0.5 rounded text-[12px] [unicode-bidi:isolate]"
+              >
+                {wrapBidiChildren(children, "strong")}
+              </strong>
+            );
+          },
+          em: ({ children }) => {
+            const emDir = resolveTextDirection(extractPlainText(children));
+            return (
+              <em dir={emDir} className="italic text-[#1a191b]/85 [unicode-bidi:isolate]">
+                {wrapBidiChildren(children, "em")}
+              </em>
+            );
+          },
           ul: ({ children }) => (
             <ul dir={baseDir} className="my-2 space-y-1 ps-5 list-disc marker:text-[#ff4c00] text-start">
               {children}

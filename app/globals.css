@@ -1231,23 +1231,34 @@ button[data-variant='unstyled'] *,
    Prevents mixed Arabic/English text collision, line-height truncation,
    and character scrambling across LTR/RTL script boundaries.
    ========================================================================== */
-.ascleon-bidi,
+.ascleon-bidi {
+  text-align: start;
+  line-height: 1.85 !important;
+  word-spacing: 0.02em;
+  overflow-wrap: break-word;
+}
+
 [dir="auto"] {
   unicode-bidi: plaintext;
   text-align: start;
   line-height: 1.85 !important;
-  word-spacing: 0.03em;
+  word-spacing: 0.02em;
   overflow-wrap: break-word;
-  word-break: break-word;
 }
 
-/* Ensure inline English terms, abbreviations, and code spans inside Arabic context stay isolated */
+/* Keep inline <bdi> runs naturally inline so mixed Arabic/English wraps without letter/word gaps */
+.ascleon-bidi bdi,
+[dir="auto"] bdi {
+  unicode-bidi: isolate;
+  display: inline;
+  font-family: var(--font-mona-sans), system-ui, sans-serif;
+}
+
+/* Ensure inline code spans and pills inside Arabic context stay isolated */
 .ascleon-bidi code,
 .ascleon-bidi .ascleon-pill,
-.ascleon-bidi bdi,
 [dir="auto"] code,
-[dir="auto"] .ascleon-pill,
-[dir="auto"] bdi {
+[dir="auto"] .ascleon-pill {
   unicode-bidi: isolate;
   display: inline-block;
   vertical-align: baseline;

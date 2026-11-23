@@ -79,8 +79,10 @@ async function callGeminiAgent(
 ): Promise<AgentRunOutput> {
   const ai = new GoogleGenAI({ apiKey });
   const orderedModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
-  const modelName = orderedModels[0] || "gemini-4-hydrogen";
-  const fallbackModel = orderedModels[1] || "gemini-3.8-flash";
+  const modelsToTry =
+    orderedModels.length > 0
+      ? orderedModels
+      : ["gemini-4-hydrogen", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash"];
 
   // Build grounding context from active page + background textbook knowledge
   const pageIntro = `Active Book: "${context.bookTitle}" (Section ${context.currentSegmentIndex + 1}${
@@ -123,10 +125,12 @@ async function callGeminiAgent(
   ];
 
   if (context.selectedImage) {
-    const cleanBase64 = context.selectedImage.replace(/^data:image\/\w+;base64,/, "");
+    const mimeMatch = context.selectedImage.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+    const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+    const cleanBase64 = context.selectedImage.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
     userParts.push({
       inlineData: {
-        mimeType: "image/png",
+        mimeType,
         data: cleanBase64,
       },
     });
@@ -137,130 +141,163 @@ async function callGeminiAgent(
     parts: userParts,
   });
 
-  const toolsUsed: string[] = [];
-  let generatedMorph: any = null;
-  let generatedQuiz: any = null;
-
-  const isQuickQuery =
-    userQuery.trim().length < 80 &&
-    !userQuery.toLowerCase().includes("deep dive") &&
-    !userQuery.toLowerCase().includes("mechanism") &&
-    !userQuery.toLowerCase().includes("step-by-step") &&
-    !userQuery.toLowerCase().includes("breakdown");
+  // Only attach function-calling tools when the student explicitly asks to generate an interactive artifact
+  const needsTools = /\b(morph|quiz|qbank|test me|vignette|flashcard|visualize|interactive)\b/i.test(
+    userQuery
+  );
 
   const langDirective = buildLanguageDirective(context.language || "en", "text");
   const fullSystemInstruction = `${SOCRATIC_SYSTEM_PROMPT}\n\n${langDirective}`;
 
-  try {
-    const turn1Abort = new AbortController();
-    const turn1Timer = setTimeout(() => turn1Abort.abort(), 16_000);
-    let response: any;
-    try {
-      const generatePromise = ai.models.generateContent({
-        model: modelName,
-        contents,
-        config: {
-          systemInstruction: fullSystemInstruction,
-          tools: toolsDeclaration as any,
-          temperature: 0.2,
-          abortSignal: turn1Abort.signal,
-          thinkingConfig: {
-            thinkingBudget: isQuickQuery ? 0 : 256,
-          },
-        },
-      });
+  let lastError: unknown = new Error("All Gemini models failed");
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        turn1Abort.signal.addEventListener("abort", () =>
-          reject(new Error(`Gemini ${modelName} timed out after 16s`))
-        )
-      );
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const modelName = modelsToTry[i];
+    const isPrimary = i === 0;
+    const timeoutMs = isPrimary ? 22_000 : 14_000;
+    const supportsThinking = !modelName.includes("lite");
+    const toolsUsed: string[] = [];
+    let generatedMorph: any = null;
+    let generatedQuiz: any = null;
 
-      response = await Promise.race([generatePromise, timeoutPromise]);
-    } finally {
-      clearTimeout(turn1Timer);
-    }
-
-    clearModelCooldown(`gemini:${modelName}`);
-    const candidate = response.candidates?.[0];
-    const functionCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall);
-
-    if (candidate && candidate.content && functionCalls && functionCalls.length > 0) {
-      // Execute each tool
-      const toolParts: any[] = [];
-      for (const fc of functionCalls) {
-        const call = fc.functionCall;
-        if (!call || !call.name) continue;
-        const toolName: string = call.name;
-        toolsUsed.push(toolName);
-
-        const execution = await executeAgentTool(
-          toolName,
-          (call.args as Record<string, any>) || {},
-          {
-            bookId: context.bookId,
-            currentSegmentIndex: context.currentSegmentIndex,
-            currentSegmentContent: context.currentSegmentContent,
-          }
-        );
-
-        if (toolName === "generate_interactive_morph" && execution.data) {
-          generatedMorph = execution.data;
-        }
-        if (toolName === "generate_board_quiz" && execution.data) {
-          generatedQuiz = execution.data;
-        }
-
-        toolParts.push({
-          functionResponse: {
-            name: toolName,
-            response: { result: execution.output },
-          },
-        });
-      }
-
-      // Turn 2: Provide tool results back to Gemini for final response
-      const followUpContents = [
-        ...contents,
-        candidate.content,
-        {
-          role: "user",
-          parts: toolParts,
-        },
-      ];
-
-      const turn2Abort = new AbortController();
-      const turn2Timer = setTimeout(() => turn2Abort.abort(), 14_000);
-      let finalResponse: any;
+    const runWithTimeout = async (
+      config: Record<string, any>,
+      requestContents: any[],
+      ms: number,
+      label: string
+    ) => {
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), ms);
       try {
-        const finalResponsePromise = ai.models.generateContent({
+        const promise = ai.models.generateContent({
           model: modelName,
-          contents: followUpContents,
+          contents: requestContents,
           config: {
-            temperature: 0.3,
-            abortSignal: turn2Abort.signal,
-            thinkingConfig: {
-              thinkingBudget: isQuickQuery ? 0 : 256,
-            },
+            ...config,
+            abortSignal: abort.signal,
           },
         });
-
-        const finalTimeoutPromise = new Promise<never>((_, reject) =>
-          turn2Abort.signal.addEventListener("abort", () =>
-            reject(new Error(`Gemini ${modelName} Turn 2 timed out after 14s`))
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          abort.signal.addEventListener("abort", () =>
+            reject(new Error(`Gemini ${modelName} ${label} timed out after ${Math.round(ms / 1000)}s`))
           )
         );
-
-        finalResponse = await Promise.race([finalResponsePromise, finalTimeoutPromise]);
+        return await Promise.race([promise, timeoutPromise]);
       } finally {
-        clearTimeout(turn2Timer);
+        clearTimeout(timer);
+      }
+    };
+
+    try {
+      const baseConfig: Record<string, any> = {
+        systemInstruction: fullSystemInstruction,
+        temperature: isPrimary ? 0.2 : 0.25,
+        ...(isPrimary && needsTools ? { tools: toolsDeclaration as any } : {}),
+        ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 128 } } : {}),
+      };
+
+      let response: any;
+      try {
+        response = await runWithTimeout(baseConfig, contents, timeoutMs, "Turn 1");
+      } catch (firstErr: any) {
+        const msg = String(firstErr?.message || "").toLowerCase();
+        // If a model rejects thinkingConfig with a 400 error, retry once without it
+        if (supportsThinking && (msg.includes("thinking") || msg.includes("400"))) {
+          const { thinkingConfig: _omit, ...withoutThinking } = baseConfig;
+          response = await runWithTimeout(withoutThinking, contents, timeoutMs, "Turn 1 retry");
+        } else {
+          throw firstErr;
+        }
+      }
+
+      clearModelCooldown(`gemini:${modelName}`);
+      const candidate = response.candidates?.[0];
+      const functionCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall);
+
+      if (candidate && candidate.content && functionCalls && functionCalls.length > 0) {
+        const toolParts: any[] = [];
+        for (const fc of functionCalls) {
+          const call = fc.functionCall;
+          if (!call || !call.name) continue;
+          const toolName: string = call.name;
+          toolsUsed.push(toolName);
+
+          const execution = await executeAgentTool(
+            toolName,
+            (call.args as Record<string, any>) || {},
+            {
+              bookId: context.bookId,
+              currentSegmentIndex: context.currentSegmentIndex,
+              currentSegmentContent: context.currentSegmentContent,
+            }
+          );
+
+          if (toolName === "generate_interactive_morph" && execution.data) {
+            generatedMorph = execution.data;
+          }
+          if (toolName === "generate_board_quiz" && execution.data) {
+            generatedQuiz = execution.data;
+          }
+
+          toolParts.push({
+            functionResponse: {
+              name: toolName,
+              response: { result: execution.output },
+            },
+          });
+        }
+
+        const followUpContents = [
+          ...contents,
+          candidate.content,
+          {
+            role: "user",
+            parts: toolParts,
+          },
+        ];
+
+        const finalResponse: any = await runWithTimeout(
+          {
+            systemInstruction: fullSystemInstruction,
+            temperature: 0.3,
+            ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 128 } } : {}),
+          },
+          followUpContents,
+          18_000,
+          "Turn 2"
+        );
+
+        const finalText = (finalResponse?.text || "").trim();
+        if (finalText.length < 2) {
+          throw new Error(`Gemini ${modelName} returned empty text on Turn 2`);
+        }
+
+        return {
+          text: normalizeScientificNotation(finalText),
+          provider: "gemini",
+          model: modelName,
+          toolsUsed,
+          citations: Array.from(
+            new Set([
+              `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
+              ...filterCitationSources(enriched.authoritativeReferences),
+            ])
+          ),
+          generatedMorph,
+          generatedQuiz,
+          authoritativeReferences: enriched.authoritativeReferences,
+          qbankVignettes: enriched.qbankVignettes,
+          mnemonics: enriched.mnemonics,
+        };
+      }
+
+      const directText = (response?.text || "").trim();
+      if (directText.length < 2) {
+        throw new Error(`Gemini ${modelName} returned empty text`);
       }
 
       return {
-        text: normalizeScientificNotation(
-          finalResponse.text ||
-          "Here is the synthesized clinical explanation grounded in your active text and canonical textbooks."
-        ),
+        text: normalizeScientificNotation(directText),
         provider: "gemini",
         model: modelName,
         toolsUsed,
@@ -276,67 +313,14 @@ async function callGeminiAgent(
         qbankVignettes: enriched.qbankVignettes,
         mnemonics: enriched.mnemonics,
       };
-    }
-
-    return {
-      text: normalizeScientificNotation(
-        response.text ||
-        "Grounded analysis completed based on your active chapter reading and textbook references."
-      ),
-      provider: "gemini",
-      model: modelName,
-      toolsUsed,
-      citations: Array.from(
-        new Set([
-          `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
-          ...filterCitationSources(enriched.authoritativeReferences),
-        ])
-      ),
-      generatedMorph,
-      generatedQuiz,
-      authoritativeReferences: enriched.authoritativeReferences,
-      qbankVignettes: enriched.qbankVignettes,
-      mnemonics: enriched.mnemonics,
-    };
-  } catch (err: any) {
-    markModelCooldownFromError(`gemini:${modelName}`, err);
-    // Fast bounded fallback to secondary Gemini model
-    const fbAbort = new AbortController();
-    const fbTimer = setTimeout(() => fbAbort.abort(), 12_000);
-    try {
-      const fbPromise = ai.models.generateContent({
-        model: fallbackModel,
-        contents,
-        config: {
-          systemInstruction: fullSystemInstruction,
-          temperature: 0.25,
-          abortSignal: fbAbort.signal,
-        },
-      });
-      const fbTimeout = new Promise<never>((_, reject) =>
-        fbAbort.signal.addEventListener("abort", () =>
-          reject(new Error(`Gemini fallback ${fallbackModel} timed out after 12s`))
-        )
-      );
-      const fallbackResp: any = await Promise.race([fbPromise, fbTimeout]);
-      clearModelCooldown(`gemini:${fallbackModel}`);
-      return {
-        text: normalizeScientificNotation(fallbackResp.text || "Analysis completed."),
-        provider: "gemini",
-        model: fallbackModel,
-        toolsUsed: [],
-        citations: [`Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`],
-        authoritativeReferences: enriched.authoritativeReferences,
-        qbankVignettes: enriched.qbankVignettes,
-        mnemonics: enriched.mnemonics,
-      };
-    } catch (fbErr) {
-      markModelCooldownFromError(`gemini:${fallbackModel}`, fbErr);
-      throw err;
-    } finally {
-      clearTimeout(fbTimer);
+    } catch (err: any) {
+      lastError = err;
+      markModelCooldownFromError(`gemini:${modelName}`, err);
+      console.warn(`[agent-harness] Gemini model ${modelName} failed:`, err?.message || err);
     }
   }
+
+  throw lastError;
 }
 
 /**
@@ -386,11 +370,28 @@ async function callOpenAICompatibleAgent(
     }
   }
 
+  const userPromptText = `Book: "${context.bookTitle}" (${context.currentPageNumber ? `Page ${context.currentPageNumber}` : `Section ${context.currentSegmentIndex + 1}`})\nActive Text:\n${
+    context.currentSegmentContent
+  }\n${context.selectedText ? `Highlighted Passage:\n"${context.selectedText}"\n` : ""}\nQuery: ${userQuery}`;
+
+  const userContent =
+    context.selectedImage && provider === "openai"
+      ? [
+          { type: "text", text: userPromptText },
+          {
+            type: "image_url",
+            image_url: {
+              url: context.selectedImage.startsWith("data:")
+                ? context.selectedImage
+                : `data:image/png;base64,${context.selectedImage}`,
+            },
+          },
+        ]
+      : userPromptText;
+
   messages.push({
     role: "user",
-    content: `Book: "${context.bookTitle}" (${context.currentPageNumber ? `Page ${context.currentPageNumber}` : `Section ${context.currentSegmentIndex + 1}`})\nActive Text:\n${
-      context.currentSegmentContent
-    }\n${context.selectedText ? `Highlighted Passage:\n"${context.selectedText}"\n` : ""}\nQuery: ${userQuery}`,
+    content: userContent,
   });
 
   const toolsUsed: string[] = [];
@@ -404,7 +405,7 @@ async function callOpenAICompatibleAgent(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(18_000),
     body: JSON.stringify({
       model: effectiveModel,
       messages,
@@ -461,7 +462,7 @@ async function callOpenAICompatibleAgent(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(16_000),
       body: JSON.stringify({
         model: effectiveModel,
         messages,
@@ -471,11 +472,12 @@ async function callOpenAICompatibleAgent(
 
     if (followUpRes.ok) {
       const followUpData = await followUpRes.json();
+      const followUpText = (followUpData.choices?.[0]?.message?.content || "").trim();
+      if (followUpText.length < 2) {
+        throw new Error(`${provider} returned empty follow-up response`);
+      }
       return {
-        text: normalizeScientificNotation(
-          followUpData.choices?.[0]?.message?.content ||
-          "Grounded explanation synthesized."
-        ),
+        text: normalizeScientificNotation(followUpText),
         provider,
         model: effectiveModel,
         toolsUsed,
@@ -494,10 +496,13 @@ async function callOpenAICompatibleAgent(
     }
   }
 
+  const directContent = (msg?.content || "").trim();
+  if (directContent.length < 2) {
+    throw new Error(`${provider} returned empty response`);
+  }
+
   return {
-    text: normalizeScientificNotation(
-      msg?.content || "Analysis synthesized from active study text."
-    ),
+    text: normalizeScientificNotation(directContent),
     provider,
     model: effectiveModel,
     toolsUsed,
