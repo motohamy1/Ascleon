@@ -15,7 +15,10 @@ import {
   isGenericTopicTitle,
   resolveActivePageTopic,
   sanitizeStudyScope,
+  sanitizeTopicCandidates,
 } from "@/lib/ai/rag/topic-resolution";
+import { isPlaceholderPageText, tokenizeText } from "@/lib/ai/rag/chunker";
+import type { RagAlignmentStatus } from "@/lib/ai/rag/book-rag-retriever";
 
 import type { StudyScope } from "@/components/reader/StudyScopeBar";
 
@@ -33,7 +36,14 @@ interface ReaderAssistantRequestBody {
   selectedText?: string;
   selectedImage?: string;
   language?: string;
-  history?: Array<{ sender?: string; role?: string; text?: string; content?: string }>;
+  socraticMode?: boolean;
+  history?: Array<{
+    sender?: string;
+    role?: string;
+    text?: string;
+    content?: string;
+    pageNumber?: number;
+  }>;
   studyScope?: StudyScope;
   topicMap?: { topics?: unknown[] };
 }
@@ -61,6 +71,7 @@ export async function POST(request: Request) {
     selectedText = "",
     selectedImage = "",
     language = "en",
+    socraticMode = false,
     history = [],
     studyScope,
     topicMap,
@@ -75,16 +86,29 @@ export async function POST(request: Request) {
 
   const cleanQuery = query.trim();
   const historyArray = Array.isArray(history)
-    ? history.map((item: { sender?: string; role?: string; text?: string; content?: string }) => ({
-        sender: (item?.sender === "ai" || item?.role === "assistant" ? "ai" : "user") as "user" | "ai",
-        text: String(item?.text || item?.content || ""),
-      }))
+    ? history.map(
+        (item: {
+          sender?: string;
+          role?: string;
+          text?: string;
+          content?: string;
+          pageNumber?: number;
+        }) => ({
+          sender: (item?.sender === "ai" || item?.role === "assistant" ? "ai" : "user") as "user" | "ai",
+          text: String(item?.text || item?.content || ""),
+          pageNumber:
+            typeof item?.pageNumber === "number" && item.pageNumber > 0
+              ? item.pageNumber
+              : undefined,
+        })
+      )
     : [];
 
   const activePageNum = currentPageNumber
     ? Number(currentPageNumber)
     : Number(currentSegmentIndex) + 1;
   const livePageText = String(currentSegmentContent || "").trim();
+  const hasRealLiveText = Boolean(livePageText) && !isPlaceholderPageText(livePageText);
   let effectiveScope = sanitizeStudyScope(studyScope as never, activePageNum);
   let effectiveContent = livePageText;
   let effectiveTopicLocation: {
@@ -95,9 +119,42 @@ export async function POST(request: Request) {
     candidates?: unknown[];
   } | null = null;
 
-  // 1. ACTIVE TOPIC AWARENESS & AMBIGUITY CHECK (before generating any response)
+  // 1. EXPLICIT NAMED TOPIC MATCH IN QUERY (e.g. "Explain Pulmonary Embolism" while viewing another page)
+  const referencesCurrentPage =
+    /\b(this page|current page|on this page|here|this section)\b|الصفحة\s*(دي|هذه|الحالية)/i.test(
+      cleanQuery
+    );
+
+  if (effectiveScope.type === "page" && !referencesCurrentPage && cleanQuery.length > 4) {
+    const mapTopics = sanitizeTopicCandidates(topicMap?.topics);
+    const qLower = cleanQuery.toLowerCase();
+    const namedTopicMatches = mapTopics.filter((t) => {
+      const tLower = t.title.toLowerCase();
+      if (tLower.length >= 4 && qLower.includes(tLower)) return true;
+      const tWords = tokenizeText(t.title);
+      return tWords.length >= 2 && tWords.every((w) => qLower.includes(w));
+    });
+
+    if (namedTopicMatches.length === 1) {
+      const matched = namedTopicMatches[0];
+      effectiveScope = {
+        type: "topic",
+        topicTitle: matched.title,
+        startPage: matched.startPage,
+        endPage: matched.endPage,
+        topicId: matched.id,
+      };
+      effectiveTopicLocation = {
+        title: matched.title,
+        startPage: matched.startPage,
+        endPage: matched.endPage,
+      };
+    }
+  }
+
+  // 1b. ACTIVE TOPIC AWARENESS & AMBIGUITY CHECK (when explicitly asking for topic-wide summary)
   const isTopicSummaryIntent =
-    /\b(executive\s+(topic|page|range)\s+summary|summarize\s+(this\s+)?topic|explain\s+(this\s+)?topic|what\s+topic\s+is\s+this)\b/i.test(
+    /\b(executive\s+topic\s+summary|summarize\s+(this\s+)?topic|explain\s+(this\s+)?topic|what\s+topic\s+is\s+this)\b|اشرح\s+الموضوع|لخص\s+الموضوع/i.test(
       cleanQuery
     ) ||
     (studyScope?.type === "topic" && isGenericTopicTitle(studyScope?.topicTitle));
@@ -164,8 +221,9 @@ export async function POST(request: Request) {
     }
   }
 
-  // 2. UNIVERSAL BOOK RAG RETRIEVAL: Search across bounded book segments in MongoDB
+  // 2. UNIVERSAL BOOK RAG RETRIEVAL WITH ACTIVE-PAGE SUPREMACY
   let ragCitedPages: number[] = [];
+  let ragAlignmentStatus: RagAlignmentStatus = hasRealLiveText ? "live_only" : "verified";
 
   if (bookId) {
     try {
@@ -176,6 +234,7 @@ export async function POST(request: Request) {
           query: cleanQuery,
           scope: effectiveScope,
           activePage: activePageNum,
+          livePageText,
           topK: effectiveScope.type === "page" ? 2 : 6,
         }),
         new Promise<never>((_, reject) =>
@@ -183,17 +242,58 @@ export async function POST(request: Request) {
         ),
       ]);
 
+      ragAlignmentStatus = ragRes.alignmentStatus;
+
       if (ragRes.combinedContext) {
         ragCitedPages = ragRes.citedPages;
 
-        // Always anchor the live active page text if RAG didn't include activePageNum
-        const includesActivePage = ragCitedPages.includes(activePageNum);
-        if (!includesActivePage && livePageText) {
-          effectiveContent = `--- [ACTIVE PAGE ${activePageNum} — LIVE READER TEXT] ---\n${livePageText}\n\n${ragRes.combinedContext}`;
-          ragCitedPages = Array.from(new Set([activePageNum, ...ragCitedPages]));
+        if (effectiveScope.type === "page") {
+          if (hasRealLiveText) {
+            const supplementarySegments = ragRes.segments.filter(
+              (s) => s.pageNumber !== activePageNum
+            );
+            const activeMeta = ragRes.segments.find((s) => s.pageNumber === activePageNum);
+            const activeHeading =
+              activeMeta?.headings?.length
+                ? ` [${activeMeta.headings.join(" / ")}]`
+                : "";
+            const activeGs =
+              ragAlignmentStatus === "verified" && activeMeta?.goldStandards?.length
+                ? `\n- Author-Stated Gold Standards / Primary Rules: ${activeMeta.goldStandards.join("; ")}`
+                : "";
+            const supplementaryBlock =
+              supplementarySegments.length > 0
+                ? `\n\n=== SUPPLEMENTARY BOOK CONTEXT ===\n` +
+                  supplementarySegments
+                    .map(
+                      (s) =>
+                        `--- [Page ${s.pageNumber}] ---\n${s.content}`
+                    )
+                    .join("\n\n")
+                : "";
+            effectiveContent = `=== PRIMARY ACTIVE PAGE ${activePageNum} (CURRENTLY ON STUDENT'S SCREEN)${activeHeading} ===\n${livePageText}${activeGs}${supplementaryBlock}`;
+            ragCitedPages = Array.from(new Set([activePageNum, ...ragCitedPages]));
+          } else {
+            effectiveContent = ragRes.combinedContext;
+          }
         } else {
-          effectiveContent = ragRes.combinedContext;
+          const activeInScope =
+            activePageNum >= (effectiveScope.startPage || activePageNum) &&
+            activePageNum <= (effectiveScope.endPage || activePageNum);
+          if (
+            hasRealLiveText &&
+            activeInScope &&
+            (ragAlignmentStatus !== "verified" || !ragCitedPages.includes(activePageNum))
+          ) {
+            effectiveContent = `=== PRIMARY ACTIVE PAGE ${activePageNum} (CURRENTLY ON STUDENT'S SCREEN) ===\n${livePageText}\n\n=== SUPPLEMENTARY BOOK CONTEXT ===\n${ragRes.combinedContext}`;
+            ragCitedPages = Array.from(new Set([activePageNum, ...ragCitedPages]));
+          } else {
+            effectiveContent = ragRes.combinedContext;
+          }
         }
+      } else if (hasRealLiveText) {
+        effectiveContent = `=== PRIMARY ACTIVE PAGE ${activePageNum} (CURRENTLY ON STUDENT'S SCREEN) ===\n${livePageText}`;
+        ragCitedPages = [activePageNum];
       }
 
       if (
@@ -216,6 +316,10 @@ export async function POST(request: Request) {
       }
     } catch (ragErr) {
       console.warn("[reader-assistant] Book RAG retrieval fallback:", ragErr);
+      if (hasRealLiveText) {
+        effectiveContent = `=== PRIMARY ACTIVE PAGE ${activePageNum} (CURRENTLY ON STUDENT'S SCREEN) ===\n${livePageText}`;
+        ragCitedPages = [activePageNum];
+      }
     }
   } else if (
     effectiveScope.startPage &&
@@ -240,6 +344,7 @@ export async function POST(request: Request) {
     selectedText: String(selectedText || ""),
     selectedImage: typeof selectedImage === "string" && selectedImage ? selectedImage : undefined,
     language: String(language || "en") as "en" | "ar" | "mixed",
+    socraticMode: Boolean(socraticMode),
     history: historyArray,
     studyScope: effectiveScope,
     topicMap,
@@ -272,6 +377,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       answer: output.text,
+      routedTier: output.routedTier,
+      intent: output.intent,
       toolsUsed: output.toolsUsed,
       citations: finalCitations,
       generatedMorph: output.generatedMorph,
@@ -280,6 +387,11 @@ export async function POST(request: Request) {
       qbankVignettes: output.qbankVignettes,
       mnemonics: output.mnemonics,
       topicLocation: effectiveTopicLocation || output.topicLocation,
+      ragMeta: {
+        alignmentStatus: ragAlignmentStatus,
+        activePage: activePageNum,
+        citedPages: finalCitations,
+      },
       creditsCharged: dynamicCost.total,
       creditsRemaining: creditCheck.remaining,
       creditBreakdown: dynamicCost.summary,

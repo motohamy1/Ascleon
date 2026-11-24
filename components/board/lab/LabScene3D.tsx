@@ -11,7 +11,9 @@ import React, {
 } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { BookOpen, Box, Eye, Layers, RotateCw, Sparkles, X } from "lucide-react";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import { BookOpen, Box, Eye, Layers, Loader2, RotateCw, Sparkles, X } from "lucide-react";
 import {
   LabCameraPreset,
   LabParamControl,
@@ -235,15 +237,21 @@ export const LabScene3D = forwardRef<LabScene3DHandle, LabScene3DProps>(
     const animatedGroupRef = useRef<{
       particles: Array<{ mesh: THREE.Mesh; phase: number; speed: number; customMode?: string }>;
       pulseTarget?: THREE.Object3D;
+      spinTarget?: THREE.Object3D;
       waveRing?: THREE.Mesh;
     }>({ particles: [] });
+    const glbRootRef = useRef<THREE.Group | null>(null);
+    const xrayOpacityRef = useRef<number>(1.0);
 
     const [camPreset, setCamPreset] = useState<LabCameraPreset>(
-      scene.tier !== "interactive-sim" ? scene.cam || "iso" : "iso"
+      scene.tier !== "interactive-sim" && scene.tier !== "none" ? scene.cam || "iso" : "iso"
     );
     const [selectedStruct, setSelectedStruct] = useState<{ id: string; label: string } | null>(null);
     const selectedStructId = selectedStruct?.id ?? null;
     const [webglFailed, setWebglFailed] = useState(false);
+    const [xrayOpacity, setXrayOpacity] = useState<number>(1.0);
+    const [assetLoading, setAssetLoading] = useState<boolean>(false);
+    const [assetError, setAssetError] = useState<string | null>(null);
 
     // Build initial parameter state from scene controls or anatomy rig defaults
     const initialParams = useMemo(() => {
@@ -269,10 +277,36 @@ export const LabScene3D = forwardRef<LabScene3DHandle, LabScene3DProps>(
       setParamValues(initialParams);
       setSelectedStruct(null);
       setWebglFailed(false);
-      if (scene.tier !== "interactive-sim" && scene.cam) {
+      setAssetError(null);
+      setAssetLoading(false);
+      setXrayOpacity(1.0);
+      if (scene.tier !== "interactive-sim" && scene.tier !== "none" && scene.cam) {
         setCamPreset(scene.cam);
       }
     }
+
+    useEffect(() => {
+      xrayOpacityRef.current = xrayOpacity;
+      const root = glbRootRef.current;
+      if (!root) return;
+      root.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          const mesh = obj as THREE.Mesh;
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          const isHighlighted = Boolean(mesh.userData?.highlighted);
+          const targetOpacity = isHighlighted
+            ? Math.max(0.85, xrayOpacity)
+            : xrayOpacity;
+          for (const mat of mats) {
+            if (!mat) continue;
+            mat.transparent = targetOpacity < 0.98;
+            mat.opacity = targetOpacity;
+            mat.depthWrite = targetOpacity >= 0.98;
+            mat.needsUpdate = true;
+          }
+        }
+      });
+    }, [xrayOpacity, scene]);
 
     const handleParamChange = useCallback((name: string, val: number) => {
       setParamValues((prev) => ({ ...prev, [name]: val }));
@@ -306,9 +340,11 @@ export const LabScene3D = forwardRef<LabScene3DHandle, LabScene3DProps>(
       return [];
     }, [scene, paramValues]);
 
-    // Three.js WebGL setup & scene builder for Tiers 1, 2, 4
+    // Three.js WebGL setup & scene builder for 3D Tiers
     useEffect(() => {
-      if (scene.tier === "interactive-sim") return;
+      if (scene.tier === "interactive-sim" || scene.tier === "none") return;
+      let cancelled = false;
+      glbRootRef.current = null;
       const container = mountRef.current;
       if (!container) return;
 
@@ -1145,6 +1181,234 @@ export const LabScene3D = forwardRef<LabScene3DHandle, LabScene3DProps>(
         }
       }
 
+      // =====================================================================
+      // BUILD REAL 3D GLB ANATOMY PACK (Z-Anatomy / BodyParts3D via DRACO GLTF)
+      // =====================================================================
+      let dracoLoader: DRACOLoader | null = null;
+      if (scene.tier === "glb-anatomy") {
+        Promise.resolve().then(() => {
+          if (!cancelled) {
+            setAssetLoading(true);
+            setAssetError(null);
+          }
+        });
+        dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath(
+          "https://www.gstatic.com/draco/versioned/decoders/1.5.7/"
+        );
+        const loader = new GLTFLoader();
+        loader.setDRACOLoader(dracoLoader);
+
+        const highlightTargets = (scene.highlightMeshes || []).map((m) =>
+          m.toLowerCase().replace(/[^a-z0-9]/g, "")
+        );
+
+        loader.load(
+          scene.glbUrl,
+          (gltf) => {
+            if (cancelled) return;
+            const model = gltf.scene;
+            const box = new THREE.Box3().setFromObject(model);
+            const center = new THREE.Vector3();
+            const size = new THREE.Vector3();
+            box.getCenter(center);
+            box.getSize(size);
+            const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+            const scale = 1.65 / maxDim;
+            model.position.copy(center).multiplyScalar(-scale);
+            model.scale.setScalar(scale);
+
+            model.traverse((child) => {
+              if ((child as THREE.Mesh).isMesh) {
+                const mesh = child as THREE.Mesh;
+                const cleanName = (mesh.name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+                const isHighlighted =
+                  Boolean(cleanName) &&
+                  highlightTargets.some(
+                    (t) => cleanName.includes(t) || t.includes(cleanName)
+                  );
+                const clonedMat = Array.isArray(mesh.material)
+                  ? mesh.material.map((m) => m.clone())
+                  : mesh.material.clone();
+                mesh.material = clonedMat;
+                const mats = Array.isArray(clonedMat) ? clonedMat : [clonedMat];
+                const opacity = isHighlighted
+                  ? Math.max(0.85, xrayOpacityRef.current)
+                  : xrayOpacityRef.current;
+                for (const m of mats) {
+                  if (m instanceof THREE.MeshStandardMaterial && isHighlighted) {
+                    m.emissive.setHex(0xff4c00);
+                    m.emissiveIntensity = 0.42;
+                  }
+                  m.transparent = opacity < 0.98;
+                  m.opacity = opacity;
+                  m.depthWrite = opacity >= 0.98;
+                }
+                const label = (mesh.name || scene.title).replace(/[_-]+/g, " ").trim();
+                mesh.userData = {
+                  id: mesh.name || `mesh-${pickables.length}`,
+                  label,
+                  highlighted: isHighlighted,
+                };
+                pickables.push(mesh);
+              }
+            });
+
+            glbRootRef.current = model;
+            threeScene.add(model);
+            if (scene.labels) {
+              for (const lm of scene.labels) {
+                if (!labels.some((l) => l.id === lm.id)) {
+                  labels.push({
+                    id: lm.id,
+                    label: language === "ar" && lm.labelAr ? lm.labelAr : lm.label,
+                    tone: lm.tone || "neutral",
+                    xPct: 50,
+                    yPct: 50,
+                    visible: true,
+                    worldPos: new THREE.Vector3(...(lm.pos || [0, 0.45, 0.25])),
+                  });
+                }
+              }
+              projectedListRef.current = labels;
+            }
+            setAssetLoading(false);
+          },
+          undefined,
+          () => {
+            if (cancelled) return;
+            setAssetLoading(false);
+            setAssetError(
+              `Could not load 3D anatomy pack (${scene.packId}). Verify asset URL or inspect step notes.`
+            );
+          }
+        );
+      }
+
+      // =====================================================================
+      // BUILD REAL 3D MOLECULE (PubChem 3D Conformer CPK Ball-and-Stick)
+      // =====================================================================
+      if (scene.tier === "molecule-3d") {
+        Promise.resolve().then(() => {
+          if (!cancelled) {
+            setAssetLoading(true);
+            setAssetError(null);
+          }
+        });
+        const CPK_COLOR: Record<string, number> = {
+          H: 0xf8fafc,
+          C: 0x334155,
+          N: 0x2563eb,
+          O: 0xdc2626,
+          S: 0xeab308,
+          P: 0xf97316,
+          F: 0x22c55e,
+          Cl: 0x16a34a,
+          Br: 0x991b1b,
+          I: 0x7e22ce,
+          Fe: 0xb45309,
+          Ca: 0x10b981,
+          Na: 0x8b5cf6,
+          K: 0xa855f7,
+        };
+        const CPK_RADIUS: Record<string, number> = {
+          H: 0.08,
+          P: 0.16,
+          S: 0.16,
+          Cl: 0.15,
+          Br: 0.17,
+          I: 0.18,
+        };
+
+        fetch(`/api/whiteboard/molecule-3d?name=${encodeURIComponent(scene.compoundName)}`)
+          .then(async (res) => {
+            if (!res.ok) throw new Error("Molecule lookup failed");
+            return (await res.json()) as {
+              cid: number;
+              atoms: Array<{ aid: number; element: string; x: number; y: number; z: number }>;
+              bonds: Array<{ aid1: number; aid2: number; order: number }>;
+            };
+          })
+          .then((mol) => {
+            if (cancelled || !mol.atoms?.length) return;
+            const molGroup = new THREE.Group();
+            let maxSpan = 1;
+            for (const a of mol.atoms) {
+              maxSpan = Math.max(maxSpan, Math.abs(a.x), Math.abs(a.y), Math.abs(a.z));
+            }
+            const scale = 0.88 / maxSpan;
+            const posByAid = new Map<number, [number, number, number]>();
+
+            for (const atom of mol.atoms) {
+              const p: [number, number, number] = [
+                atom.x * scale,
+                atom.y * scale + 0.06,
+                atom.z * scale,
+              ];
+              posByAid.set(atom.aid, p);
+              const color = CPK_COLOR[atom.element] ?? 0x94a3b8;
+              const radius = CPK_RADIUS[atom.element] ?? 0.125;
+              const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(radius, 18, 18),
+                new THREE.MeshStandardMaterial({
+                  color,
+                  roughness: 0.28,
+                  metalness: 0.18,
+                })
+              );
+              sphere.position.set(...p);
+              sphere.userData = {
+                id: `atom-${atom.aid}`,
+                label: `${atom.element} #${atom.aid}`,
+              };
+              molGroup.add(sphere);
+              pickables.push(sphere);
+            }
+
+            const bondMat = new THREE.MeshStandardMaterial({
+              color: 0xcbd5e1,
+              roughness: 0.45,
+              metalness: 0.25,
+            });
+            for (const bond of mol.bonds || []) {
+              const a = posByAid.get(bond.aid1);
+              const b = posByAid.get(bond.aid2);
+              if (!a || !b) continue;
+              const dir = new THREE.Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+              const perp = new THREE.Vector3(-dir.z, 0, dir.x);
+              if (perp.lengthSq() < 1e-5) perp.set(0, 1, 0);
+              perp.normalize().multiplyScalar(0.032);
+              const offsets =
+                bond.order >= 3 ? [-1, 0, 1] : bond.order === 2 ? [-0.65, 0.65] : [0];
+              const bondRad = bond.order >= 2 ? 0.024 : 0.038;
+              for (const k of offsets) {
+                const pa: [number, number, number] = [
+                  a[0] + perp.x * k,
+                  a[1] + perp.y * k,
+                  a[2] + perp.z * k,
+                ];
+                const pb: [number, number, number] = [
+                  b[0] + perp.x * k,
+                  b[1] + perp.y * k,
+                  b[2] + perp.z * k,
+                ];
+                molGroup.add(createSegmentCylinder(pa, pb, bondRad, bondMat));
+              }
+            }
+
+            threeScene.add(molGroup);
+            animatedGroupRef.current.spinTarget = molGroup;
+            setAssetLoading(false);
+          })
+          .catch(() => {
+            if (cancelled) return;
+            setAssetLoading(false);
+            setAssetError(
+              `Could not load 3D molecular conformer for "${scene.compoundName}".`
+            );
+          });
+      }
+
       projectedListRef.current = labels;
 
       // Pointer picking with 6px drag threshold
@@ -1194,7 +1458,10 @@ export const LabScene3D = forwardRef<LabScene3DHandle, LabScene3DProps>(
         rafId = requestAnimationFrame(animate);
         const tSec = (performance.now() - startTime) / 1000;
 
-        // Animate physiological motion / flowing particles
+        // Animate physiological motion / flowing particles / gentle molecule rotation
+        if (animatedGroupRef.current.spinTarget) {
+          animatedGroupRef.current.spinTarget.rotation.y = tSec * 0.35;
+        }
         if (animatedGroupRef.current.pulseTarget) {
           const beat = 1 + Math.sin(tSec * 3.8) * 0.045;
           animatedGroupRef.current.pulseTarget.scale.set(beat, beat, beat);
@@ -1298,6 +1565,9 @@ export const LabScene3D = forwardRef<LabScene3DHandle, LabScene3DProps>(
       rafId = requestAnimationFrame(animate);
 
       return () => {
+        cancelled = true;
+        glbRootRef.current = null;
+        dracoLoader?.dispose();
         cancelAnimationFrame(rafId);
         resizeObs.disconnect();
         renderer.domElement.removeEventListener("pointerdown", onPointerDown);
@@ -1363,6 +1633,16 @@ export const LabScene3D = forwardRef<LabScene3DHandle, LabScene3DProps>(
             }
           }
         }
+      } else if (scene.tier === "glb-anatomy") {
+        if (scene.labels) {
+          for (const l of scene.labels) {
+            list.push({
+              id: l.id,
+              label: language === "ar" && l.labelAr ? l.labelAr : l.label,
+              tone: l.tone || "neutral",
+            });
+          }
+        }
       } else if (scene.tier === "smart-diagram-3d") {
         section.nodes.forEach((n, idx) => {
           list.push({
@@ -1385,6 +1665,10 @@ export const LabScene3D = forwardRef<LabScene3DHandle, LabScene3DProps>(
         paramValues
       );
     }, [selectedStruct, scene, section, paramValues]);
+
+    if (scene.tier === "none") {
+      return null;
+    }
 
     if (scene.tier === "interactive-sim") {
       return (
@@ -1475,6 +1759,46 @@ export const LabScene3D = forwardRef<LabScene3DHandle, LabScene3DProps>(
           ) : (
             <>
               <div ref={mountRef} className="size-full cursor-grab active:cursor-grabbing" />
+
+              {assetLoading && (
+                <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[#09090B]/60">
+                  <div className="flex items-center gap-2 rounded-full border border-white/20 bg-[#0D0D10] px-3 py-1 text-[11px] font-bold text-white">
+                    <Loader2 className="size-3.5 animate-spin text-[#ff4c00]" />
+                    <span>Loading 3D structure...</span>
+                  </div>
+                </div>
+              )}
+
+              {assetError && !assetLoading && (
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-[#09090B]/85 p-4 text-center">
+                  <Layers className="size-6 text-[#ff4c00]" />
+                  <p className="max-w-xs text-[11px] font-medium text-zinc-300">
+                    {assetError}
+                  </p>
+                </div>
+              )}
+
+              {scene.tier === "glb-anatomy" && (
+                <div className="absolute top-2 right-2.5 z-20 flex items-center gap-2 rounded-full border border-white/15 bg-[#09090B]/90 px-2.5 py-1 text-[10px] font-mono text-zinc-200">
+                  <span>X-Ray</span>
+                  <input
+                    type="range"
+                    min={0.15}
+                    max={1}
+                    step={0.05}
+                    value={xrayOpacity}
+                    onChange={(e) => setXrayOpacity(Number(e.target.value))}
+                    aria-label="X-Ray opacity"
+                    className="h-1 w-16 cursor-pointer accent-[#ff4c00]"
+                  />
+                </div>
+              )}
+
+              {scene.tier === "glb-anatomy" && scene.attribution && (
+                <div className="pointer-events-none absolute bottom-2 right-2.5 rounded-full border border-white/12 bg-[#09090B]/85 px-2 py-0.5 font-mono text-[8.5px] text-zinc-400">
+                  {scene.attribution}
+                </div>
+              )}
 
               {/* 3D-to-2D Projected Bilingual DOM Labels (anti-collision positioned) */}
               {labelItems.map((lbl) => (

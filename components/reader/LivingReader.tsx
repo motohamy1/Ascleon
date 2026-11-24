@@ -33,11 +33,12 @@ import {
   sanitizeStudyScope,
   sanitizeTopicCandidates,
 } from "@/lib/ai/rag/topic-resolution";
+import { isPlaceholderPageText } from "@/lib/ai/rag/chunker";
 import {
   SourceSelectionToolbar,
   ScannedPinItem,
 } from "@/components/reader/SourceSelectionToolbar";
-import OriginalPdfViewer from "./OriginalPdfViewer";
+import OriginalPdfViewer, { type OriginalPdfViewerHandle } from "./OriginalPdfViewer";
 import RichStudyMessage from "./RichStudyMessage";
 import { AscleonLogo } from "@/components/ui/AscleonLogo";
 import Link from "next/link";
@@ -128,6 +129,7 @@ type StudyIntent = "morph" | "chat" | "whiteboard" | "voice" | "summary" | "quiz
 interface ChatMessage {
   sender: "user" | "ai";
   text: string;
+  pageNumber?: number;
   time?: string;
   provider?: string;
   model?: string;
@@ -317,9 +319,25 @@ export default function LivingReader({
   const [totalPdfPages, setTotalPdfPages] = useState<number>(
     initialProgress?.totalPages || book.totalPages || initialSegments.length || 1
   );
-  const [activePageLiveText, setActivePageLiveText] = useState<string>("");
+  const pdfViewerRef = useRef<OriginalPdfViewerHandle | null>(null);
+  const pdfPageTextCacheRef = useRef<Map<number, string>>(new Map());
+  const [activePageTextRecord, setActivePageTextRecord] = useState<{
+    page: number;
+    text: string;
+  }>({ page: 0, text: "" });
+  const activePageLiveText =
+    activePageTextRecord.page === activePdfPage
+      ? activePageTextRecord.text
+      : pdfPageTextCacheRef.current.get(activePdfPage) || "";
+  const [liveBlueprint, setLiveBlueprint] = useState<any>(book.blueprint);
+  useEffect(() => {
+    setLiveBlueprint(book.blueprint);
+    pdfPageTextCacheRef.current.clear();
+  }, [book._id, book.blueprint]);
+
   const [isEditingTopPage, setIsEditingTopPage] = useState<boolean>(false);
   const [topPageInputValue, setTopPageInputValue] = useState<string>("");
+  const didSubmitTopPageRef = useRef<boolean>(false);
   const [snippedDiagram, setSnippedDiagram] = useState<{
     url: string;
     pageNumber: number;
@@ -337,6 +355,28 @@ export default function LivingReader({
     const saved = initialProgress?.studioState?.activeIntent as StudyIntent | undefined;
     return saved && saved !== "whiteboard" ? saved : "chat";
   });
+  const [socraticMode, setSocraticMode] = useState(false);
+  const [whiteboardAccess, setWhiteboardAccess] = useState<{
+    allowed: boolean;
+    mode: "public" | "admin-preview" | "locked";
+  }>({ allowed: false, mode: "locked" });
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/whiteboard/access")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data || typeof data.allowed !== "boolean") return;
+        setWhiteboardAccess({
+          allowed: data.allowed,
+          mode: data.mode || (data.allowed ? "public" : "locked"),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
   const [isStudioMenuOpen, setIsStudioMenuOpen] = useState(false);
   const [isQuickControlsOpen, setIsQuickControlsOpen] = useState(false);
   const [showFeatureBar, setShowFeatureBar] = useState(true);
@@ -852,13 +892,23 @@ export default function LivingReader({
     toast.success("Restarted book from Page 1");
   }, [book.fileURL, book.title, book.slug, performSave, studyLanguage]);
 
-  // Keep studyScope in sync with active page when in single-page mode
+  // Keep studyScope in sync with active page; auto-reset stale topic/range when user navigates outside it
   useEffect(() => {
     const cur = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
     setStudyScope((prev) => {
-      if (prev.type === "page" && (prev.startPage !== cur || prev.endPage !== cur)) {
+      if (prev.type === "page") {
+        if (prev.startPage !== cur || prev.endPage !== cur) {
+          return {
+            ...prev,
+            startPage: cur,
+            endPage: cur,
+          };
+        }
+        return prev;
+      }
+      if (cur < prev.startPage || cur > prev.endPage) {
         return {
-          ...prev,
+          type: "page",
           startPage: cur,
           endPage: cur,
         };
@@ -866,6 +916,63 @@ export default function LivingReader({
       return prev;
     });
   }, [book.fileURL, activePdfPage, currentSegment, currentIdx]);
+
+  // Clear stale text selection / off-page diagram snip whenever active page changes
+  const prevSyncedPageRef = useRef<number>(currentPageNumber);
+  useEffect(() => {
+    if (prevSyncedPageRef.current === currentPageNumber) return;
+    prevSyncedPageRef.current = currentPageNumber;
+    setSelectedText("");
+    setSelectionPos(null);
+    setSnippedDiagram((prev) =>
+      prev && prev.pageNumber !== currentPageNumber ? null : prev
+    );
+  }, [currentPageNumber]);
+
+  // Deterministic active-page text & scanned-page snapshot resolver (never leaks Page 1 into another page)
+  const resolveActivePageContext = useCallback(
+    async (targetPage: number): Promise<{ text: string; scannedPageImage?: string }> => {
+      if (!book.fileURL) {
+        return { text: (currentSegment?.content || "").trim() };
+      }
+
+      let liveText = pdfPageTextCacheRef.current.get(targetPage);
+      if (liveText === undefined && pdfViewerRef.current) {
+        try {
+          const extracted = await Promise.race([
+            pdfViewerRef.current.extractPageText(targetPage),
+            new Promise<string>((resolve) => setTimeout(() => resolve(""), 2500)),
+          ]);
+          if (extracted) {
+            liveText = extracted;
+            pdfPageTextCacheRef.current.set(targetPage, extracted);
+            if (targetPage === activePdfPage) {
+              setActivePageTextRecord({ page: targetPage, text: extracted });
+            }
+          }
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      let resolvedText = (liveText || "").trim();
+      if (
+        isPlaceholderPageText(resolvedText) &&
+        currentSegment?.pageNumber === targetPage &&
+        !isPlaceholderPageText(currentSegment.content)
+      ) {
+        resolvedText = (currentSegment.content || "").trim();
+      }
+
+      let scannedPageImage: string | undefined;
+      if (isPlaceholderPageText(resolvedText) && pdfViewerRef.current) {
+        scannedPageImage = pdfViewerRef.current.capturePageSnapshot(targetPage) || undefined;
+      }
+
+      return { text: resolvedText, scannedPageImage };
+    },
+    [book.fileURL, activePdfPage, currentSegment]
+  );
 
   // Split active segment content into interactive paragraph blocks
   const pageParagraphs = useMemo(() => {
@@ -918,7 +1025,6 @@ export default function LivingReader({
       : (book.fileURL ? activePdfPage : currentIdx);
     const activeKey = `${baseKey}_${studyLanguage}`;
     const activePage = book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1);
-    const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
 
     setActiveIntent("morph");
 
@@ -941,9 +1047,12 @@ export default function LivingReader({
     }, 55_000);
 
     try {
+      const resolvedCtx = await resolveActivePageContext(activePage);
+      const activeText = resolvedCtx.text;
+
       let effectiveScope = studyScope;
       if (topicToMorph) {
-        const matched = (book.blueprint?.topicMap?.topics || []).find(
+        const matched = (liveBlueprint?.topicMap?.topics || []).find(
           (t: any) => t.title.toLowerCase() === topicToMorph.toLowerCase()
         );
         if (matched) {
@@ -958,9 +1067,11 @@ export default function LivingReader({
         }
       }
 
-      const precedingSegments = segments
-        .slice(Math.max(0, currentIdx - 2), currentIdx)
-        .map((s) => s.content);
+      const precedingSegments = !book.fileURL
+        ? segments
+            .slice(Math.max(0, currentIdx - 2), currentIdx)
+            .map((s) => s.content)
+        : [];
 
       const res = await fetch("/api/morph", {
         method: "POST",
@@ -976,7 +1087,7 @@ export default function LivingReader({
           pageNumber: activePage,
           precedingSegments,
           selectedText: targetSelection || undefined,
-          snippedDiagram: diagramUrl || snippedDiagram?.url || null,
+          snippedDiagram: diagramUrl || snippedDiagram?.url || resolvedCtx.scannedPageImage || null,
           language: studyLanguage,
           forceRefresh: Boolean(forceRefresh),
           studyScope: effectiveScope,
@@ -1053,7 +1164,8 @@ export default function LivingReader({
       controller.abort();
     }, 55_000);
     try {
-      const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
+      const resolvedCtx = await resolveActivePageContext(activePage);
+      const activeText = resolvedCtx.text;
       const existingTopics = dynamicQBankList.map((q) => q.topic).filter(Boolean);
 
       const res = await fetch("/api/qbank", {
@@ -1066,7 +1178,7 @@ export default function LivingReader({
           pageNumber: activePage,
           pageText: activeText,
           selectedText: selectedText || undefined,
-          snippedDiagram: diagramUrl || snippedDiagram?.url || null,
+          snippedDiagram: diagramUrl || snippedDiagram?.url || resolvedCtx.scannedPageImage || null,
           language: studyLanguage,
           studyScope,
           excludeTopics: forceRefresh ? existingTopics : [],
@@ -1109,7 +1221,7 @@ export default function LivingReader({
         setIsQBankLoading(false);
       }
     }
-  }, [book._id, book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, snippedDiagram, qbankCache, dynamicQBankList, studyLanguage, studyScope]);
+  }, [book._id, book.title, book.fileURL, activePdfPage, resolveActivePageContext, currentSegment, currentIdx, selectedText, snippedDiagram, qbankCache, dynamicQBankList, studyLanguage, studyScope]);
 
   // Dynamic Summary generator with per-page caching
   const loadDynamicSummary = useCallback(async (forceRefresh = false) => {
@@ -1133,7 +1245,8 @@ export default function LivingReader({
       controller.abort();
     }, 50_000);
     try {
-      const activeText = (book.fileURL && activePageLiveText) ? activePageLiveText : (currentSegment?.content || "");
+      const resolvedCtx = await resolveActivePageContext(activePage);
+      const activeText = resolvedCtx.text;
 
       const res = await fetch("/api/summary", {
         method: "POST",
@@ -1183,7 +1296,7 @@ export default function LivingReader({
         setIsSummaryLoading(false);
       }
     }
-  }, [book._id, book.title, book.fileURL, activePdfPage, activePageLiveText, currentSegment, currentIdx, selectedText, summaryCache, studyLanguage, studyScope]);
+  }, [book._id, book.title, book.fileURL, activePdfPage, resolveActivePageContext, currentSegment, currentIdx, selectedText, summaryCache, studyLanguage, studyScope]);
 
   // Pin active selection into Study Vault (background storage)
   const handlePinSelectionToVault = useCallback(
@@ -1194,7 +1307,7 @@ export default function LivingReader({
       const newPin: ScannedPinItem = {
         id: `pin-${Date.now()}`,
         sectionIndex: currentIdx,
-        pageNumber: currentSegment?.pageNumber || currentIdx + 1,
+        pageNumber: currentPageNumber,
         text: target,
         type: "selection",
         timestamp: new Date().toLocaleTimeString([], {
@@ -1206,7 +1319,7 @@ export default function LivingReader({
       saveVaultItems([newPin, ...pinnedVaultItems]);
       setSelectionPos(null);
     },
-    [selectedText, currentIdx, currentSegment, pinnedVaultItems, saveVaultItems]
+    [selectedText, currentIdx, currentPageNumber, pinnedVaultItems, saveVaultItems]
   );
 
   // Background page scan
@@ -1277,9 +1390,14 @@ export default function LivingReader({
     contextSelection?: string,
     imagePayload?: string
   ) => {
+    const activePageNum = book.fileURL
+      ? activePdfPage
+      : (currentSegment?.pageNumber || currentIdx + 1);
+
     const historyPayload = messages.slice(-6).map((m) => ({
       sender: m.sender,
       text: m.text,
+      pageNumber: m.pageNumber,
     }));
 
     setMessages((prev) => [
@@ -1287,6 +1405,7 @@ export default function LivingReader({
       {
         sender: "user",
         text: queryText,
+        pageNumber: activePageNum,
         imageUrl: imagePayload || undefined,
         time: new Date().toLocaleTimeString([], {
           hour: "2-digit",
@@ -1306,12 +1425,8 @@ export default function LivingReader({
 
     setIsAiLoading(true);
     try {
-      const activePageNum = book.fileURL
-        ? activePdfPage
-        : (currentSegment?.pageNumber || currentIdx + 1);
-      const activeContent = (book.fileURL && activePageLiveText)
-        ? activePageLiveText
-        : (currentSegment?.content || "");
+      const resolvedCtx = await resolveActivePageContext(activePageNum);
+      const activeContent = resolvedCtx.text;
 
       const res = await fetch("/api/reader-assistant", {
         method: "POST",
@@ -1321,17 +1436,18 @@ export default function LivingReader({
           query: queryText,
           bookId: book._id,
           bookTitle: book.title,
-          bookTopic: book.blueprint?.domain || book.topic || "",
-          bookReferences: book.blueprint?.authoritativeReferences || [],
+          bookTopic: liveBlueprint?.domain || book.topic || "",
+          bookReferences: liveBlueprint?.authoritativeReferences || [],
           currentSegmentIndex: currentIdx,
           currentPageNumber: activePageNum,
           currentSegmentContent: activeContent,
           selectedText: contextSelection || selectedText || undefined,
-          selectedImage: imagePayload || snippedDiagram?.url || undefined,
+          selectedImage: imagePayload || snippedDiagram?.url || resolvedCtx.scannedPageImage || undefined,
           language: studyLanguage,
+          socraticMode,
           history: historyPayload,
           studyScope,
-          topicMap: book.blueprint?.topicMap,
+          topicMap: liveBlueprint?.topicMap,
         }),
       });
 
@@ -1380,6 +1496,7 @@ export default function LivingReader({
         {
           sender: "ai",
           text: data.answer || "I have analyzed this passage.",
+          pageNumber: activePageNum,
           time: new Date().toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
@@ -1518,6 +1635,19 @@ export default function LivingReader({
 
       if (isInput) return;
 
+      if (book.fileURL) {
+        // Horizontal PDF mode delegates arrow handling directly to OriginalPdfViewer
+        if (scrollOrientation === "horizontal") return;
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          setActivePdfPage((prev) => Math.max(1, prev - 1));
+        } else if (e.key === "ArrowRight") {
+          e.preventDefault();
+          setActivePdfPage((prev) => Math.min(resolvedTotalPages, prev + 1));
+        }
+        return;
+      }
+
       if (e.key === "ArrowLeft") {
         setCurrentIdx((prev) => Math.max(0, prev - 1));
       } else if (e.key === "ArrowRight") {
@@ -1527,7 +1657,7 @@ export default function LivingReader({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [segments.length]);
+  }, [book.fileURL, scrollOrientation, resolvedTotalPages, segments.length]);
 
   const goToSourcePage = useCallback(
     (page: number) => {
@@ -1637,6 +1767,8 @@ export default function LivingReader({
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
+                  if (didSubmitTopPageRef.current) return;
+                  didSubmitTopPageRef.current = true;
                   const p = parseInt(topPageInputValue, 10);
                   if (!isNaN(p) && p >= 1 && p <= resolvedTotalPages) {
                     goToSourcePage(p);
@@ -1654,6 +1786,8 @@ export default function LivingReader({
                   value={topPageInputValue}
                   onChange={(e) => setTopPageInputValue(e.target.value)}
                   onBlur={() => {
+                    if (didSubmitTopPageRef.current) return;
+                    didSubmitTopPageRef.current = true;
                     const p = parseInt(topPageInputValue, 10);
                     if (!isNaN(p) && p >= 1 && p <= resolvedTotalPages) {
                       goToSourcePage(p);
@@ -1661,7 +1795,10 @@ export default function LivingReader({
                     setIsEditingTopPage(false);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === "Escape") setIsEditingTopPage(false);
+                    if (e.key === "Escape") {
+                      didSubmitTopPageRef.current = true;
+                      setIsEditingTopPage(false);
+                    }
                   }}
                   className="w-12 rounded border border-[color:var(--orange)] bg-[var(--study-surface-solid)] px-1 py-0.5 text-center text-[color:var(--orange)] outline-none"
                 />
@@ -1672,6 +1809,7 @@ export default function LivingReader({
               <button
                 type="button"
                 onClick={() => {
+                  didSubmitTopPageRef.current = false;
                   setTopPageInputValue(String(currentPageNumber));
                   setIsEditingTopPage(true);
                 }}
@@ -1927,6 +2065,7 @@ export default function LivingReader({
                   onClearSelection={handleClearSelection}
                 />
                 <OriginalPdfViewer
+                  ref={pdfViewerRef}
                   fileURL={book.fileURL}
                   currentPage={activePdfPage}
                   scrollOrientation={scrollOrientation}
@@ -1959,7 +2098,10 @@ export default function LivingReader({
                     }
                     setActivePdfPage(page);
                     lastSavedPageRef.current = page;
-                    if (text) setActivePageLiveText(text);
+                    if (typeof text === "string") {
+                      pdfPageTextCacheRef.current.set(page, text);
+                      setActivePageTextRecord({ page, text });
+                    }
                     const matchedIdx = segments.findIndex(
                       (s) => s.pageNumber === page
                     );
@@ -2241,6 +2383,8 @@ export default function LivingReader({
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
+                      if (didSubmitTopPageRef.current) return;
+                      didSubmitTopPageRef.current = true;
                       const p = parseInt(topPageInputValue, 10);
                       if (!isNaN(p) && p >= 1 && p <= resolvedTotalPages) {
                         goToSourcePage(p);
@@ -2258,6 +2402,8 @@ export default function LivingReader({
                       value={topPageInputValue}
                       onChange={(e) => setTopPageInputValue(e.target.value)}
                       onBlur={() => {
+                        if (didSubmitTopPageRef.current) return;
+                        didSubmitTopPageRef.current = true;
                         const p = parseInt(topPageInputValue, 10);
                         if (!isNaN(p) && p >= 1 && p <= resolvedTotalPages) {
                           goToSourcePage(p);
@@ -2265,7 +2411,10 @@ export default function LivingReader({
                         setIsEditingTopPage(false);
                       }}
                       onKeyDown={(e) => {
-                        if (e.key === "Escape") setIsEditingTopPage(false);
+                        if (e.key === "Escape") {
+                          didSubmitTopPageRef.current = true;
+                          setIsEditingTopPage(false);
+                        }
                       }}
                       className="w-12 rounded border border-[color:var(--orange)] bg-[var(--study-surface-solid)] px-1 py-0.5 text-center text-[color:var(--orange)] outline-none"
                     />
@@ -2276,6 +2425,7 @@ export default function LivingReader({
                   <button
                     type="button"
                     onClick={() => {
+                      didSubmitTopPageRef.current = false;
                       setTopPageInputValue(String(currentPageNumber));
                       setIsEditingTopPage(true);
                     }}
@@ -2339,9 +2489,12 @@ export default function LivingReader({
             bookTitle={book.title}
             currentPageNumber={book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
             currentSectionText={
-              (book.fileURL && activePageLiveText)
-                ? activePageLiveText
-                : (currentSegment?.content || "")
+              book.fileURL
+                ? activePageLiveText ||
+                  (currentSegment?.pageNumber === activePdfPage
+                    ? currentSegment.content || ""
+                    : "")
+                : currentSegment?.content || ""
             }
             selectedText={selectedText || undefined}
             authoritativeReferences={activeReferences}
@@ -2755,7 +2908,7 @@ export default function LivingReader({
               onRefreshSummary={() => loadDynamicSummary(true)}
               currentPage={book.fileURL ? activePdfPage : (currentSegment?.pageNumber || currentIdx + 1)}
               totalPages={resolvedTotalPages}
-              topics={sanitizeTopicCandidates(book.blueprint?.topicMap?.topics).map((t, idx) => ({
+              topics={sanitizeTopicCandidates(liveBlueprint?.topicMap?.topics).map((t, idx) => ({
                 id: t.id || `topic-${idx}`,
                 title: t.title,
                 startPage: t.startPage,
@@ -2779,6 +2932,7 @@ export default function LivingReader({
               bookId={book._id ? String(book._id) : undefined}
               ingestionStatus={book.ingestionStatus}
               ingestionProgress={book.ingestionProgress}
+              onBlueprintUpdated={setLiveBlueprint}
               onOpenStartNew={() => setShowStartNewModal(true)}
             />
 
@@ -2904,7 +3058,7 @@ export default function LivingReader({
                           placeholder="Custom topic (e.g. Acute Coronary Syndrome)..."
                           className="w-full rounded-full border border-[var(--study-pill-border)]/45 bg-[var(--study-surface-muted)] px-3 py-1 text-[11px] font-medium text-[var(--study-text)] placeholder:text-[var(--study-text-muted)] focus:border-[color:var(--orange)] focus:outline-none pr-24 sm:pr-28"
                         />
-                        {book.blueprint?.topicMap?.topics && book.blueprint.topicMap.topics.length > 0 && (
+                        {liveBlueprint?.topicMap?.topics && liveBlueprint.topicMap.topics.length > 0 && (
                           <div className="absolute right-2 top-1/2 -translate-y-1/2">
                             <select
                               onChange={(e) => {
@@ -2920,7 +3074,7 @@ export default function LivingReader({
                               <option value="" disabled className="bg-[var(--study-surface-solid)] text-[var(--study-text)]">
                                 Topics ▾
                               </option>
-                              {book.blueprint.topicMap.topics.map((t: any) => (
+                              {liveBlueprint.topicMap.topics.map((t: any) => (
                                 <option key={t.id} value={t.title} className="bg-[var(--study-surface-solid)] text-[var(--study-text)]">
                                   {t.title} (P.{t.startPage}–{t.endPage})
                                 </option>
@@ -3346,8 +3500,8 @@ export default function LivingReader({
                 </div>
               )}
 
-              {/* TAB 3: ASCLEON GENERATIVE WHITEBOARD VIDEO (LOCKED — COMING SOON) */}
-              {activeIntent === "whiteboard" && (
+              {/* TAB 3: ASCLEON GENERATIVE WHITEBOARD VIDEO (FEATURE-GATED / COMING SOON IN PROD) */}
+              {activeIntent === "whiteboard" && !whiteboardAccess.allowed && (
                 <div className="flex animate-in fade-in flex-col items-center justify-center gap-3 rounded-[18px] border-2 border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md py-10 px-5 text-center text-[var(--study-text)] shadow-[var(--study-shadow)] duration-150">
                   <div className="flex size-12 items-center justify-center rounded-full border-2 border-[var(--study-panel-border)] bg-[var(--study-surface-muted)] text-[color:var(--orange)] shadow-xs">
                     <Tv className="size-6" />
@@ -3366,6 +3520,36 @@ export default function LivingReader({
                   >
                     Back to AI Chat
                   </button>
+                </div>
+              )}
+
+              {activeIntent === "whiteboard" && whiteboardAccess.allowed && (
+                <div className="flex animate-in fade-in flex-col gap-2 duration-150">
+                  {whiteboardAccess.mode === "admin-preview" && (
+                    <div className="flex items-center justify-between rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold text-amber-300">
+                      <span>Admin Preview · Hidden from public users</span>
+                      <span className="rounded-full border border-amber-500/40 px-2 py-0.5 text-[10px] uppercase tracking-wider">
+                        Locked in Production
+                      </span>
+                    </div>
+                  )}
+                  <WhiteboardVideoStudio
+                    book={book}
+                    currentPageNumber={
+                      book.fileURL
+                        ? activePdfPage
+                        : currentSegment?.pageNumber || currentIdx + 1
+                    }
+                    activePageLiveText={activePageLiveText}
+                    selectedText={selectedText}
+                    studyLanguage={studyLanguage}
+                    onStudyLanguageChange={setStudyLanguage}
+                    studyScope={studyScope}
+                    onStudyScopeChange={setStudyScope}
+                    onNavigateToPage={goToSourcePage}
+                    onWhiteboardExpandChange={setIsWhiteboardExpanded}
+                    selectionTriggerSeq={whiteboardSelectionSeq}
+                  />
                 </div>
               )}
 
@@ -3394,7 +3578,7 @@ export default function LivingReader({
                 <div className="flex animate-in fade-in flex-col gap-4 duration-200">
                   <div className="flex items-center justify-between rounded-[14px] border-[1.5px] border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md px-3 py-2 shadow-[var(--study-shadow)]">
                     <span className="font-mono text-xs font-bold text-[color:var(--orange)]">
-                      Page {currentSegment?.pageNumber || currentIdx + 1} Synthesis
+                      Page {currentPageNumber} Synthesis
                     </span>
                     <button
                       type="button"
@@ -3416,12 +3600,12 @@ export default function LivingReader({
                       <span className="rounded-full bg-[#ff4c00] text-[color:var(--ink)] px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider">
                         Executive Overview
                       </span>
-                      <span className="text-[10px] font-mono font-bold text-[color:var(--ink)]/60">Page {currentSegment?.pageNumber || currentIdx + 1}</span>
+                      <span className="text-[10px] font-mono font-bold text-[color:var(--ink)]/60">Page {currentPageNumber}</span>
                     </div>
                     <BiDiText as="p" className="font-semibold text-[color:var(--ink)] leading-relaxed">
                       {dynamicSummary?.executiveSummary ||
-                        (currentSegment?.content
-                          ? `${currentSegment.content.slice(0, 240)}...`
+                        ((book.fileURL ? activePageLiveText : currentSegment?.content)
+                          ? `${(book.fileURL ? activePageLiveText : currentSegment?.content || "").slice(0, 240)}...`
                           : "Extracting core thesis for this page...")}
                     </BiDiText>
                   </div>
@@ -3720,6 +3904,31 @@ export default function LivingReader({
                   paddingBottom: keyboardHeight > 0 ? `${keyboardHeight + 8}px` : undefined,
                 }}
               >
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSocraticMode((prev) => !prev)}
+                    aria-pressed={socraticMode}
+                    title="Guide me step-by-step with one focused question at a time instead of giving the full answer immediately"
+                    className={cn(
+                      "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10.5px] font-bold transition-all",
+                      socraticMode
+                        ? "border-[color:var(--ink)] bg-[#ff4c00] text-[color:var(--ink)] shadow-xs"
+                        : "border-[var(--study-pill-border)]/50 bg-[var(--study-surface-solid)] text-[var(--study-text-muted)] hover:text-[var(--study-text)]"
+                    )}
+                  >
+                    <Bot className="size-3" />
+                    <span>Socratic Tutor</span>
+                    <span className="rounded-full bg-black/10 px-1.5 py-[1px] text-[9px] font-black uppercase">
+                      {socraticMode ? "ON" : "OFF"}
+                    </span>
+                  </button>
+                  {socraticMode && (
+                    <span className="truncate text-[10px] font-medium text-[var(--study-text-muted)]">
+                      Step-by-step active recall coaching
+                    </span>
+                  )}
+                </div>
                 <form
                   onSubmit={handleSendMessage}
                   className="relative flex items-center"
@@ -3731,9 +3940,11 @@ export default function LivingReader({
                     onFocus={handleInputFocus}
                     onBlur={handleInputBlur}
                     placeholder={
-                      selectedText
-                        ? `Ask about selected (${selectedText.split(/\s+/).length}w) passage...`
-                        : `Ask the AI Study Agent about ${book.title}...`
+                      socraticMode
+                        ? "Ask a question for step-by-step Socratic coaching..."
+                        : selectedText
+                          ? `Ask about selected (${selectedText.split(/\s+/).length}w) passage...`
+                          : `Ask the AI Study Agent about ${book.title}...`
                     }
                     className="w-full rounded-full border-[1.5px] border-[var(--study-pill-border)]/55 bg-[var(--study-surface-solid)] backdrop-blur-md py-2 pl-3.5 pr-10 sm:py-2.5 sm:pl-4 sm:pr-11 text-xs text-[var(--study-text)] placeholder:text-[var(--study-text-muted)] transition-all focus:border-[color:var(--orange)] focus:outline-none"
                   />

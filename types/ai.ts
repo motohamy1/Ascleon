@@ -27,7 +27,8 @@ export interface AgentContext {
   selectedText?: string;
   selectedImage?: string;
   language?: "en" | "ar" | "mixed";
-  history?: { sender: "user" | "ai"; text: string }[];
+  socraticMode?: boolean;
+  history?: { sender: "user" | "ai"; text: string; pageNumber?: number }[];
   studyScope?: {
     type: "page" | "range" | "topic";
     startPage: number;
@@ -48,6 +49,8 @@ export interface AgentRunOutput {
   text: string;
   provider: AIProvider;
   model: string;
+  routedTier?: "fast" | "deep";
+  intent?: string;
   toolsUsed: string[];
   citations: string[];
   generatedMorph?: any;

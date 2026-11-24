@@ -16,10 +16,17 @@ import { EnrichedStudyContext } from "@/types/knowledge";
 import { normalizeScientificNotation } from "@/lib/formatting/scientific-text";
 import {
   clearModelCooldown,
+  FAST_GEMINI_MODEL_CHAIN,
   GEMINI_MODEL_CHAIN,
   markModelCooldownFromError,
   orderModelsByHealth,
 } from "./model-cooldown";
+import {
+  buildIntentPromptAddon,
+  classifyStudyQuery,
+  type QueryIntent,
+} from "./intent-router";
+import { isPlaceholderPageText } from "./rag/chunker";
 
 const SOCRATIC_SYSTEM_PROMPT = `You are Ascleon's elite AI Clinical Study Agent & Academic Mentor.
 Your mission is to guide students to first-principles mastery of the material in their study source with absolute scientific fidelity, pedagogical elegance, and crystal-clear presentation.
@@ -68,6 +75,88 @@ function filterCitationSources(refs: Array<{ source: string }>): string[] {
     });
 }
 
+const FRESH_PAGE_ANCHORED_RE =
+  /\b(explain|summarize|summary|what is this|what does this|mechanism|breakdown|tell me about this|this page|current page|core mechanism|high-yield|exam pearls|key invariants)\b|اشرح|لخص|ملخص|الصفحة|ايه ده|ما هذا/i;
+
+const EXPLICIT_CROSS_PAGE_RE =
+  /\b(previous page|earlier page|last page|compare with|before this|what we covered|we studied)\b|الصفحة السابقة|قارن مع/i;
+
+export function preparePageAwareHistory(
+  history: AgentContext["history"],
+  currentPageNumber: number | undefined,
+  userQuery: string,
+  intent: QueryIntent
+): Array<{ sender: "user" | "ai"; text: string; pageNumber?: number }> {
+  if (!Array.isArray(history) || history.length === 0) return [];
+  const recent = history.slice(-8).filter((h) => h && typeof h.text === "string" && h.text.trim());
+
+  if (intent === "recap") {
+    return recent.map((h) => ({
+      ...h,
+      text:
+        h.pageNumber && currentPageNumber && h.pageNumber !== currentPageNumber
+          ? `[Earlier turn while viewing Page ${h.pageNumber}]: ${h.text}`
+          : h.text,
+    }));
+  }
+
+  const isFreshPageAnchoredQuery =
+    FRESH_PAGE_ANCHORED_RE.test(userQuery) && !EXPLICIT_CROSS_PAGE_RE.test(userQuery);
+
+  const filtered = isFreshPageAnchoredQuery && currentPageNumber
+    ? recent.filter((h) => !h.pageNumber || h.pageNumber === currentPageNumber)
+    : recent;
+
+  return filtered.map((h) => ({
+    ...h,
+    text:
+      h.pageNumber && currentPageNumber && h.pageNumber !== currentPageNumber
+        ? `[Earlier turn while viewing Page ${h.pageNumber}]: ${h.text}`
+        : h.text,
+  }));
+}
+
+function buildActiveViewportPrompt(
+  userQuery: string,
+  context: AgentContext,
+  enriched: EnrichedStudyContext
+): string {
+  const activePage = context.currentPageNumber || context.currentSegmentIndex + 1;
+  const contentTrimmed = (context.currentSegmentContent || "").trim();
+  const contentIsScannedOrMissing = isPlaceholderPageText(contentTrimmed);
+  const scope = context.studyScope;
+
+  let viewportLock: string;
+  if (scope?.type === "topic" && scope.startPage && scope.endPage) {
+    const label = scope.topicTitle ? `"${scope.topicTitle}" ` : "";
+    viewportLock = `ACTIVE STUDY SCOPE: Complete Topic ${label}(Pages ${scope.startPage}–${scope.endPage}) of "${context.bookTitle}". Synthesize and illustrate thoroughly across ALL pages of this topic provided below. Do not restrict yourself to a single page when multi-page topic context is provided.`;
+  } else if (scope?.type === "range" && scope.startPage && scope.endPage) {
+    viewportLock = `ACTIVE STUDY SCOPE: Selected Page Range (Pages ${scope.startPage}–${scope.endPage}) of "${context.bookTitle}". Synthesize and illustrate thoroughly across ALL pages in this selected range provided below.`;
+  } else {
+    viewportLock = `ACTIVE VIEWPORT LOCK: The student is currently on Page ${activePage} of "${context.bookTitle}". Answer STRICTLY from ACTIVE PAGE ${activePage} below (plus any matched book excerpts if the student explicitly asked about a topic located on other pages). Never answer about an earlier page's topic from chat history unless the student explicitly asks to compare or refer back.`;
+  }
+
+  const visionNote =
+    contentIsScannedOrMissing && context.selectedImage
+      ? `\n[NOTE: Page ${activePage} appears to be a scanned/image-based page with minimal extractable text. Read and explain the attached Page ${activePage} image directly.]\n`
+      : "";
+
+  const scopeHeader =
+    scope?.type === "topic"
+      ? `Topic: ${scope.topicTitle || "Selected Topic"} (Pages ${scope.startPage}–${scope.endPage})`
+      : scope?.type === "range"
+        ? `Selected Range: Pages ${scope.startPage}–${scope.endPage}`
+        : `Section ${context.currentSegmentIndex + 1}, Page ${activePage}`;
+
+  const pageIntro = `${viewportLock}\n\nActive Book: "${context.bookTitle}" (${scopeHeader})${visionNote}\nActive Study Source Text:\n${contentTrimmed}\n${
+    context.selectedText
+      ? `\nUser Specifically Selected/Highlighted:\n"${context.selectedText}"\n`
+      : ""
+  }\n\n${enriched.groundingSnippet}`;
+
+  return `${pageIntro}\n\nStudent Question / Query:\n${userQuery}`;
+}
+
 /**
  * Executes a call to Google Gemini with tools and deep background references
  */
@@ -78,18 +167,20 @@ async function callGeminiAgent(
   enriched: EnrichedStudyContext
 ): Promise<AgentRunOutput> {
   const ai = new GoogleGenAI({ apiKey });
-  const orderedModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
+  // Only attach function-calling tools when the student explicitly asks to generate an interactive artifact
+  const needsTools = /\b(morph|quiz|qbank|test me|vignette|flashcard|visualize|interactive)\b/i.test(
+    userQuery
+  );
+  const classification = classifyStudyQuery(userQuery, Boolean(context.selectedImage));
+  const selectedChain =
+    classification.tier === "fast" && !needsTools
+      ? FAST_GEMINI_MODEL_CHAIN
+      : GEMINI_MODEL_CHAIN;
+  const orderedModels = orderModelsByHealth(selectedChain);
   const modelsToTry =
     orderedModels.length > 0
       ? orderedModels
-      : ["gemini-4-hydrogen", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash"];
-
-  // Build grounding context from active page + background textbook knowledge
-  const pageIntro = `Active Book: "${context.bookTitle}" (Section ${context.currentSegmentIndex + 1}${
-    context.currentPageNumber ? `, Page ${context.currentPageNumber}` : ""
-  })\nActive Section Text:\n${context.currentSegmentContent}\n${
-    context.selectedText ? `\nUser Specifically Selected/Highlighted:\n"${context.selectedText}"\n` : ""
-  }\n\n${enriched.groundingSnippet}`;
+      : [...selectedChain];
 
   const toolsDeclaration = [
     {
@@ -106,22 +197,26 @@ async function callGeminiAgent(
   ];
 
   const contents: any[] = [];
+  const activePage = context.currentPageNumber || context.currentSegmentIndex + 1;
+  const scopedHistory = preparePageAwareHistory(
+    context.history,
+    activePage,
+    userQuery,
+    classification.intent
+  );
 
-  // Inject prior conversation turns if provided
-  if (Array.isArray(context.history) && context.history.length > 0) {
-    for (const h of context.history.slice(-8)) {
-      if (!h.text || typeof h.text !== "string") continue;
-      const role = h.sender === "user" ? "user" : "model";
-      contents.push({
-        role,
-        parts: [{ text: h.text }],
-      });
-    }
+  // Inject page-aware conversation turns
+  for (const h of scopedHistory) {
+    const role = h.sender === "user" ? "user" : "model";
+    contents.push({
+      role,
+      parts: [{ text: h.text }],
+    });
   }
 
   // Turn: Active page grounding context + user query
   const userParts: any[] = [
-    { text: `${pageIntro}\n\nStudent Question / Query:\n${userQuery}` },
+    { text: buildActiveViewportPrompt(userQuery, context, enriched) },
   ];
 
   if (context.selectedImage) {
@@ -141,13 +236,9 @@ async function callGeminiAgent(
     parts: userParts,
   });
 
-  // Only attach function-calling tools when the student explicitly asks to generate an interactive artifact
-  const needsTools = /\b(morph|quiz|qbank|test me|vignette|flashcard|visualize|interactive)\b/i.test(
-    userQuery
-  );
-
   const langDirective = buildLanguageDirective(context.language || "en", "text");
-  const fullSystemInstruction = `${SOCRATIC_SYSTEM_PROMPT}\n\n${langDirective}`;
+  const intentAddon = buildIntentPromptAddon(classification.intent, context.socraticMode);
+  const fullSystemInstruction = `${SOCRATIC_SYSTEM_PROMPT}\n\n${intentAddon}\n\n${langDirective}`;
 
   let lastError: unknown = new Error("All Gemini models failed");
 
@@ -189,10 +280,15 @@ async function callGeminiAgent(
     };
 
     try {
+      const useCodeExecution = classification.enableCodeExecution && !needsTools;
       const baseConfig: Record<string, any> = {
         systemInstruction: fullSystemInstruction,
         temperature: isPrimary ? 0.2 : 0.25,
-        ...(isPrimary && needsTools ? { tools: toolsDeclaration as any } : {}),
+        ...(isPrimary && needsTools
+          ? { tools: toolsDeclaration as any }
+          : useCodeExecution
+            ? { tools: [{ codeExecution: {} }] as any }
+            : {}),
         ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 128 } } : {}),
       };
 
@@ -201,8 +297,18 @@ async function callGeminiAgent(
         response = await runWithTimeout(baseConfig, contents, timeoutMs, "Turn 1");
       } catch (firstErr: any) {
         const msg = String(firstErr?.message || "").toLowerCase();
-        // If a model rejects thinkingConfig with a 400 error, retry once without it
-        if (supportsThinking && (msg.includes("thinking") || msg.includes("400"))) {
+        // If a model rejects thinkingConfig or codeExecution with a 400/unsupported error, retry once cleanly
+        if (useCodeExecution && (msg.includes("codeexecution") || msg.includes("code_execution") || msg.includes("tool") || msg.includes("400"))) {
+          const { tools: _omitTools, thinkingConfig: _omitThinking, ...cleanConfig } = baseConfig;
+          response = await runWithTimeout(
+            supportsThinking && !msg.includes("thinking")
+              ? { ...cleanConfig, thinkingConfig: { thinkingBudget: 128 } }
+              : cleanConfig,
+            contents,
+            timeoutMs,
+            "Turn 1 retry (no codeExecution)"
+          );
+        } else if (supportsThinking && (msg.includes("thinking") || msg.includes("400"))) {
           const { thinkingConfig: _omit, ...withoutThinking } = baseConfig;
           response = await runWithTimeout(withoutThinking, contents, timeoutMs, "Turn 1 retry");
         } else {
@@ -212,6 +318,14 @@ async function callGeminiAgent(
 
       clearModelCooldown(`gemini:${modelName}`);
       const candidate = response.candidates?.[0];
+      const usedCodeExec = Boolean(
+        candidate?.content?.parts?.some(
+          (p: any) => p.executableCode || p.codeExecutionResult
+        )
+      );
+      if (usedCodeExec && !toolsUsed.includes("code_execution")) {
+        toolsUsed.push("code_execution");
+      }
       const functionCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall);
 
       if (candidate && candidate.content && functionCalls && functionCalls.length > 0) {
@@ -276,6 +390,8 @@ async function callGeminiAgent(
           text: normalizeScientificNotation(finalText),
           provider: "gemini",
           model: modelName,
+          routedTier: classification.tier,
+          intent: classification.intent,
           toolsUsed,
           citations: Array.from(
             new Set([
@@ -300,6 +416,8 @@ async function callGeminiAgent(
         text: normalizeScientificNotation(directText),
         provider: "gemini",
         model: modelName,
+        routedTier: classification.tier,
+        intent: classification.intent,
         toolsUsed,
         citations: Array.from(
           new Set([
@@ -355,24 +473,29 @@ async function callOpenAICompatibleAgent(
   }));
 
   const langDirective = buildLanguageDirective(context.language || "en", "text");
+  const classification = classifyStudyQuery(userQuery, Boolean(context.selectedImage));
+  const intentAddon = buildIntentPromptAddon(classification.intent, context.socraticMode);
   const messages: any[] = [
-    { role: "system", content: `${SOCRATIC_SYSTEM_PROMPT}\n\n${langDirective}\n\n${enriched.groundingSnippet}` },
+    { role: "system", content: `${SOCRATIC_SYSTEM_PROMPT}\n\n${intentAddon}\n\n${langDirective}\n\n${enriched.groundingSnippet}` },
   ];
 
-  // Inject prior conversation turns
-  if (Array.isArray(context.history) && context.history.length > 0) {
-    for (const h of context.history.slice(-8)) {
-      if (!h.text || typeof h.text !== "string") continue;
-      messages.push({
-        role: h.sender === "user" ? "user" : "assistant",
-        content: h.text,
-      });
-    }
+  const activePage = context.currentPageNumber || context.currentSegmentIndex + 1;
+  const scopedHistory = preparePageAwareHistory(
+    context.history,
+    activePage,
+    userQuery,
+    classification.intent
+  );
+
+  // Inject page-aware conversation turns
+  for (const h of scopedHistory) {
+    messages.push({
+      role: h.sender === "user" ? "user" : "assistant",
+      content: h.text,
+    });
   }
 
-  const userPromptText = `Book: "${context.bookTitle}" (${context.currentPageNumber ? `Page ${context.currentPageNumber}` : `Section ${context.currentSegmentIndex + 1}`})\nActive Text:\n${
-    context.currentSegmentContent
-  }\n${context.selectedText ? `Highlighted Passage:\n"${context.selectedText}"\n` : ""}\nQuery: ${userQuery}`;
+  const userPromptText = buildActiveViewportPrompt(userQuery, context, enriched);
 
   const userContent =
     context.selectedImage && provider === "openai"

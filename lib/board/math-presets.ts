@@ -6,6 +6,7 @@ import {
   PROCEDURAL_3D_BLUEPRINTS,
   Procedural3DBlueprintId,
 } from "@/types/lesson-board";
+import { matchReal3DAsset } from "./anatomy-registry";
 
 // =============================================================================
 // SAFE DETERMINISTIC MATH EXPRESSION COMPILER (Zero eval / Zero Function)
@@ -532,6 +533,12 @@ export function resolveGuaranteedLabScene(
   // domain inference below to upgrade it to a specialized Tier 1/2/3 model when keywords match!
   const candidate = section.labScene;
   if (candidate) {
+    if (candidate.tier === "glb-anatomy" && candidate.glbUrl) {
+      return candidate;
+    }
+    if (candidate.tier === "molecule-3d" && candidate.compoundName) {
+      return candidate;
+    }
     if (candidate.tier === "anatomy-rig" && isKnownAnatomyModel(candidate.model)) {
       return candidate;
     }
@@ -559,6 +566,9 @@ export function resolveGuaranteedLabScene(
         return CANONICAL_SIM_PRESETS[candidate.presetId];
       }
     }
+    if (candidate.tier === "none") {
+      return candidate;
+    }
   }
 
   // 2. Deterministic keyword inference from section content + nodes + title
@@ -573,6 +583,24 @@ export function resolveGuaranteedLabScene(
     if (sim.re.test(sectionCorpus) || sim.re.test(fullCorpus)) {
       return CANONICAL_SIM_PRESETS[sim.presetId];
     }
+  }
+
+  // Check Real 3D Asset Registry (PubChem molecules & configured Z-Anatomy .glb packs)
+  const sectionRealAsset = matchReal3DAsset(
+    sectionCorpus,
+    section.title,
+    section.nodes
+  );
+  if (sectionRealAsset) {
+    return sectionRealAsset;
+  }
+  const fullRealAsset = matchReal3DAsset(
+    fullCorpus,
+    section.title,
+    section.nodes
+  );
+  if (fullRealAsset) {
+    return fullRealAsset;
   }
 
   // Check Tier 1 anatomy rigs
@@ -647,17 +675,10 @@ export function resolveGuaranteedLabScene(
     };
   }
 
-  // Preserve valid explicit smart-diagram-3d if no domain model applied
-  if (candidate && candidate.tier === "smart-diagram-3d") {
-    return candidate;
-  }
-
-  // 3. Guaranteed Tier 4 fallback: depth-layered 3D parallax concept rig from section nodes
+  // 3. No unrelated generic 3D diagram forced on abstract/non-spatial topics
   return {
-    tier: "smart-diagram-3d",
-    title: `${section.title} — 3D Concept Map`,
-    cam: "iso",
-    subtitle: `${section.nodes.length} connected clinical steps`,
-    focusNodeIds: section.nodes.map((n) => n.id),
+    tier: "none",
+    title: section.title,
+    reason: "Focused 2D whiteboard view — no unrelated 3D model forced.",
   };
 }

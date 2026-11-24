@@ -10,6 +10,7 @@ import {
 
 export const maxDuration = 60;
 import { retrieveFromBookRAG } from "@/lib/ai/rag/book-rag-retriever";
+import { isPlaceholderPageText } from "@/lib/ai/rag/chunker";
 import {
   calculateDynamicCreditCost,
   getScopePageSpan,
@@ -263,26 +264,33 @@ export async function POST(req: NextRequest) {
       forceRefresh = false,
     } = body;
 
-    let focalText = (selectedText || pageText || "").trim();
+    const rawLiveText = (selectedText || pageText || "").trim();
+    const hasRealLiveText = Boolean(rawLiveText) && !isPlaceholderPageText(rawLiveText);
+    let focalText = rawLiveText;
     let citedPages: number[] = [pageNumber];
 
-    // 1. RAG Digestion: Retrieve multi-page topic context if requested or if page text is empty
+    // 1. RAG Digestion: Retrieve multi-page topic context if requested or if live page text is missing/placeholder
     const isMultiPageScope =
       studyScope && (studyScope.type === "topic" || studyScope.type === "range");
 
-    if (bookId && (isMultiPageScope || !focalText)) {
+    if (bookId && (isMultiPageScope || !hasRealLiveText)) {
       try {
         const ragRes = await retrieveFromBookRAG({
           bookId,
           query: studyScope?.topicTitle || selectedText || "high yield pathophysiology and clinical diagnosis",
           scope: studyScope,
           activePage: pageNumber,
+          livePageText: rawLiveText,
           topK: 4,
         });
 
         if (ragRes.combinedContext) {
-          focalText = ragRes.combinedContext;
-          citedPages = ragRes.citedPages;
+          if (!isMultiPageScope && hasRealLiveText) {
+            focalText = rawLiveText;
+          } else {
+            focalText = ragRes.combinedContext;
+            citedPages = ragRes.citedPages;
+          }
         }
       } catch (ragErr) {
         console.warn("[QBank API] RAG retrieval fallback:", ragErr);

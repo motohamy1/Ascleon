@@ -86,6 +86,7 @@ interface StudioMenuDrawerProps {
   bookId?: string;
   ingestionStatus?: string;
   ingestionProgress?: number;
+  onBlueprintUpdated?: (newBlueprint: any) => void;
   onOpenStartNew: () => void;
 }
 
@@ -164,6 +165,7 @@ export function StudioMenuDrawer({
   bookId,
   ingestionStatus,
   ingestionProgress,
+  onBlueprintUpdated,
   onOpenStartNew,
 }: StudioMenuDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -832,6 +834,7 @@ export function StudioMenuDrawer({
                   bookId={bookId}
                   initialStatus={ingestionStatus || "completed"}
                   initialProgress={ingestionProgress ?? 100}
+                  onBlueprintUpdated={onBlueprintUpdated}
                 />
               )}
             </div>

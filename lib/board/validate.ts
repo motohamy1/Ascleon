@@ -2,6 +2,8 @@ import { z } from "zod";
 import {
   ALLOWED_LESSON_ICONS,
   BoardLimits,
+  BoardOp,
+  BoardWashTone,
   DEFAULT_BOARD_LIMITS,
   DroppedFactNotice,
   LessonCue,
@@ -10,7 +12,9 @@ import {
   LessonNode,
   LessonSection,
   LessonSegment,
+  LessonTone,
 } from "@/types/lesson-board";
+import { compileMathExpr } from "./math-presets";
 
 export interface RawLessonOutline {
   title: string;
@@ -427,6 +431,222 @@ export function computeSectionCues(
   return cues;
 }
 
+const VALID_WASHES = new Set<BoardWashTone>([
+  "sky",
+  "mint",
+  "sand",
+  "coral",
+  "lilac",
+  "head",
+  "zebra",
+]);
+
+function normalizeWash(wash: unknown, fallback?: BoardWashTone): BoardWashTone | undefined {
+  return typeof wash === "string" && VALID_WASHES.has(wash as BoardWashTone)
+    ? (wash as BoardWashTone)
+    : fallback;
+}
+
+function normalizeTone(tone: unknown): LessonTone | undefined {
+  return tone === "normal" || tone === "pathology" || tone === "neutral"
+    ? tone
+    : undefined;
+}
+
+function normalizeRange(raw: unknown, fallback: [number, number]): [number, number] {
+  if (!Array.isArray(raw) || raw.length < 2) return fallback;
+  const a = Number(raw[0]);
+  const b = Number(raw[1]);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return fallback;
+  if (a < b) return [a, b];
+  if (b < a) return [b, a];
+  return [a, a + 10];
+}
+
+/**
+ * Validates and sanitizes raw BoardOp items (including function_plot, data_chart, source_figure).
+ * Auto-degrades invalid rich visuals into safe write/bullets ops instead of failing or rendering blank.
+ */
+export function sanitizeBoardOps(
+  rawOps: unknown,
+  validPages?: Set<number>,
+  defaultPage = 1
+): BoardOp[] {
+  if (!Array.isArray(rawOps)) return [];
+  const cleanOps: BoardOp[] = [];
+
+  for (const item of rawOps) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const t = typeof o.t === "string" ? o.t : "";
+    const nodeId = typeof o.nodeId === "string" && o.nodeId.trim() ? o.nodeId.trim() : undefined;
+    const tone = normalizeTone(o.tone);
+    const wash = normalizeWash(o.wash);
+
+    if (t === "function_plot") {
+      const expr = typeof o.expr === "string" ? o.expr.trim() : "";
+      const title = typeof o.title === "string" ? cleanSpokenProse(o.title) : undefined;
+      const xRange = normalizeRange(o.xRange, [0, 10]);
+      let yRange: [number, number] | undefined;
+      if (Array.isArray(o.yRange) && o.yRange.length >= 2) {
+        yRange = normalizeRange(o.yRange, [-10, 10]);
+      }
+      let validExpr = false;
+      if (expr) {
+        try {
+          const fn = compileMathExpr(expr);
+          const span = xRange[1] - xRange[0];
+          for (let i = 0; i <= 8; i++) {
+            const xVal = xRange[0] + (span * i) / 8;
+            if (Number.isFinite(fn({ x: xVal }))) {
+              validExpr = true;
+              break;
+            }
+          }
+        } catch {
+          validExpr = false;
+        }
+      }
+      if (!validExpr) {
+        cleanOps.push({
+          t: "write",
+          text: title || (expr ? `Relation: ${cleanSpokenProse(expr)}` : "Quantitative function plot"),
+          tone: tone || "normal",
+          wash: wash || "sky",
+          emphasis: "box",
+          nodeId,
+        });
+        continue;
+      }
+      const highlightPoints = Array.isArray(o.highlightPoints)
+        ? o.highlightPoints
+            .map((hp) => {
+              if (!hp || typeof hp !== "object") return null;
+              const rec = hp as Record<string, unknown>;
+              const x = Number(rec.x);
+              const label = typeof rec.label === "string" ? cleanSpokenProse(rec.label) : "";
+              if (!Number.isFinite(x) || !label) return null;
+              return { x, label };
+            })
+            .filter((v): v is { x: number; label: string } => v !== null)
+            .slice(0, 4)
+        : undefined;
+      cleanOps.push({
+        t: "function_plot",
+        title,
+        expr,
+        xRange,
+        yRange,
+        xLabel: typeof o.xLabel === "string" ? cleanSpokenProse(o.xLabel) : undefined,
+        yLabel: typeof o.yLabel === "string" ? cleanSpokenProse(o.yLabel) : undefined,
+        highlightPoints: highlightPoints && highlightPoints.length > 0 ? highlightPoints : undefined,
+        wash: wash || "sky",
+        nodeId,
+      });
+      continue;
+    }
+
+    if (t === "data_chart") {
+      const title = typeof o.title === "string" ? cleanSpokenProse(o.title) : undefined;
+      const chartType: "bar" | "pie" = o.chartType === "pie" ? "pie" : "bar";
+      const rawItems = Array.isArray(o.items)
+        ? o.items
+        : Array.isArray(o.chartItems)
+        ? o.chartItems
+        : [];
+      const items: Array<{ label: string; value: number; tone?: LessonTone }> = [];
+      for (const entry of rawItems) {
+        if (!entry || typeof entry !== "object") continue;
+        const rec = entry as Record<string, unknown>;
+        const label = typeof rec.label === "string" ? cleanSpokenProse(rec.label) : "";
+        const value = Number(rec.value);
+        if (!label || !Number.isFinite(value) || value < 0) continue;
+        items.push({
+          label,
+          value,
+          tone: normalizeTone(rec.tone),
+        });
+      }
+      const sum = items.reduce((acc, it) => acc + it.value, 0);
+      const validChart = items.length >= 2 && (chartType === "bar" || sum > 0);
+      if (!validChart) {
+        if (items.length > 0) {
+          cleanOps.push({
+            t: "bullets",
+            heading: title || "Data Breakdown",
+            items: items.map((it) => `${it.label}: ${it.value}${typeof o.unit === "string" ? o.unit : ""}`),
+            wash: wash || "sand",
+            nodeId,
+          });
+        } else {
+          cleanOps.push({
+            t: "write",
+            text: title || "Clinical Comparison",
+            tone: tone || "neutral",
+            wash: wash || "sand",
+            emphasis: "box",
+            nodeId,
+          });
+        }
+        continue;
+      }
+      cleanOps.push({
+        t: "data_chart",
+        title,
+        chartType,
+        items: items.slice(0, 6),
+        unit: typeof o.unit === "string" ? cleanSpokenProse(o.unit) : undefined,
+        wash: wash || "sand",
+        nodeId,
+      });
+      continue;
+    }
+
+    if (t === "source_figure") {
+      const caption = typeof o.caption === "string" ? cleanSpokenProse(o.caption) : "";
+      const rawPage = Number(o.page);
+      const safePage =
+        Number.isInteger(rawPage) && rawPage > 0
+          ? !validPages || validPages.size === 0 || validPages.has(rawPage)
+            ? rawPage
+            : defaultPage
+          : defaultPage;
+      const callouts = Array.isArray(o.callouts)
+        ? o.callouts
+            .filter((c): c is string => typeof c === "string" && cleanSpokenProse(c).length > 0)
+            .map((c) => cleanSpokenProse(c))
+            .slice(0, 4)
+        : undefined;
+      if (!caption) {
+        cleanOps.push({
+          t: "write",
+          text: callouts?.[0] || `Source Figure (p.${safePage})`,
+          tone: tone || "neutral",
+          wash: wash || "head",
+          emphasis: "box",
+          nodeId,
+        });
+        continue;
+      }
+      cleanOps.push({
+        t: "source_figure",
+        caption,
+        page: safePage,
+        callouts: callouts && callouts.length > 0 ? callouts : undefined,
+        wash: wash || "head",
+        nodeId,
+      });
+      continue;
+    }
+
+    if (t === "title" || t === "write" || t === "bullets" || t === "term" || t === "flow" || t === "compare" || t === "cycle" || t === "timeline" || t === "formula" || t === "pointer") {
+      cleanOps.push(item as BoardOp);
+    }
+  }
+
+  return cleanOps;
+}
+
 /**
  * Deterministically synthesizes rich 2D handwritten BoardOp[] primitives from a section's
  * structured nodes & links when explicit ops are omitted or sparse.
@@ -700,7 +920,7 @@ export function healRawLessonOutline(
         });
       }
 
-      const rawOps = Array.isArray(s.ops) ? (s.ops as LessonSection["ops"]) : undefined;
+      const rawOps = sanitizeBoardOps(s.ops, undefined, defaultPage);
       const rawLab =
         s.labScene && typeof s.labScene === "object"
           ? (s.labScene as LessonSection["labScene"])
@@ -813,9 +1033,13 @@ export function applySoftGroundingAndEnrich(params: {
       nodes: annotatedNodes,
     };
 
-    const resolvedOps =
+    const sanitizedOps =
       enrichedSec.ops && enrichedSec.ops.length > 0
-        ? enrichedSec.ops
+        ? sanitizeBoardOps(enrichedSec.ops, validPages, defaultPage)
+        : [];
+    const resolvedOps =
+      sanitizedOps.length > 0
+        ? sanitizedOps
         : synthesizeOpsFromSection(enrichedSec, outline.links);
     const resolvedLab = resolveLabScene(enrichedSec, outline.title);
     const resolvedChallenge = synthesizeChallengeFromSection(enrichedSec, resolvedLab);

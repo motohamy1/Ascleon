@@ -128,6 +128,39 @@ export type BoardOp =
       nodeId?: string;
     }
   | {
+      t: "function_plot";
+      title?: string;
+      expr: string;
+      xRange?: [number, number];
+      yRange?: [number, number];
+      xLabel?: string;
+      yLabel?: string;
+      highlightPoints?: Array<{ x: number; label: string }>;
+      wash?: BoardWashTone;
+      nodeId?: string;
+    }
+  | {
+      t: "data_chart";
+      title?: string;
+      chartType: "bar" | "pie";
+      items: Array<{
+        label: string;
+        value: number;
+        tone?: LessonTone;
+      }>;
+      unit?: string;
+      wash?: BoardWashTone;
+      nodeId?: string;
+    }
+  | {
+      t: "source_figure";
+      caption: string;
+      page: number;
+      callouts?: string[];
+      wash?: BoardWashTone;
+      nodeId?: string;
+    }
+  | {
       t: "pointer";
       targetNodeId?: string;
       label?: string;
@@ -236,11 +269,34 @@ export type LabSceneDescriptor =
       readoutLabel?: string;
     }
   | {
+      tier: "glb-anatomy";
+      title: string;
+      packId: string;
+      glbUrl: string;
+      cam?: LabCameraPreset;
+      highlightMeshes?: string[];
+      labels?: LabLabelPoint[];
+      attribution?: string;
+    }
+  | {
+      tier: "molecule-3d";
+      title: string;
+      compoundName: string;
+      cid?: number;
+      cam?: LabCameraPreset;
+      labels?: LabLabelPoint[];
+    }
+  | {
       tier: "smart-diagram-3d";
       title: string;
       cam?: LabCameraPreset;
       subtitle?: string;
       focusNodeIds?: string[];
+    }
+  | {
+      tier: "none";
+      title: string;
+      reason?: string;
     };
 
 // =============================================================================

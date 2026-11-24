@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
-import { Sparkles, CheckCircle2, RefreshCw, AlertCircle, Layers } from "lucide-react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
+import { CheckCircle2, RefreshCw, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface RagDigestionBadgeProps {
@@ -25,9 +25,27 @@ export function RagDigestionBadge({
   const [domain, setDomain] = useState<string>("");
   const [retryNonce, setRetryNonce] = useState(0);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const autoHealedRef = useRef<boolean>(false);
+
+  const triggerReindex = useCallback(async () => {
+    try {
+      await fetch("/api/books/ingest-background", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookId }),
+      });
+    } catch {
+      // Non-fatal
+    }
+  }, [bookId]);
 
   useEffect(() => {
     let isMounted = true;
+
+    const startPolling = () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      pollTimerRef.current = setInterval(checkStatus, 3000);
+    };
 
     async function checkStatus() {
       try {
@@ -40,6 +58,16 @@ export function RagDigestionBadge({
         const data = await res.json();
         if (!isMounted) return;
 
+        if (data.needsReindex && !autoHealedRef.current) {
+          autoHealedRef.current = true;
+          setStatus("processing");
+          setProgress(10);
+          setStage("Indexing study pages for RAG...");
+          await triggerReindex();
+          startPolling();
+          return;
+        }
+
         setStatus(data.status || "completed");
         setProgress(data.progress ?? 100);
         setStage(data.stage || "completed");
@@ -50,16 +78,22 @@ export function RagDigestionBadge({
           if (onBlueprintUpdated && data.blueprint) {
             onBlueprintUpdated(data.blueprint);
           }
+        } else if (data.status === "processing" || data.status === "pending") {
+          if (!pollTimerRef.current) startPolling();
         }
-      } catch (e) {
+      } catch {
         if (pollTimerRef.current) clearInterval(pollTimerRef.current);
         if (isMounted) setStatus("failed");
       }
     }
 
-    if (initialStatus === "processing" || initialStatus === "pending" || initialProgress < 100) {
+    if (
+      initialStatus === "processing" ||
+      initialStatus === "pending" ||
+      initialProgress < 100
+    ) {
       checkStatus();
-      pollTimerRef.current = setInterval(checkStatus, 3000);
+      startPolling();
     } else {
       checkStatus();
     }
@@ -68,9 +102,9 @@ export function RagDigestionBadge({
       isMounted = false;
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
-  }, [bookId, initialStatus, initialProgress, onBlueprintUpdated, retryNonce]);
+  }, [bookId, initialStatus, initialProgress, onBlueprintUpdated, retryNonce, triggerReindex]);
 
-  const isFailed = status === "failed" || status === "unavailable";
+  const isFailed = status === "failed" || status === "unavailable" || status === "stale";
   const isCompleted = !isFailed && (status === "completed" || progress >= 100);
 
   return (
@@ -99,16 +133,18 @@ export function RagDigestionBadge({
       ) : isFailed ? (
         <>
           <AlertCircle className="size-3 text-red-400 shrink-0" />
-          <span>{status === "unavailable" ? "Index Unavailable" : "Sync Failed"}</span>
+          <span>{status === "unavailable" ? "Index Unavailable" : "Sync Needed"}</span>
           <button
             type="button"
             onClick={() => {
+              autoHealedRef.current = true;
               setStatus("processing");
-              setStage("Retrying index check...");
-              setRetryNonce((n) => n + 1);
+              setProgress(10);
+              setStage("Re-indexing book pages...");
+              triggerReindex().finally(() => setRetryNonce((n) => n + 1));
             }}
             className="ml-1 inline-flex items-center gap-1 rounded-full border border-red-300/35 bg-red-400/15 px-1.5 py-0.5 text-[9.5px] font-bold text-red-100 hover:bg-red-400/25 cursor-pointer"
-            title="Retry ingestion status check"
+            title="Trigger RAG page indexing"
           >
             <RefreshCw className="size-2.5" />
             <span>Retry</span>

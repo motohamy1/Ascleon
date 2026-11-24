@@ -5,6 +5,8 @@ import { IBook, UserStudyProgressData } from '@/types';
 import { SessionHistoryItem } from '@/lib/actions/session.actions';
 import { AscleonLogo } from '@/components/ui/AscleonLogo';
 import type { ActiveStudySourceResult } from '@/lib/actions/study-progress.actions';
+import type { StudyPlanDTO } from '@/types/study-plan';
+import StudyPlanPanel from './StudyPlanPanel';
 
 interface ProgressViewProps {
   books: IBook[];
@@ -12,6 +14,7 @@ interface ProgressViewProps {
   firstName: string | null;
   latestStudyProgress?: UserStudyProgressData | null;
   activeStudy?: ActiveStudySourceResult | null;
+  initialPlans?: StudyPlanDTO[];
 }
 
 const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -80,6 +83,7 @@ const ProgressView = ({
   firstName,
   latestStudyProgress,
   activeStudy,
+  initialPlans = [],
 }: ProgressViewProps) => {
   const name = (firstName ?? 'reader').toUpperCase();
   const favorites = books.filter((b) => b.isFavorite).length;
@@ -157,7 +161,7 @@ const ProgressView = ({
           <div className="flex items-start justify-between gap-6">
             <div className="flex items-center gap-2">
               <p className="meta-label text-[color:var(--ink)]/75">
-                Progress · the journey
+                Study Hub · plans &amp; progress
               </p>
               <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--ink)]/20 bg-[#7fd8c9] px-2 py-0.5 font-mono text-[9.5px] font-bold text-[color:var(--ink)]">
                 <span className="size-1.5 rounded-full bg-[color:var(--ink)] animate-pulse" />
@@ -266,6 +270,9 @@ const ProgressView = ({
           )}
         </div>
       </section>
+
+      {/* EXAM STUDY PLANS (Integrated inside Study Hub) */}
+      <StudyPlanPanel books={books} initialPlans={initialPlans} />
 
       {/* ROW 2 — the study log (real data) */}
       <section className="grid gap-3 md:grid-cols-12">
