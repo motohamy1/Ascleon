@@ -16,6 +16,7 @@ import {
 
 export const maxDuration = 60;
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
+import { isPlaceholderPageText } from "@/lib/ai/rag/chunker";
 import {
   calculateDynamicCreditCost,
   getScopePageSpan,
@@ -194,14 +195,15 @@ export async function POST(req: NextRequest) {
       (typeof segmentIndex === "number" ? segmentIndex + 1 : 1);
 
     const livePageText = String(focalText || "").trim();
+    const hasRealLiveText = Boolean(livePageText) && !isPlaceholderPageText(livePageText);
     const isMultiPageScope =
       Boolean(customTopic) ||
       studyScope?.type === "topic" ||
       studyScope?.type === "range" ||
       (studyScope?.startPage && studyScope?.endPage && studyScope.startPage !== studyScope.endPage);
 
-    // Only expand via Book RAG for multi-page scopes, custom topics, or when live page text is missing
-    if (bookId && bookId !== "default-book" && (isMultiPageScope || livePageText.length < 120)) {
+    // Only expand via Book RAG for multi-page scopes, custom topics, or when live page text is missing/placeholder
+    if (bookId && bookId !== "default-book" && (isMultiPageScope || !hasRealLiveText || livePageText.length < 120)) {
       try {
         const { retrieveFromBookRAG } = await import("@/lib/ai/rag/book-rag-retriever");
         const ragRes = await retrieveFromBookRAG({
@@ -209,12 +211,17 @@ export async function POST(req: NextRequest) {
           query: customTopic || (studyScope?.topicTitle) || selectedText || livePageText.slice(0, 300),
           scope: studyScope,
           activePage: pageNumber,
+          livePageText,
           topK: 5,
         });
         if (ragRes.combinedContext) {
-          focalText = livePageText
-            ? `${livePageText}\n\n${ragRes.combinedContext}`
-            : ragRes.combinedContext;
+          if (!isMultiPageScope && hasRealLiveText) {
+            focalText = livePageText;
+          } else {
+            focalText = hasRealLiveText && ragRes.alignmentStatus !== "verified"
+              ? `${livePageText}\n\n${ragRes.combinedContext}`
+              : ragRes.combinedContext;
+          }
         }
       } catch (ragErr) {
         console.warn("[/api/morph] Book RAG retrieval fallback:", ragErr);

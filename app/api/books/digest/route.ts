@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import {
+  clearModelCooldown,
+  FAST_GEMINI_MODEL_CHAIN,
+  markModelCooldownFromError,
+  orderModelsByHealth,
+} from "@/lib/ai/model-cooldown";
 
 interface DigestBlueprint {
   sourceCategory: "lecture_notes" | "textbook" | "clinical_sheet" | "guideline_paper" | "exam_review";
@@ -309,29 +315,48 @@ Analyze the document and generate a JSON study blueprint with:
 
 Return ONLY a valid JSON object matching this structure.`;
 
-      const generatePromise = ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        config: {
-          responseMimeType: "application/json",
-          temperature: 0.2,
-        },
-      });
+      const digestModels = orderModelsByHealth(FAST_GEMINI_MODEL_CHAIN);
+      for (const candidateModel of digestModels) {
+        const abortCtrl = new AbortController();
+        const timer = setTimeout(() => abortCtrl.abort(), 14000);
+        try {
+          const response: any = await Promise.race([
+            ai.models.generateContent({
+              model: candidateModel,
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              config: {
+                responseMimeType: "application/json",
+                temperature: 0.2,
+                abortSignal: abortCtrl.signal,
+              },
+            }),
+            new Promise<never>((_, reject) =>
+              abortCtrl.signal.addEventListener("abort", () =>
+                reject(new Error(`Digest ${candidateModel} timed out after 14s`))
+              )
+            ),
+          ]);
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Digest generation timed out after 15s")), 15000)
-      );
-
-      const response: any = await Promise.race([generatePromise, timeoutPromise]);
-
-      const responseText = response.text?.trim() || "";
-      if (responseText) {
-        const parsed = JSON.parse(responseText);
-        return NextResponse.json({
-          success: true,
-          blueprint: parsed,
-          source: "gemini-3.8-flash",
-        });
+          const responseText = (response?.text || "")
+            .trim()
+            .replace(/^```(?:json)?\s*/i, "")
+            .replace(/\s*```$/i, "")
+            .trim();
+          if (responseText) {
+            const parsed = JSON.parse(responseText);
+            clearModelCooldown(`gemini:${candidateModel}`);
+            return NextResponse.json({
+              success: true,
+              blueprint: parsed,
+              source: candidateModel,
+            });
+          }
+        } catch (modelErr) {
+          markModelCooldownFromError(`gemini:${candidateModel}`, modelErr);
+          console.warn(`[Digest] ${candidateModel} failed:`, modelErr);
+        } finally {
+          clearTimeout(timer);
+        }
       }
     } catch (aiErr) {
       console.warn("AI digestion error, falling back to heuristic blueprint:", aiErr);

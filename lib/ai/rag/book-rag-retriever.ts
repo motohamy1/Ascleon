@@ -1,12 +1,23 @@
+import mongoose from "mongoose";
 import { connectToDatabase } from "@/database/mongoose";
 import Book from "@/database/models/book.model";
 import BookSegment from "@/database/models/book-segment.model";
-import { StudyScope } from "@/components/reader/StudyScopeBar";
+import type { StudyScope } from "@/components/reader/StudyScopeBar";
 import {
+  extractPrimaryPageHeading,
   isGenericTopicTitle,
   sanitizeStudyScope,
   sanitizeTopicCandidates,
 } from "@/lib/ai/rag/topic-resolution";
+import {
+  chunkPageText,
+  computeLexicalOverlap,
+  extractDeterministicPageMetadata,
+  isPlaceholderPageText,
+  scoreChunksBM25,
+  tokenizeText,
+  type PageChunk,
+} from "@/lib/ai/rag/chunker";
 
 export interface RetrievedSegmentResult {
   pageNumber: number;
@@ -21,6 +32,8 @@ export interface RetrievedSegmentResult {
   matchReasons: string[];
 }
 
+export type RagAlignmentStatus = "verified" | "live_only" | "misaligned_fallback";
+
 export interface BookRagRetrievalResult {
   segments: RetrievedSegmentResult[];
   combinedContext: string;
@@ -29,30 +42,90 @@ export interface BookRagRetrievalResult {
   goldStandardsFound: string[];
   primaryField: string;
   subField: string;
+  alignmentStatus: RagAlignmentStatus;
+  matchedChunksCount: number;
+}
+
+const CROSS_BOOK_LOOKUP_RE =
+  /\b(where else|other chapters?|across the book|compare with|earlier in the book|whole book|entire book|all pages)\b|في الكتاب|فصل آخر|فصول أخرى|قارن مع|في باقي الكتاب/i;
+
+function buildSyntheticSegment(pageNumber: number, liveText: string): RetrievedSegmentResult {
+  const meta = extractDeterministicPageMetadata(pageNumber, liveText);
+  return {
+    pageNumber,
+    segmentIndex: Math.max(0, pageNumber - 1),
+    content: liveText,
+    headings: meta.headings,
+    keyTerms: meta.keyTerms,
+    clinicalEntities: [],
+    goldStandards: [],
+    summary: meta.summary,
+    relevanceScore: 1000,
+    matchReasons: ["live_active_page"],
+  };
+}
+
+function segmentPageNumber(seg: { pageNumber?: number; segmentIndex?: number }): number {
+  if (typeof seg.pageNumber === "number" && seg.pageNumber > 0) return seg.pageNumber;
+  return Number(seg.segmentIndex ?? 0) + 1;
+}
+
+function getLastWords(text: string, maxWords: number): string {
+  const words = (text || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return words.join(" ");
+  return `...${words.slice(words.length - maxWords).join(" ")}`;
 }
 
 /**
  * Universal Hybrid Book RAG Retriever
- * Retrieves relevant passages across ALL segments in MongoDB for a book:
- * 1. Scope-bounded retrieval (page, multi-page range, or whole topic)
- * 2. Full-text keyword + concept matching across all pages in the book
- * 3. Extracts verbatim quotes, page citations, and stated gold standards/invariants
+ * 1. Validates ObjectId & verifies alignment between live PDF text and MongoDB segments.
+ * 2. Enforces single-page supremacy when in single-page scope (never overwrites live page with misaligned DB pages).
+ * 3. Uses structure-aware overlapping chunks + multilingual Okapi BM25 across ranges, topics, and explicit cross-book lookups.
  */
 export async function retrieveFromBookRAG(params: {
   bookId: string;
   query?: string;
   scope?: StudyScope;
   activePage?: number;
+  livePageText?: string;
   topK?: number;
 }): Promise<BookRagRetrievalResult> {
-  const { bookId, query = "", scope, activePage = 1, topK = 4 } = params;
+  const {
+    bookId,
+    query = "",
+    scope,
+    activePage = 1,
+    livePageText = "",
+    topK = 4,
+  } = params;
+
+  const cleanLiveText = (livePageText || "").trim();
+  const hasRealLiveText = cleanLiveText.length >= 40 && !isPlaceholderPageText(cleanLiveText);
+
+  if (!bookId || !mongoose.Types.ObjectId.isValid(bookId)) {
+    const fallbackSeg = hasRealLiveText ? buildSyntheticSegment(activePage, cleanLiveText) : null;
+    return {
+      segments: fallbackSeg ? [fallbackSeg] : [],
+      combinedContext: fallbackSeg
+        ? `--- [Source Study: Page ${activePage}] ---\n${fallbackSeg.content}`
+        : "",
+      citedPages: fallbackSeg ? [activePage] : [],
+      detectedTopic: undefined,
+      goldStandardsFound: [],
+      primaryField: "General Academic",
+      subField: "General Academic",
+      alignmentStatus: "live_only",
+      matchedChunksCount: fallbackSeg ? 1 : 0,
+    };
+  }
 
   await connectToDatabase();
-  const book = await Book.findById(bookId).select("title domain subspecialty blueprint").lean();
+  const book = await Book.findById(bookId)
+    .select("title domain subspecialty blueprint")
+    .lean();
   const primaryField = book?.domain || book?.blueprint?.primaryField || "General Academic";
   const subField = book?.subspecialty || book?.blueprint?.subField || primaryField;
 
-  // 1. Resolve Range Constraints from Scope (always normalized startPage <= endPage)
   const safeScope = sanitizeStudyScope(scope, activePage);
   let startPageConstraint = safeScope.startPage;
   let endPageConstraint = safeScope.endPage;
@@ -61,9 +134,13 @@ export async function retrieveFromBookRAG(params: {
       ? safeScope.topicTitle
       : undefined;
 
-  // If a topic title is requested or detected in blueprint topicMap (only when not locked to a specific single page)
+  const isStrictSinglePage =
+    !scope ||
+    safeScope.type === "page" ||
+    (scope.type === "topic" && isGenericTopicTitle(scope.topicTitle));
+
   const topicMapTopics = sanitizeTopicCandidates(book?.blueprint?.topicMap?.topics);
-  if (!targetTopicTitle && safeScope.type !== "page" && query) {
+  if (!targetTopicTitle && !isStrictSinglePage && query) {
     const qLower = query.toLowerCase();
     const matchedTopic = topicMapTopics.find(
       (t) =>
@@ -77,123 +154,383 @@ export async function retrieveFromBookRAG(params: {
     }
   }
 
-  // 2. Fetch Candidates from BookSegment collection
-  let candidateSegments = await BookSegment.find({
+  const wantsCrossBookLookup = CROSS_BOOK_LOOKUP_RE.test(query);
+
+  // Fetch bounded range (include preceding page when in strict single-page mode for heading continuity check)
+  const queryStart = isStrictSinglePage
+    ? Math.max(1, activePage - 1)
+    : startPageConstraint;
+  const queryEnd = isStrictSinglePage ? activePage : endPageConstraint;
+
+  let candidateSegments = (await BookSegment.find({
     bookId,
-    pageNumber: { $gte: startPageConstraint, $lte: endPageConstraint },
+    pageNumber: { $gte: queryStart, $lte: queryEnd },
   })
-    .sort({ pageNumber: 1 })
-    .lean();
+    .sort({ pageNumber: 1, segmentIndex: 1 })
+    .lean()) as any[];
 
-  const isStrictSinglePage =
-    !scope ||
-    safeScope.type === "page" ||
-    (scope.type === "topic" && isGenericTopicTitle(scope.topicTitle));
-
-  // Only fall back to broad book search if a multi-page topic/range had ZERO segments in range
-  if (!isStrictSinglePage && candidateSegments.length === 0 && query.trim().length > 3) {
-    const broadSearch = await BookSegment.find({ bookId })
-      .sort({ pageNumber: 1 })
-      .lean();
-    if (broadSearch.length > 0) {
-      candidateSegments = broadSearch;
+  // Legacy fallback for books whose segments were stored without pageNumber
+  if (candidateSegments.length === 0) {
+    const legacySegments = (await BookSegment.find({
+      bookId,
+      segmentIndex: {
+        $gte: Math.max(0, queryStart - 1),
+        $lte: Math.max(0, queryEnd - 1),
+      },
+    })
+      .sort({ segmentIndex: 1 })
+      .lean()) as any[];
+    if (legacySegments.length > 0) {
+      candidateSegments = legacySegments;
     }
   }
 
-  // 3. Score Segments by Hybrid Term & Concept Overlap
-  const queryTokens = query
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 2);
+  // Fallback for multi-page scope if bounded range had zero segments
+  if (!isStrictSinglePage && candidateSegments.length === 0 && query.trim().length > 3) {
+    candidateSegments = (await BookSegment.find({ bookId })
+      .sort({ pageNumber: 1, segmentIndex: 1 })
+      .limit(400)
+      .lean()) as any[];
+  }
 
-  const scored: RetrievedSegmentResult[] = candidateSegments.map((seg) => {
-    let score = 0;
-    const reasons: string[] = [];
-    const textLower = seg.content.toLowerCase();
-    const pNum = seg.pageNumber || seg.segmentIndex + 1;
+  // Verify alignment of DB segment for activePage against live PDF text
+  const activeDbSeg = candidateSegments.find((s) => segmentPageNumber(s) === activePage);
+  let alignmentStatus: RagAlignmentStatus = "live_only";
 
-    // Active page bonus: always anchor the page the user is actively reading
-    if (pNum === activePage) {
-      score += 100;
-      reasons.push("active_page");
+  if (activeDbSeg) {
+    if (hasRealLiveText) {
+      const overlap = computeLexicalOverlap(cleanLiveText, String(activeDbSeg.content || ""));
+      alignmentStatus = overlap >= 0.12 ? "verified" : "misaligned_fallback";
+    } else {
+      alignmentStatus = isPlaceholderPageText(activeDbSeg.content) ? "live_only" : "verified";
     }
+  } else if (!hasRealLiveText && candidateSegments.length > 0 && !isStrictSinglePage) {
+    alignmentStatus = "verified";
+  }
 
-    // Proximity to active page (falloff)
-    const dist = Math.abs(pNum - activePage);
-    if (dist <= 3) {
-      score += Math.max(0, 15 - dist * 4);
-    }
+  // =========================================================================
+  // PATH A: STRICT SINGLE-PAGE SCOPE
+  // =========================================================================
+  if (isStrictSinglePage) {
+    const activeAuthoritativeText = hasRealLiveText
+      ? cleanLiveText
+      : alignmentStatus === "verified" && activeDbSeg?.content
+        ? String(activeDbSeg.content)
+        : "";
 
-    // Heading matches
-    if (seg.headings && seg.headings.length > 0) {
-      for (const h of seg.headings) {
-        const hLow = h.toLowerCase();
-        for (const token of queryTokens) {
-          if (hLow.includes(token)) {
-            score += 20;
-            reasons.push(`heading_match:${token}`);
-          }
+    const primarySegment: RetrievedSegmentResult | null = activeAuthoritativeText
+      ? {
+          pageNumber: activePage,
+          segmentIndex: activeDbSeg?.segmentIndex ?? Math.max(0, activePage - 1),
+          content: activeAuthoritativeText,
+          headings:
+            alignmentStatus === "verified" && activeDbSeg?.headings?.length
+              ? activeDbSeg.headings
+              : extractDeterministicPageMetadata(activePage, activeAuthoritativeText).headings,
+          keyTerms:
+            alignmentStatus === "verified" && activeDbSeg?.keyTerms?.length
+              ? activeDbSeg.keyTerms
+              : extractDeterministicPageMetadata(activePage, activeAuthoritativeText).keyTerms,
+          clinicalEntities:
+            alignmentStatus === "verified" ? activeDbSeg?.clinicalEntities || [] : [],
+          goldStandards:
+            alignmentStatus === "verified" ? activeDbSeg?.goldStandards || [] : [],
+          summary:
+            alignmentStatus === "verified" && activeDbSeg?.summary
+              ? activeDbSeg.summary
+              : extractDeterministicPageMetadata(activePage, activeAuthoritativeText).summary,
+          relevanceScore: 1000,
+          matchReasons: [hasRealLiveText ? "live_active_page" : "db_active_page"],
         }
+      : null;
+
+    const resultSegments: RetrievedSegmentResult[] = primarySegment ? [primarySegment] : [];
+    const contextParts: string[] = [];
+    let matchedChunksCount = primarySegment ? 1 : 0;
+
+    if (primarySegment) {
+      const headingText = primarySegment.headings.length
+        ? ` [${primarySegment.headings.join(" / ")}]`
+        : "";
+      const gsText = primarySegment.goldStandards.length
+        ? `\n- Author-Stated Gold Standards / Primary Rules: ${primarySegment.goldStandards.join("; ")}`
+        : "";
+      contextParts.push(
+        `--- [Source Study: Page ${activePage}]${headingText} ---\n${primarySegment.content}${gsText}`
+      );
+    }
+
+    // Topic continuity from preceding page ONLY when verified & activePage lacks a top heading
+    if (
+      alignmentStatus === "verified" &&
+      activePage > 1 &&
+      activeAuthoritativeText &&
+      !extractPrimaryPageHeading(activeAuthoritativeText)
+    ) {
+      const prevSeg = candidateSegments.find((s) => segmentPageNumber(s) === activePage - 1);
+      if (prevSeg && !isPlaceholderPageText(prevSeg.content)) {
+        const prevHeading =
+          (prevSeg.headings && prevSeg.headings[0]) ||
+          extractPrimaryPageHeading(String(prevSeg.content || ""));
+        const tail = getLastWords(String(prevSeg.content || ""), 120);
+        const headerTag = prevHeading ? ` (${prevHeading})` : "";
+        contextParts.push(
+          `--- [PRECEDING PAGE ${activePage - 1} — TOPIC CONTINUITY ONLY]${headerTag} ---\n${tail}`
+        );
       }
     }
 
-    // Key terms & clinical entities match
-    const entities = [...(seg.keyTerms || []), ...(seg.clinicalEntities || [])];
-    for (const ent of entities) {
-      const entLow = ent.toLowerCase();
-      for (const token of queryTokens) {
-        if (entLow.includes(token)) {
-          score += 15;
-          reasons.push(`concept_match:${token}`);
-        }
+    // Optional cross-book chunk BM25 lookup when explicitly requested OR when user asks about a specific topic absent from active page
+    const queryTokens = tokenizeText(query);
+    const activeTokenSet = new Set(tokenizeText(activeAuthoritativeText));
+    const hasActiveOverlap = queryTokens.some((t) => activeTokenSet.has(t));
+    const referencesCurrentPageOnly =
+      /\b(this page|current page|here|this section)\b|الصفحة\s*(دي|هذه|الحالية)/i.test(query);
+    const shouldSearchOffPageTopic =
+      wantsCrossBookLookup ||
+      (!referencesCurrentPageOnly && queryTokens.length >= 2 && !hasActiveOverlap);
+
+    if (shouldSearchOffPageTopic && query.trim().length > 3) {
+      const allSegments = (await BookSegment.find({ bookId })
+        .sort({ pageNumber: 1, segmentIndex: 1 })
+        .limit(400)
+        .lean()) as any[];
+
+      const allChunks: PageChunk[] = [];
+      for (const seg of allSegments) {
+        const pNum = segmentPageNumber(seg);
+        if (pNum === activePage) continue;
+        if (isPlaceholderPageText(seg.content)) continue;
+        allChunks.push(...chunkPageText(pNum, String(seg.content || "")));
+      }
+
+      const minScore = wantsCrossBookLookup ? 1.5 : 2.2;
+      const scoredChunks = scoreChunksBM25(query, allChunks)
+        .filter((c) => c.bm25Score > minScore)
+        .slice(0, 3);
+
+      matchedChunksCount += scoredChunks.length;
+
+      for (const ch of scoredChunks) {
+        contextParts.push(
+          `--- [RELATED BOOK EXCERPT — Page ${ch.pageNumber}] ---\n${ch.text}`
+        );
+        resultSegments.push({
+          pageNumber: ch.pageNumber,
+          segmentIndex: Math.max(0, ch.pageNumber - 1),
+          content: ch.text,
+          headings: ch.headingHint ? [ch.headingHint] : [],
+          keyTerms: [],
+          clinicalEntities: [],
+          goldStandards: [],
+          summary: "",
+          relevanceScore: ch.bm25Score,
+          matchReasons: ch.matchedTerms.map((t) => `bm25:${t}`),
+        });
       }
     }
 
-    // Gold standards match
-    if (seg.goldStandards && seg.goldStandards.length > 0) {
-      for (const gs of seg.goldStandards) {
-        const gsLow = gs.toLowerCase();
-        for (const token of queryTokens) {
-          if (gsLow.includes(token)) {
-            score += 30;
-            reasons.push(`gold_standard_match:${token}`);
-          }
-        }
-        if (query.toLowerCase().includes("gold standard") || query.toLowerCase().includes("first line") || query.toLowerCase().includes("definitive")) {
-          score += 25;
-        }
-      }
-    }
-
-    // Content body token matches
-    for (const token of queryTokens) {
-      const occurrences = (textLower.match(new RegExp(`\\b${token}\\b`, "g")) || []).length;
-      if (occurrences > 0) {
-        score += Math.min(25, occurrences * 5);
-      }
-    }
+    const citedPages = Array.from(new Set(resultSegments.map((s) => s.pageNumber)));
+    const goldStandardsFound = Array.from(
+      new Set(resultSegments.flatMap((s) => s.goldStandards))
+    );
 
     return {
-      pageNumber: pNum,
-      segmentIndex: seg.segmentIndex,
-      content: seg.content,
-      headings: seg.headings || [],
-      keyTerms: seg.keyTerms || [],
-      clinicalEntities: seg.clinicalEntities || [],
-      goldStandards: seg.goldStandards || [],
-      summary: seg.summary || "",
-      relevanceScore: score,
-      matchReasons: reasons,
+      segments: resultSegments,
+      combinedContext: contextParts.join("\n\n"),
+      citedPages,
+      detectedTopic: targetTopicTitle,
+      goldStandardsFound,
+      primaryField,
+      subField,
+      alignmentStatus,
+      matchedChunksCount,
     };
+  }
+
+  // =========================================================================
+  // PATH B: MULTI-PAGE / TOPIC / RANGE HYBRID CHUNKED BM25 RETRIEVAL
+  // =========================================================================
+  const allBookPool =
+    alignmentStatus === "misaligned_fallback" && hasRealLiveText
+      ? ((await BookSegment.find({ bookId })
+          .sort({ pageNumber: 1, segmentIndex: 1 })
+          .limit(400)
+          .lean()) as any[])
+      : candidateSegments;
+
+  const segByPage = new Map<number, any>();
+  const chunks: Array<PageChunk & { sourceSeg?: any }> = [];
+
+  for (const seg of allBookPool) {
+    const pNum = segmentPageNumber(seg);
+    // Skip stale/misaligned DB content for activePage when we have live text
+    if (pNum === activePage && alignmentStatus === "misaligned_fallback" && hasRealLiveText) {
+      continue;
+    }
+    if (!segByPage.has(pNum)) segByPage.set(pNum, seg);
+    if (isPlaceholderPageText(seg.content)) continue;
+    for (const ch of chunkPageText(pNum, String(seg.content || ""))) {
+      chunks.push({ ...ch, sourceSeg: seg });
+    }
+  }
+
+  if (hasRealLiveText) {
+    const liveChunks = chunkPageText(activePage, cleanLiveText);
+    for (const ch of liveChunks) {
+      chunks.push({
+        ...ch,
+        sourceSeg:
+          alignmentStatus === "verified" ? activeDbSeg : undefined,
+      });
+    }
+  }
+
+  const effectiveQuery =
+    alignmentStatus === "misaligned_fallback" && hasRealLiveText
+      ? `${query} ${tokenizeText(cleanLiveText).slice(0, 12).join(" ")}`
+      : query;
+
+  const queryTokens = Array.from(new Set(tokenizeText(effectiveQuery)));
+  const scoredBm25 = scoreChunksBM25(effectiveQuery, chunks);
+
+  const rescored = scoredBm25.map((ch) => {
+    const seg = (ch as PageChunk & { sourceSeg?: any }).sourceSeg;
+    let totalScore = ch.bm25Score;
+    const reasons = ch.matchedTerms.map((t) => `bm25:${t}`);
+
+    if (ch.pageNumber === activePage) {
+      totalScore += 12;
+      reasons.push("active_page");
+    } else {
+      const dist = Math.abs(ch.pageNumber - activePage);
+      if (dist <= 3) {
+        totalScore += Math.max(0, 4 - dist);
+      }
+    }
+
+    if (seg) {
+      const headings: string[] = Array.isArray(seg.headings) ? seg.headings : [];
+      for (const h of headings) {
+        const hTokens = new Set(tokenizeText(h));
+        for (const qt of queryTokens) {
+          if (hTokens.has(qt)) {
+            totalScore += 5;
+            reasons.push(`heading_match:${qt}`);
+          }
+        }
+      }
+
+      const entities = [
+        ...(Array.isArray(seg.keyTerms) ? seg.keyTerms : []),
+        ...(Array.isArray(seg.clinicalEntities) ? seg.clinicalEntities : []),
+      ];
+      for (const ent of entities) {
+        const eTokens = new Set(tokenizeText(ent));
+        for (const qt of queryTokens) {
+          if (eTokens.has(qt)) {
+            totalScore += 3;
+            reasons.push(`concept_match:${qt}`);
+          }
+        }
+      }
+
+      const gsList: string[] = Array.isArray(seg.goldStandards) ? seg.goldStandards : [];
+      for (const gs of gsList) {
+        const gsTokens = new Set(tokenizeText(gs));
+        for (const qt of queryTokens) {
+          if (gsTokens.has(qt)) {
+            totalScore += 6;
+            reasons.push(`gold_standard_match:${qt}`);
+          }
+        }
+      }
+    }
+
+    return { chunk: ch, seg, totalScore, reasons };
   });
 
-  // Sort by relevance score descending
-  scored.sort((a, b) => b.relevanceScore - a.relevanceScore);
+  rescored.sort(
+    (a, b) =>
+      b.totalScore - a.totalScore ||
+      a.chunk.pageNumber - b.chunk.pageNumber ||
+      a.chunk.chunkIndex - b.chunk.chunkIndex
+  );
 
-  const topSegments = scored.slice(0, topK);
-  // Sort back chronologically for coherent narrative
-  topSegments.sort((a, b) => a.pageNumber - b.pageNumber);
+  const selected = rescored.slice(0, topK);
+
+  // Guarantee activePage is represented if it lies within the requested scope
+  const activeInScope =
+    activePage >= startPageConstraint && activePage <= endPageConstraint;
+  if (
+    activeInScope &&
+    !selected.some((item) => item.chunk.pageNumber === activePage)
+  ) {
+    const activeCandidate = rescored.find(
+      (item) => item.chunk.pageNumber === activePage
+    );
+    if (activeCandidate) {
+      if (selected.length >= topK && selected.length > 0) {
+        selected[selected.length - 1] = activeCandidate;
+      } else {
+        selected.push(activeCandidate);
+      }
+    }
+  }
+
+  selected.sort(
+    (a, b) =>
+      a.chunk.pageNumber - b.chunk.pageNumber ||
+      a.chunk.chunkIndex - b.chunk.chunkIndex
+  );
+
+  // Merge selected chunks per page in chronological order
+  const mergedByPage = new Map<
+    number,
+    {
+      chunks: typeof selected;
+      seg: any;
+      bestScore: number;
+      reasons: Set<string>;
+    }
+  >();
+
+  for (const item of selected) {
+    const p = item.chunk.pageNumber;
+    const existing = mergedByPage.get(p);
+    if (existing) {
+      existing.chunks.push(item);
+      existing.bestScore = Math.max(existing.bestScore, item.totalScore);
+      item.reasons.forEach((r) => existing.reasons.add(r));
+    } else {
+      mergedByPage.set(p, {
+        chunks: [item],
+        seg: item.seg || segByPage.get(p),
+        bestScore: item.totalScore,
+        reasons: new Set(item.reasons),
+      });
+    }
+  }
+
+  const topSegments: RetrievedSegmentResult[] = Array.from(mergedByPage.entries()).map(
+    ([pNum, group]) => {
+      const mergedText = group.chunks.map((c) => c.chunk.text).join("\n\n");
+      const seg = group.seg;
+      const meta = extractDeterministicPageMetadata(pNum, mergedText);
+      return {
+        pageNumber: pNum,
+        segmentIndex: seg?.segmentIndex ?? Math.max(0, pNum - 1),
+        content: mergedText,
+        headings: seg?.headings?.length ? seg.headings : meta.headings,
+        keyTerms: seg?.keyTerms?.length ? seg.keyTerms : meta.keyTerms,
+        clinicalEntities: seg?.clinicalEntities || [],
+        goldStandards: seg?.goldStandards || [],
+        summary: seg?.summary || meta.summary,
+        relevanceScore: group.bestScore,
+        matchReasons: Array.from(group.reasons),
+      };
+    }
+  );
 
   const citedPages = Array.from(new Set(topSegments.map((s) => s.pageNumber)));
   const goldStandardsFound = Array.from(
@@ -203,7 +540,9 @@ export async function retrieveFromBookRAG(params: {
   const combinedContext = topSegments
     .map((s) => {
       const headingText = s.headings.length ? ` [${s.headings.join(" / ")}]` : "";
-      const gsText = s.goldStandards.length ? `\n- Author-Stated Gold Standards / Primary Rules: ${s.goldStandards.join("; ")}` : "";
+      const gsText = s.goldStandards.length
+        ? `\n- Author-Stated Gold Standards / Primary Rules: ${s.goldStandards.join("; ")}`
+        : "";
       return `--- [Source Study: Page ${s.pageNumber}]${headingText} ---\n${s.content}${gsText}`;
     })
     .join("\n\n");
@@ -216,5 +555,7 @@ export async function retrieveFromBookRAG(params: {
     goldStandardsFound,
     primaryField,
     subField,
+    alignmentStatus,
+    matchedChunksCount: selected.length,
   };
 }

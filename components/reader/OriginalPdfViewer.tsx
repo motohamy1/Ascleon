@@ -2,10 +2,13 @@
 
 import React, {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useCallback,
   useMemo,
+  forwardRef,
+  useImperativeHandle,
 } from "react";
 import {
   Loader2,
@@ -27,8 +30,13 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
 import { getCachedPdfBuffer, cachePdfBuffer } from "@/lib/storage/pdf-local-cache";
+
+export interface OriginalPdfViewerHandle {
+  extractPageText: (pageNum: number) => Promise<string>;
+  capturePageSnapshot: (pageNum: number) => string | null;
+  jumpToPage: (pageNum: number) => void;
+}
 
 interface OriginalPdfViewerProps {
   fileURL: string;
@@ -40,7 +48,11 @@ interface OriginalPdfViewerProps {
     position: { x: number; y: number } | null
   ) => void;
   onClearSelection?: () => void;
-  onSnipDiagram?: (imageDataUrl: string, pageNumber: number, targetFeature?: "morph" | "chat" | "qbank") => void;
+  onSnipDiagram?: (
+    imageDataUrl: string,
+    pageNumber: number,
+    targetFeature?: "morph" | "chat" | "qbank"
+  ) => void;
   zoomLevel?: number;
   fitMode?: "normal" | "fit-width" | "fit-page";
   onZoomIn?: () => void;
@@ -63,23 +75,58 @@ interface ConfirmedSnip {
   dataUrl: string;
 }
 
+function downscaleCanvasToJpeg(
+  canvas: HTMLCanvasElement,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number
+): string | null {
+  if (!canvas || canvas.width <= 0 || canvas.height <= 0 || sw <= 0 || sh <= 0) {
+    return null;
+  }
+  const MAX_SNIP_DIM = 960;
+  const downscale = Math.min(1, MAX_SNIP_DIM / Math.max(sw, sh, 1));
+  const targetW = Math.max(1, Math.round(sw * downscale));
+  const targetH = Math.max(1, Math.round(sh * downscale));
+
+  const snippetCanvas = document.createElement("canvas");
+  snippetCanvas.width = targetW;
+  snippetCanvas.height = targetH;
+  const ctx = snippetCanvas.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, targetW, targetH);
+  ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, targetW, targetH);
+
+  let dataUrl = snippetCanvas.toDataURL("image/jpeg", 0.72);
+  if (dataUrl.length > 140_000) {
+    dataUrl = snippetCanvas.toDataURL("image/jpeg", 0.55);
+  }
+  return dataUrl;
+}
+
 // ============================================================================
-// SINGLE PAGE COMPONENT (Zero-Flicker Canvas & TextLayer Lifecycle)
+// SINGLE PAGE COMPONENT (Serialized Render Lock & Lazy GPU Lifecycle)
 // ============================================================================
 interface PdfPageItemProps {
   pageNum: number;
   pdfDoc: any;
   scale: number;
+  readyToRender: boolean;
   fitMode: "normal" | "fit-width" | "fit-page";
   scrollOrientation?: "vertical" | "horizontal";
+  scrollRoot: HTMLElement | null;
   defaultPageSize: { width: number; height: number };
-  isActivePage?: boolean;
+  isActivePage: boolean;
+  isNearActive: boolean;
+  isFarFromActive: boolean;
   isSnipActive: boolean;
   onSnipMouseDown: (e: React.MouseEvent, pageNum: number) => void;
   onSnipMouseMove: (e: React.MouseEvent, pageNum: number) => void;
   onSnipMouseUp: () => void;
   renderSnipOverlay: (pageNum: number) => React.ReactNode;
-  onVisibleChange: (pageNum: number, isIntersecting: boolean, ratio: number) => void;
   onRegisterCanvas: (pageNum: number, canvas: HTMLCanvasElement | null) => void;
 }
 
@@ -87,16 +134,19 @@ const PdfPageItem = React.memo(function PdfPageItem({
   pageNum,
   pdfDoc,
   scale,
+  readyToRender,
   fitMode,
   scrollOrientation = "vertical",
+  scrollRoot,
   defaultPageSize,
-  isActivePage = true,
+  isActivePage,
+  isNearActive,
+  isFarFromActive,
   isSnipActive,
   onSnipMouseDown,
   onSnipMouseMove,
   onSnipMouseUp,
   renderSnipOverlay,
-  onVisibleChange,
   onRegisterCanvas,
 }: PdfPageItemProps) {
   const pageContainerRef = useRef<HTMLDivElement>(null);
@@ -105,12 +155,16 @@ const PdfPageItem = React.memo(function PdfPageItem({
 
   const [isRendered, setIsRendered] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
-  const [shouldRender, setShouldRender] = useState(pageNum <= 3);
+  const [isIntersecting, setIsIntersecting] = useState(pageNum <= 3);
+  const [retryNonce, setRetryNonce] = useState(0);
 
-  const activeRenderTask = useRef<any>(null);
+  const isRenderedRef = useRef<boolean>(false);
   const renderedScaleRef = useRef<number>(0);
+  const activeRenderTaskRef = useRef<any>(null);
+  const activeRenderPromiseRef = useRef<Promise<unknown> | null>(null);
+  const retryAttemptedRef = useRef<boolean>(false);
 
-  // 1. Viewport-based lazy rendering observer (Stable across parent renders)
+  // 1. Viewport-based pre-render observer (ONLY manages pre-render visibility, NOT active page)
   useEffect(() => {
     const el = pageContainerRef.current;
     if (!el) return;
@@ -119,58 +173,75 @@ const PdfPageItem = React.memo(function PdfPageItem({
       (entries) => {
         const entry = entries[0];
         if (entry) {
-          onVisibleChange(pageNum, entry.isIntersecting, entry.intersectionRatio);
-          setShouldRender(entry.isIntersecting);
-          if (!entry.isIntersecting && canvasRef.current) {
-            // Free canvas GPU memory when scrolled far away to prevent browser black screens
-            canvasRef.current.width = 0;
-            canvasRef.current.height = 0;
-            setIsRendered(false);
-          }
+          setIsIntersecting(entry.isIntersecting);
         }
       },
       {
-        root: null,
+        root: scrollRoot || null,
         rootMargin:
           scrollOrientation === "horizontal"
-            ? "0px 1200px 0px 1200px"
-            : "1200px 0px 1200px 0px",
-        threshold: [0, 0.2, 0.4, 0.6, 0.8, 1.0],
+            ? "0px 800px 0px 800px"
+            : "800px 0px 800px 0px",
+        threshold: 0,
       }
     );
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [pageNum, onVisibleChange, scrollOrientation]);
+  }, [scrollRoot, scrollOrientation]);
 
-  // 2. Register canvas ref with parent for diagram snip tool
+  const shouldRender =
+    readyToRender && (isActivePage || isNearActive || isIntersecting);
+
+  // Release canvas GPU memory ONLY when far from active page and outside observer window
+  useEffect(() => {
+    if (!shouldRender && isFarFromActive && canvasRef.current) {
+      if (activeRenderTaskRef.current) {
+        try {
+          activeRenderTaskRef.current.cancel();
+        } catch {}
+      }
+      if (canvasRef.current.width !== 0 || canvasRef.current.height !== 0) {
+        canvasRef.current.width = 0;
+        canvasRef.current.height = 0;
+      }
+      isRenderedRef.current = false;
+      renderedScaleRef.current = 0;
+      setIsRendered(false);
+      setIsRendering(false);
+    }
+  }, [shouldRender, isFarFromActive]);
+
+  // 2. Register canvas ref with parent for diagram snip tool & vision snapshots
   useEffect(() => {
     onRegisterCanvas(pageNum, canvasRef.current);
     return () => onRegisterCanvas(pageNum, null);
   }, [pageNum, onRegisterCanvas]);
 
-  // 3. Render Canvas and TextLayer with scale caching
+  // 3. Render Canvas and TextLayer with serialized render-task lock
   useEffect(() => {
-    if (!pdfDoc) return;
-
-    if (!shouldRender) {
-      if (activeRenderTask.current) {
+    if (!pdfDoc || !shouldRender) {
+      if (!shouldRender && activeRenderTaskRef.current) {
         try {
-          activeRenderTask.current.cancel();
-        } catch { }
-        activeRenderTask.current = null;
+          activeRenderTaskRef.current.cancel();
+        } catch {}
       }
-      // Keep already-rendered canvases in memory to prevent scroll flickering and layout jumps
-      setIsRendering(false);
+      if (!shouldRender) setIsRendering(false);
       return;
     }
 
-    // Avoid redundant renders if already rendered at this exact scale
-    if (isRendered && Math.abs(renderedScaleRef.current - scale) < 0.01) {
+    const canvasNow = canvasRef.current;
+    if (
+      isRenderedRef.current &&
+      Math.abs(renderedScaleRef.current - scale) < 0.01 &&
+      canvasNow &&
+      canvasNow.width > 0
+    ) {
       return;
     }
 
     let isCancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     async function executePageRender() {
       const canvas = canvasRef.current;
@@ -180,24 +251,39 @@ const PdfPageItem = React.memo(function PdfPageItem({
       setIsRendering(true);
 
       try {
+        // Strictly cancel and await any prior PDF.js render() on this same canvas
+        if (activeRenderTaskRef.current) {
+          try {
+            activeRenderTaskRef.current.cancel();
+          } catch {}
+        }
+        if (activeRenderPromiseRef.current) {
+          await activeRenderPromiseRef.current.catch(() => {});
+        }
+        if (isCancelled) return;
+
         const page = await pdfDoc.getPage(pageNum);
         if (isCancelled) return;
 
-        const viewport = page.getViewport({ scale });
-
-        if (activeRenderTask.current) {
+        // Re-check lock after getPage await in case another render started
+        if (activeRenderTaskRef.current) {
           try {
-            activeRenderTask.current.cancel();
-          } catch { }
+            activeRenderTaskRef.current.cancel();
+          } catch {}
         }
+        if (activeRenderPromiseRef.current) {
+          await activeRenderPromiseRef.current.catch(() => {});
+        }
+        if (isCancelled) return;
 
+        const viewport = page.getViewport({ scale });
         const outputScale =
           typeof window !== "undefined"
             ? Math.min(window.devicePixelRatio || 1, 2.0)
             : 1;
 
-        canvas.width = Math.floor(viewport.width * outputScale);
-        canvas.height = Math.floor(viewport.height * outputScale);
+        canvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
+        canvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
         canvas.style.width = `${Math.floor(viewport.width)}px`;
         canvas.style.height = `${Math.floor(viewport.height)}px`;
         canvas.style.backgroundColor = "#ffffff";
@@ -216,17 +302,29 @@ const PdfPageItem = React.memo(function PdfPageItem({
         const renderContext = {
           canvasContext: context,
           transform: transform as any,
-          viewport: viewport,
+          viewport,
         };
 
         const renderTask = page.render(renderContext);
-        activeRenderTask.current = renderTask;
+        activeRenderTaskRef.current = renderTask;
+        const promise = renderTask.promise;
+        activeRenderPromiseRef.current = promise;
 
-        await renderTask.promise;
-        activeRenderTask.current = null;
+        try {
+          await promise;
+        } finally {
+          if (activeRenderTaskRef.current === renderTask) {
+            activeRenderTaskRef.current = null;
+          }
+          if (activeRenderPromiseRef.current === promise) {
+            activeRenderPromiseRef.current = null;
+          }
+        }
 
         if (isCancelled) return;
+        retryAttemptedRef.current = false;
         renderedScaleRef.current = scale;
+        isRenderedRef.current = true;
         setIsRendered(true);
         setIsRendering(false);
 
@@ -245,9 +343,8 @@ const PdfPageItem = React.memo(function PdfPageItem({
             const textLayer = new pdfjsLib.TextLayer({
               textContentSource: textContent,
               container: textLayerDiv,
-              viewport: viewport,
+              viewport,
             });
-
             await textLayer.render();
           } catch (tlErr) {
             console.warn(`TextLayer warning on page ${pageNum}:`, tlErr);
@@ -256,6 +353,13 @@ const PdfPageItem = React.memo(function PdfPageItem({
       } catch (err: any) {
         if (err?.name !== "RenderingCancelledException") {
           console.error(`Page ${pageNum} render error:`, err);
+          if (!isCancelled && !retryAttemptedRef.current) {
+            retryAttemptedRef.current = true;
+            retryTimer = setTimeout(() => {
+              if (!isCancelled) setRetryNonce((n) => n + 1);
+            }, 250);
+            return;
+          }
         }
         if (!isCancelled) {
           setIsRendering(false);
@@ -267,13 +371,14 @@ const PdfPageItem = React.memo(function PdfPageItem({
 
     return () => {
       isCancelled = true;
-      if (activeRenderTask.current) {
+      if (retryTimer) clearTimeout(retryTimer);
+      if (activeRenderTaskRef.current) {
         try {
-          activeRenderTask.current.cancel();
-        } catch { }
+          activeRenderTaskRef.current.cancel();
+        } catch {}
       }
     };
-  }, [pdfDoc, pageNum, scale, shouldRender, isRendered]);
+  }, [pdfDoc, pageNum, scale, shouldRender, retryNonce]);
 
   const estimatedWidth = Math.round(defaultPageSize.width * scale);
   const estimatedHeight = Math.round(defaultPageSize.height * scale);
@@ -338,388 +443,339 @@ const PdfPageItem = React.memo(function PdfPageItem({
 // ============================================================================
 // MAIN VIEWER COMPONENT
 // ============================================================================
-export default function OriginalPdfViewer({
-  fileURL,
-  currentPage,
-  onPageChange,
-  onTotalPagesLoaded,
-  onTextSelection,
-  onClearSelection,
-  onSnipDiagram,
-  zoomLevel = 100,
-  fitMode = "fit-width",
-  onZoomIn,
-  onZoomOut,
-  onFitWidth,
-  onFitPage,
-  onZoomReset,
-  scrollOrientation: initialScrollOrientation = "vertical",
-  onScrollOrientationChange,
-  theme = "paper",
-  className,
-}: OriginalPdfViewerProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+const OriginalPdfViewer = forwardRef<OriginalPdfViewerHandle, OriginalPdfViewerProps>(
+  function OriginalPdfViewer(
+    {
+      fileURL,
+      currentPage,
+      onPageChange,
+      onTotalPagesLoaded,
+      onTextSelection,
+      onClearSelection,
+      onSnipDiagram,
+      zoomLevel = 100,
+      fitMode = "fit-width",
+      onZoomIn,
+      onZoomOut,
+      onFitWidth,
+      onFitPage,
+      onZoomReset,
+      scrollOrientation: initialScrollOrientation = "vertical",
+      onScrollOrientationChange,
+      theme = "paper",
+      className,
+    },
+    ref
+  ) {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
 
-  // Local fallback state if parent does not provide callbacks
-  const [internalFitMode, setInternalFitMode] = useState<"normal" | "fit-width" | "fit-page">(fitMode || "fit-width");
-  const [internalZoomLevel, setInternalZoomLevel] = useState<number>(zoomLevel || 100);
+    const setContainerNode = useCallback((node: HTMLDivElement | null) => {
+      containerRef.current = node;
+      setScrollContainerEl(node);
+    }, []);
 
-  useEffect(() => {
-    if (fitMode) setInternalFitMode(fitMode);
-  }, [fitMode]);
+    // Local fallback state if parent does not provide callbacks
+    const [internalFitMode, setInternalFitMode] = useState<"normal" | "fit-width" | "fit-page">(
+      fitMode || "fit-width"
+    );
+    const [internalZoomLevel, setInternalZoomLevel] = useState<number>(zoomLevel || 100);
 
-  useEffect(() => {
-    if (zoomLevel) setInternalZoomLevel(zoomLevel);
-  }, [zoomLevel]);
+    useEffect(() => {
+      if (fitMode) setInternalFitMode(fitMode);
+    }, [fitMode]);
 
-  const activeFitMode = fitMode || internalFitMode;
-  const activeZoomLevel = zoomLevel || internalZoomLevel;
+    useEffect(() => {
+      if (zoomLevel) setInternalZoomLevel(zoomLevel);
+    }, [zoomLevel]);
 
-  const handleTriggerFitWidth = () => {
-    if (onFitWidth) onFitWidth();
-    else setInternalFitMode("fit-width");
-  };
+    const activeFitMode = fitMode || internalFitMode;
+    const activeZoomLevel = zoomLevel || internalZoomLevel;
 
-  const handleTriggerFitPage = () => {
-    if (onFitPage) onFitPage();
-    else setInternalFitMode("fit-page");
-  };
+    const handleTriggerFitWidth = () => {
+      if (onFitWidth) onFitWidth();
+      else setInternalFitMode("fit-width");
+    };
 
-  const handleTriggerZoomIn = () => {
-    if (onZoomIn) onZoomIn();
-    else setInternalZoomLevel((prev) => Math.min(250, prev + 15));
-  };
+    const handleTriggerFitPage = () => {
+      if (onFitPage) onFitPage();
+      else setInternalFitMode("fit-page");
+    };
 
-  const handleTriggerZoomOut = () => {
-    if (onZoomOut) onZoomOut();
-    else setInternalZoomLevel((prev) => Math.max(50, prev - 15));
-  };
+    const handleTriggerZoomIn = () => {
+      if (onZoomIn) onZoomIn();
+      else setInternalZoomLevel((prev) => Math.min(250, prev + 15));
+    };
 
-  const handleTriggerZoomReset = () => {
-    if (onZoomReset) onZoomReset();
-    else {
-      setInternalFitMode("normal");
-      setInternalZoomLevel(100);
-    }
-  };
+    const handleTriggerZoomOut = () => {
+      if (onZoomOut) onZoomOut();
+      else setInternalZoomLevel((prev) => Math.max(50, prev - 15));
+    };
 
-  // Scroll Orientation State (Vertical or Horizontal carousel/slide)
-  const [scrollOrientation, setScrollOrientation] = useState<"vertical" | "horizontal">(
-    initialScrollOrientation
-  );
+    const handleTriggerZoomReset = () => {
+      if (onZoomReset) onZoomReset();
+      else {
+        setInternalFitMode("normal");
+        setInternalZoomLevel(100);
+      }
+    };
 
-  // Keep latest callbacks in ref to eliminate parent re-render dependencies
-  const callbacksRef = useRef({
-    onPageChange,
-    onTotalPagesLoaded,
-    onTextSelection,
-    onClearSelection,
-    onSnipDiagram,
-    onScrollOrientationChange,
-  });
+    // Scroll Orientation State (Vertical or Horizontal carousel/slide)
+    const [scrollOrientation, setScrollOrientation] = useState<"vertical" | "horizontal">(
+      initialScrollOrientation
+    );
 
-  useEffect(() => {
-    callbacksRef.current = {
+    // Keep latest callbacks in ref to eliminate parent re-render dependencies
+    const callbacksRef = useRef({
       onPageChange,
       onTotalPagesLoaded,
       onTextSelection,
       onClearSelection,
       onSnipDiagram,
       onScrollOrientationChange,
-    };
-  });
-
-  // PDF Document State
-  const [pdfDoc, setPdfDoc] = useState<any>(null);
-  const pdfDocRef = useRef<any>(null);
-  const [totalPages, setTotalPages] = useState<number>(0);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Intrinsic Page Size
-  const [docPageSize, setDocPageSize] = useState<{ width: number; height: number }>({
-    width: 595,
-    height: 842,
-  });
-
-  // Dynamic Container Dimensions
-  const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({
-    width: 0,
-    height: 0,
-  });
-
-  // Page Tracking
-  const [activeVisiblePage, setActiveVisiblePage] = useState<number>(
-    currentPage || 1
-  );
-  const activeVisiblePageRef = useRef<number>(currentPage || 1);
-  const lastReportedPageRef = useRef<number>(currentPage || 1);
-  const visiblePageRatios = useRef<Map<number, number>>(new Map());
-  const isInternalScrollRef = useRef<boolean>(Boolean(currentPage && currentPage > 1));
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // User manual scroll detection to completely prevent scroll fighting & rollbacks
-  const isUserScrollingRef = useRef<boolean>(false);
-  const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const pageNotifyTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Stable toggle handler for orientation that freezes visibility detection during DOM reflow
-  const handleToggleScrollOrientation = useCallback(() => {
-    const next = scrollOrientation === "vertical" ? "horizontal" : "vertical";
-
-    // 1. Lock internal scroll immediately to suppress observer callbacks during reflow
-    isInternalScrollRef.current = true;
-    if (pageNotifyTimerRef.current) {
-      clearTimeout(pageNotifyTimerRef.current);
-      pageNotifyTimerRef.current = null;
-    }
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
-      scrollTimeoutRef.current = null;
-    }
-
-    const targetPage = activeVisiblePageRef.current || currentPage || 1;
-    visiblePageRatios.current.clear();
-    visiblePageRatios.current.set(targetPage, 1.0);
-
-    setScrollOrientation(next);
-    callbacksRef.current.onScrollOrientationChange?.(next);
-
-    // 2. Wait two animation frames for DOM layout reflow to settle, then align to targetPage
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const pageEl = document.getElementById(`pdf-page-container-${targetPage}`);
-        if (pageEl && containerRef.current) {
-          pageEl.scrollIntoView({
-            behavior: "auto",
-            block: next === "horizontal" ? "nearest" : "start",
-            inline: next === "horizontal" ? "center" : "nearest",
-          });
-        }
-        scrollTimeoutRef.current = setTimeout(() => {
-          isInternalScrollRef.current = false;
-        }, 400);
-      });
     });
-  }, [scrollOrientation, currentPage]);
 
-  // Sync external changes to initialScrollOrientation
-  const prevOrientationRef = useRef<"vertical" | "horizontal">(initialScrollOrientation);
-  useEffect(() => {
-    if (initialScrollOrientation && initialScrollOrientation !== prevOrientationRef.current) {
-      prevOrientationRef.current = initialScrollOrientation;
-      if (initialScrollOrientation !== scrollOrientation) {
-        const targetPage = activeVisiblePageRef.current || currentPage || 1;
-        isInternalScrollRef.current = true;
-        if (pageNotifyTimerRef.current) clearTimeout(pageNotifyTimerRef.current);
-        visiblePageRatios.current.clear();
-        visiblePageRatios.current.set(targetPage, 1.0);
-        setScrollOrientation(initialScrollOrientation);
+    useEffect(() => {
+      callbacksRef.current = {
+        onPageChange,
+        onTotalPagesLoaded,
+        onTextSelection,
+        onClearSelection,
+        onSnipDiagram,
+        onScrollOrientationChange,
+      };
+    });
 
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            const pageEl = document.getElementById(`pdf-page-container-${targetPage}`);
-            if (pageEl && containerRef.current) {
-              pageEl.scrollIntoView({
-                behavior: "auto",
-                block: initialScrollOrientation === "horizontal" ? "nearest" : "start",
-                inline: initialScrollOrientation === "horizontal" ? "center" : "nearest",
-              });
-            }
-            if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-            scrollTimeoutRef.current = setTimeout(() => {
-              isInternalScrollRef.current = false;
-            }, 400);
-          });
+    // PDF Document State
+    const [pdfDoc, setPdfDoc] = useState<any>(null);
+    const pdfDocRef = useRef<any>(null);
+    const [totalPages, setTotalPages] = useState<number>(0);
+    const [loading, setLoading] = useState<boolean>(true);
+    const [error, setError] = useState<string | null>(null);
+
+    // Intrinsic Page Size
+    const [docPageSize, setDocPageSize] = useState<{ width: number; height: number }>({
+      width: 595,
+      height: 842,
+    });
+
+    // Dynamic Container Dimensions (measured synchronously in useLayoutEffect before canvas renders)
+    const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({
+      width: 0,
+      height: 0,
+    });
+
+    // Page Tracking & Caching
+    const [activeVisiblePage, setActiveVisiblePage] = useState<number>(currentPage || 1);
+    const activeVisiblePageRef = useRef<number>(currentPage || 1);
+    const lastReportedPageRef = useRef<number>(currentPage || 1);
+    const isInternalScrollRef = useRef<boolean>(Boolean(currentPage && currentPage > 1));
+    const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const scrollCleanupRef = useRef<(() => void) | null>(null);
+    const pageNotifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const scrollRafRef = useRef<number | null>(null);
+    const extractSeqRef = useRef<number>(0);
+    const pageTextCacheRef = useRef<Map<number, string>>(new Map());
+    const pendingTextExtractionsRef = useRef<Map<number, Promise<string>>>(new Map());
+
+    // Jump Input State
+    const [isEditingPage, setIsEditingPage] = useState<boolean>(false);
+    const [pageInputValue, setPageInputValue] = useState<string>("");
+    const pageInputRef = useRef<HTMLInputElement>(null);
+    const didSubmitPageInputRef = useRef<boolean>(false);
+
+    // Canvas registry for snipping & vision snapshots
+    const canvasMap = useRef<Map<number, HTMLCanvasElement>>(new Map());
+
+    // Snip Tool State
+    const [isSnipActive, setIsSnipActive] = useState<boolean>(false);
+    const [snipStart, setSnipStart] = useState<{ x: number; y: number } | null>(null);
+    const [snipCurrent, setSnipCurrent] = useState<{ x: number; y: number } | null>(null);
+    const [activeSnipPage, setActiveSnipPage] = useState<number>(1);
+    const [confirmedSnip, setConfirmedSnip] = useState<ConfirmedSnip | null>(null);
+
+    // Clear caches when fileURL changes
+    useEffect(() => {
+      pageTextCacheRef.current.clear();
+      pendingTextExtractionsRef.current.clear();
+    }, [fileURL]);
+
+    // Extract & cache text for any page (deduplicated per page)
+    const extractPageText = useCallback(async (pageNum: number): Promise<string> => {
+      const cached = pageTextCacheRef.current.get(pageNum);
+      if (cached !== undefined) return cached;
+
+      const existing = pendingTextExtractionsRef.current.get(pageNum);
+      if (existing) return existing;
+
+      const doc = pdfDocRef.current;
+      if (!doc || pageNum < 1 || pageNum > doc.numPages) return "";
+
+      const task = (async () => {
+        try {
+          const pageObj = await doc.getPage(pageNum);
+          const textContent = await pageObj.getTextContent();
+          const pageString = textContent.items
+            .map((item: any) => item.str)
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim();
+          pageTextCacheRef.current.set(pageNum, pageString);
+          return pageString;
+        } catch {
+          return "";
+        } finally {
+          pendingTextExtractionsRef.current.delete(pageNum);
+        }
+      })();
+
+      pendingTextExtractionsRef.current.set(pageNum, task);
+      return task;
+    }, []);
+
+    const extractAndNotifyPage = useCallback(
+      (pageNum: number) => {
+        const seq = ++extractSeqRef.current;
+        const cached = pageTextCacheRef.current.get(pageNum);
+        callbacksRef.current.onPageChange?.(pageNum, cached);
+
+        if (cached !== undefined) return;
+
+        extractPageText(pageNum).then((text) => {
+          if (extractSeqRef.current !== seq) return;
+          if (activeVisiblePageRef.current !== pageNum) return;
+          callbacksRef.current.onPageChange?.(pageNum, text);
         });
-      }
-    }
-  }, [initialScrollOrientation, scrollOrientation, currentPage]);
+      },
+      [extractPageText]
+    );
 
-  // Jump Input State
-  const [isEditingPage, setIsEditingPage] = useState<boolean>(false);
-  const [pageInputValue, setPageInputValue] = useState<string>("");
-  const pageInputRef = useRef<HTMLInputElement>(null);
+    const capturePageSnapshot = useCallback((pageNum: number): string | null => {
+      const canvas = canvasMap.current.get(pageNum);
+      if (!canvas || canvas.width <= 0 || canvas.height <= 0) return null;
+      return downscaleCanvasToJpeg(canvas, 0, 0, canvas.width, canvas.height);
+    }, []);
 
-  // Canvas registry for snipping
-  const canvasMap = useRef<Map<number, HTMLCanvasElement>>(new Map());
+    // 1. Synchronous pre-paint container measurement + ResizeObserver
+    useLayoutEffect(() => {
+      if (loading || error) return;
+      const el = containerRef.current;
+      if (!el) return;
 
-  // Snip Tool State
-  const [isSnipActive, setIsSnipActive] = useState<boolean>(false);
-  const [snipStart, setSnipStart] = useState<{ x: number; y: number } | null>(
-    null
-  );
-  const [snipCurrent, setSnipCurrent] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [activeSnipPage, setActiveSnipPage] = useState<number>(1);
-  const [confirmedSnip, setConfirmedSnip] = useState<ConfirmedSnip | null>(null);
+      let resizeTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // 1. ResizeObserver attached once scroll container mounts (after loading finishes)
-  useEffect(() => {
-    if (loading || error) return;
-    const el = containerRef.current;
-    if (!el) return;
+      const measureNow = () => {
+        const style = window.getComputedStyle(el);
+        const padX =
+          (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+        const padY =
+          (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+        const nextW = Math.max(0, el.clientWidth - padX);
+        const nextH = Math.max(0, el.clientHeight - padY);
+        if (nextW > 0 && nextH > 0) {
+          setContainerSize((prev) =>
+            Math.abs(prev.width - nextW) < 1 && Math.abs(prev.height - nextH) < 1
+              ? prev
+              : { width: nextW, height: nextH }
+          );
+        }
+      };
 
-    let resizeTimer: NodeJS.Timeout | null = null;
+      measureNow();
 
-    const measureNow = () => {
-      const style = window.getComputedStyle(el);
-      const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
-      const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
-      const nextW = Math.max(0, el.clientWidth - padX);
-      const nextH = Math.max(0, el.clientHeight - padY);
-      if (nextW > 0 && nextH > 0) {
-        setContainerSize((prev) =>
-          Math.abs(prev.width - nextW) < 1 && Math.abs(prev.height - nextH) < 1
-            ? prev
-            : { width: nextW, height: nextH }
-        );
-      }
-    };
-
-    // Measure immediately on mount so Fit Page never uses a stale fallback height
-    measureNow();
-
-    const ro = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry) {
+      const ro = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (!entry) return;
         if (resizeTimer) clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
           const nextW = Math.max(0, entry.contentRect.width);
           const nextH = Math.max(0, entry.contentRect.height);
           if (nextW > 0 && nextH > 0) {
             setContainerSize((prev) =>
-              Math.abs(prev.width - nextW) < 1 && Math.abs(prev.height - nextH) < 1
+              Math.abs(prev.width - nextW) < 2 && Math.abs(prev.height - nextH) < 2
                 ? prev
                 : { width: nextW, height: nextH }
             );
           }
         }, 80);
-      }
-    });
+      });
 
-    ro.observe(el);
-    window.addEventListener("resize", measureNow);
-    return () => {
-      if (resizeTimer) clearTimeout(resizeTimer);
-      window.removeEventListener("resize", measureNow);
-      ro.disconnect();
-    };
-  }, [loading, error]);
+      ro.observe(el);
+      window.addEventListener("resize", measureNow);
+      return () => {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        window.removeEventListener("resize", measureNow);
+        ro.disconnect();
+      };
+    }, [loading, error]);
 
-  // 1b. Keep docPageSize synced to the active page's true intrinsic dimensions
-  useEffect(() => {
-    if (!pdfDoc || !activeVisiblePage) return;
-    let cancelled = false;
-    pdfDoc
-      .getPage(activeVisiblePage)
-      .then((page: any) => {
-        if (cancelled) return;
-        const vp = page.getViewport({ scale: 1.0 });
-        setDocPageSize((prev) =>
-          Math.abs(prev.width - vp.width) > 2 || Math.abs(prev.height - vp.height) > 2
-            ? { width: vp.width, height: vp.height }
-            : prev
-        );
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [pdfDoc, activeVisiblePage]);
+    // 1b. Keep docPageSize synced to active page's intrinsic dimensions (> 8px threshold prevents jitter)
+    useEffect(() => {
+      if (!pdfDoc || !activeVisiblePage) return;
+      let cancelled = false;
+      pdfDoc
+        .getPage(activeVisiblePage)
+        .then((page: any) => {
+          if (cancelled) return;
+          const vp = page.getViewport({ scale: 1.0 });
+          setDocPageSize((prev) =>
+            Math.abs(prev.width - vp.width) > 8 || Math.abs(prev.height - vp.height) > 8
+              ? { width: vp.width, height: vp.height }
+              : prev
+          );
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }, [pdfDoc, activeVisiblePage]);
 
-  // 2. Initialize and Load Document
-  useEffect(() => {
-    let isMounted = true;
-    setLoading(true);
-    setError(null);
+    // 2. Initialize and Load Document
+    useEffect(() => {
+      let isMounted = true;
+      setLoading(true);
+      setError(null);
 
-    async function loadPdf() {
-      try {
-        const pdfjsLib = await import("pdfjs-dist");
-
-        if (typeof window !== "undefined") {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-        }
-
-        // Resolve URL: proxy private Vercel blobs via local streaming route
-        const effectiveUrl = fileURL.includes(".private.blob.vercel-storage.com")
-          ? `/api/storage/file?url=${encodeURIComponent(fileURL)}`
-          : fileURL;
-
-        // Check local IndexedDB cache first for instant <100ms loading
-        const cachedBuffer = await getCachedPdfBuffer(fileURL);
-
-        const loadingTask = pdfjsLib.getDocument(
-          cachedBuffer
-            ? { data: cachedBuffer }
-            : {
-                url: effectiveUrl,
-                withCredentials: false,
-                disableAutoFetch: true,
-                disableStream: false,
-                rangeChunkSize: 65536,
-              }
-        );
-
-        const doc = await loadingTask.promise;
-        if (!isMounted) return;
-
-        // Cache for all future reader sessions if not cached yet
-        if (!cachedBuffer) {
-          doc.getData().then((u8) => cachePdfBuffer(fileURL, u8.buffer as ArrayBuffer)).catch(() => {});
-        }
-
-        try {
-          const firstPage = await doc.getPage(1);
-          const vp = firstPage.getViewport({ scale: 1.0 });
-          setDocPageSize({ width: vp.width, height: vp.height });
-        } catch { }
-
-        setPdfDoc(doc);
-        pdfDocRef.current = doc;
-        setTotalPages(doc.numPages);
-        callbacksRef.current.onTotalPagesLoaded?.(doc.numPages);
-        setLoading(false);
-
-        // Extract active page text in background without delaying visual canvas paint
-        doc.getPage(currentPage || 1)
-          .then((initP) => initP.getTextContent())
-          .then((txtContent) => {
-            if (!isMounted) return;
-            const initStr = txtContent.items.map((it: any) => it.str).join(" ");
-            callbacksRef.current.onPageChange?.(currentPage || 1, initStr);
-          })
-          .catch(() => {});
-      } catch (err: any) {
-        console.warn("Local worker load issue, trying unpkg worker fallback:", err);
+      async function loadPdf() {
         try {
           const pdfjsLib = await import("pdfjs-dist");
-          const workerVer = pdfjsLib.version || "5.5.207";
-          pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${workerVer}/build/pdf.worker.min.mjs`;
+          if (typeof window !== "undefined") {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+          }
 
           const effectiveUrl = fileURL.includes(".private.blob.vercel-storage.com")
             ? `/api/storage/file?url=${encodeURIComponent(fileURL)}`
             : fileURL;
 
-          const fallbackTask = pdfjsLib.getDocument({
-            url: effectiveUrl,
-            withCredentials: false,
-            disableAutoFetch: true,
-            disableStream: false,
-            rangeChunkSize: 65536,
-          });
+          const cachedBuffer = await getCachedPdfBuffer(fileURL);
 
-          const doc = await fallbackTask.promise;
+          const loadingTask = pdfjsLib.getDocument(
+            cachedBuffer
+              ? { data: cachedBuffer }
+              : {
+                  url: effectiveUrl,
+                  withCredentials: false,
+                  disableAutoFetch: true,
+                  disableStream: false,
+                  rangeChunkSize: 65536,
+                }
+          );
+
+          const doc = await loadingTask.promise;
           if (!isMounted) return;
+
+          if (!cachedBuffer) {
+            doc
+              .getData()
+              .then((u8) => cachePdfBuffer(fileURL, u8.buffer as ArrayBuffer))
+              .catch(() => {});
+          }
 
           try {
             const firstPage = await doc.getPage(1);
             const vp = firstPage.getViewport({ scale: 1.0 });
             setDocPageSize({ width: vp.width, height: vp.height });
-          } catch { }
+          } catch {}
 
           setPdfDoc(doc);
           pdfDocRef.current = doc;
@@ -727,918 +783,1048 @@ export default function OriginalPdfViewer({
           callbacksRef.current.onTotalPagesLoaded?.(doc.numPages);
           setLoading(false);
 
-          doc.getPage(currentPage || 1)
-            .then((initP) => initP.getTextContent())
-            .then((txtContent) => {
+          const initPage = Math.max(1, Math.min(currentPage || 1, doc.numPages));
+          extractPageText(initPage).then((initStr) => {
+            if (!isMounted) return;
+            if (activeVisiblePageRef.current === initPage) {
+              callbacksRef.current.onPageChange?.(initPage, initStr);
+            }
+          });
+        } catch (err: any) {
+          console.warn("Local worker load issue, trying unpkg worker fallback:", err);
+          try {
+            const pdfjsLib = await import("pdfjs-dist");
+            const workerVer = pdfjsLib.version || "5.5.207";
+            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${workerVer}/build/pdf.worker.min.mjs`;
+
+            const effectiveUrl = fileURL.includes(".private.blob.vercel-storage.com")
+              ? `/api/storage/file?url=${encodeURIComponent(fileURL)}`
+              : fileURL;
+
+            const fallbackTask = pdfjsLib.getDocument({
+              url: effectiveUrl,
+              withCredentials: false,
+              disableAutoFetch: true,
+              disableStream: false,
+              rangeChunkSize: 65536,
+            });
+
+            const doc = await fallbackTask.promise;
+            if (!isMounted) return;
+
+            try {
+              const firstPage = await doc.getPage(1);
+              const vp = firstPage.getViewport({ scale: 1.0 });
+              setDocPageSize({ width: vp.width, height: vp.height });
+            } catch {}
+
+            setPdfDoc(doc);
+            pdfDocRef.current = doc;
+            setTotalPages(doc.numPages);
+            callbacksRef.current.onTotalPagesLoaded?.(doc.numPages);
+            setLoading(false);
+
+            const initPage = Math.max(1, Math.min(currentPage || 1, doc.numPages));
+            extractPageText(initPage).then((initStr) => {
               if (!isMounted) return;
-              const initStr = txtContent.items.map((it: any) => it.str).join(" ");
-              callbacksRef.current.onPageChange?.(currentPage || 1, initStr);
-            })
-            .catch(() => {});
-        } catch (fallbackErr: any) {
-          console.error("Critical PDF load error:", fallbackErr);
-          if (!isMounted) return;
-          setError(
-            fallbackErr?.message ||
-            "Unable to load original PDF file. Please verify file availability."
-          );
-          setLoading(false);
+              if (activeVisiblePageRef.current === initPage) {
+                callbacksRef.current.onPageChange?.(initPage, initStr);
+              }
+            });
+          } catch (fallbackErr: any) {
+            console.error("Critical PDF load error:", fallbackErr);
+            if (!isMounted) return;
+            setError(
+              fallbackErr?.message ||
+                "Unable to load original PDF file. Please verify file availability."
+            );
+            setLoading(false);
+          }
         }
       }
-    }
 
-    if (fileURL) {
-      loadPdf();
-    } else {
-      setError("No document URL provided for this source.");
-      setLoading(false);
-    }
-
-    return () => {
-      isMounted = false;
-    };
-  }, [fileURL]);
-
-  // 3. Compute Scale with Width/Height Fitting (Responsive on Mobile & Desktop)
-  const computedScale = useMemo(() => {
-    const windowW = typeof window !== "undefined" ? window.innerWidth : 375;
-    const windowH = typeof window !== "undefined" ? window.innerHeight : 667;
-    const defaultW = Math.max(280, Math.min(windowW - 24, 760));
-    const defaultH = Math.max(280, windowH - 200);
-
-    const w = containerSize.width > 0 ? containerSize.width : defaultW;
-    const h = containerSize.height > 0 ? containerSize.height : defaultH;
-
-    const pageWidth = docPageSize.width || 595;
-    const pageHeight = docPageSize.height || 842;
-
-    // Reserve inner wrapper padding & subtle shadow clearance so Fit Page never clips
-    const padX =
-      scrollOrientation === "horizontal"
-        ? w < 640
-          ? 28
-          : 56
-        : w < 480
-          ? 8
-          : 16;
-    const padY =
-      scrollOrientation === "horizontal"
-        ? h < 600
-          ? 16
-          : 24
-        : h < 600
-          ? 20
-          : 32;
-
-    const availableW = Math.max(100, w - padX);
-    const availableH = Math.max(100, h - padY);
-    const scaleW = availableW / pageWidth;
-    const scaleH = availableH / pageHeight;
-
-    if (activeFitMode === "fit-page") {
-      // Fit the entire page (both width AND height) cleanly inside the visible viewport
-      return Math.max(0.15, Math.min(3.2, Math.min(scaleW, scaleH)));
-    }
-
-    if (activeFitMode === "fit-width") {
-      return Math.max(0.15, Math.min(3.2, scaleW));
-    }
-
-    // Normal mode: respect explicit zoomLevel relative to the natural base fit
-    const baseScale =
-      scrollOrientation === "horizontal" ? Math.min(scaleW, scaleH) : scaleW;
-    return Math.max(0.15, Math.min(3.2, baseScale * (activeZoomLevel / 100)));
-  }, [activeZoomLevel, activeFitMode, containerSize, docPageSize, scrollOrientation]);
-
-  // 4. Register Canvas Callback for Page Items (stable reference)
-  const handleRegisterCanvas = useCallback(
-    (pageNum: number, canvas: HTMLCanvasElement | null) => {
-      if (canvas) {
-        canvasMap.current.set(pageNum, canvas);
+      if (fileURL) {
+        loadPdf();
       } else {
-        canvasMap.current.delete(pageNum);
-      }
-    },
-    []
-  );
-
-  // User manual scroll handler to set scrolling flag and prevent scroll-fighting
-  const handleContainerScroll = useCallback(() => {
-    if (isInternalScrollRef.current) return;
-    isUserScrollingRef.current = true;
-    if (userScrollTimeoutRef.current) clearTimeout(userScrollTimeoutRef.current);
-    userScrollTimeoutRef.current = setTimeout(() => {
-      isUserScrollingRef.current = false;
-    }, 400);
-  }, []);
-
-  // 5. Track Most Visible Page with stable reference, debounce, and loop guard
-  const handleVisibleChange = useCallback(
-    (pageNum: number, isIntersecting: boolean, ratio: number) => {
-      if (isIntersecting) {
-        visiblePageRatios.current.set(pageNum, ratio);
-      } else {
-        visiblePageRatios.current.delete(pageNum);
+        setError("No document URL provided for this source.");
+        setLoading(false);
       }
 
+      return () => {
+        isMounted = false;
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fileURL]);
+
+    // 3. Compute Scale with Width/Height Fitting
+    const computedScale = useMemo(() => {
+      const windowW = typeof window !== "undefined" ? window.innerWidth : 375;
+      const windowH = typeof window !== "undefined" ? window.innerHeight : 667;
+      const defaultW = Math.max(280, Math.min(windowW - 24, 760));
+      const defaultH = Math.max(280, windowH - 200);
+
+      const w = containerSize.width > 0 ? containerSize.width : defaultW;
+      const h = containerSize.height > 0 ? containerSize.height : defaultH;
+
+      const pageWidth = docPageSize.width || 595;
+      const pageHeight = docPageSize.height || 842;
+
+      const padX =
+        scrollOrientation === "horizontal"
+          ? w < 640
+            ? 28
+            : 56
+          : w < 480
+            ? 8
+            : 16;
+      const padY =
+        scrollOrientation === "horizontal"
+          ? h < 600
+            ? 16
+            : 24
+          : h < 600
+            ? 20
+            : 32;
+
+      const availableW = Math.max(100, w - padX);
+      const availableH = Math.max(100, h - padY);
+      const scaleW = availableW / pageWidth;
+      const scaleH = availableH / pageHeight;
+
+      if (activeFitMode === "fit-page") {
+        return Math.max(0.15, Math.min(3.2, Math.min(scaleW, scaleH)));
+      }
+
+      if (activeFitMode === "fit-width") {
+        return Math.max(0.15, Math.min(3.2, scaleW));
+      }
+
+      const baseScale =
+        scrollOrientation === "horizontal" ? Math.min(scaleW, scaleH) : scaleW;
+      return Math.max(0.15, Math.min(3.2, baseScale * (activeZoomLevel / 100)));
+    }, [activeZoomLevel, activeFitMode, containerSize, docPageSize, scrollOrientation]);
+
+    const readyToRender = containerSize.width > 0 && containerSize.height > 0;
+
+    // 4. Register Canvas Callback
+    const handleRegisterCanvas = useCallback(
+      (pageNum: number, canvas: HTMLCanvasElement | null) => {
+        if (canvas) {
+          canvasMap.current.set(pageNum, canvas);
+        } else {
+          canvasMap.current.delete(pageNum);
+        }
+      },
+      []
+    );
+
+    // 5. Deterministic Geometric Most-Visible-Page Detector (replaces IntersectionObserver ratios)
+    const findMostVisiblePage = useCallback((): number => {
+      const container = containerRef.current;
+      if (!container || totalPages <= 0) return activeVisiblePageRef.current;
+
+      const cRect = container.getBoundingClientRect();
+      if (cRect.width <= 0 || cRect.height <= 0) return activeVisiblePageRef.current;
+
+      const containerCenter =
+        scrollOrientation === "horizontal"
+          ? (cRect.left + cRect.right) / 2
+          : (cRect.top + cRect.bottom) / 2;
+
+      const approxStep =
+        scrollOrientation === "horizontal"
+          ? Math.max(40, docPageSize.width * computedScale + 44)
+          : Math.max(40, docPageSize.height * computedScale + 24);
+      const scrollOffset =
+        scrollOrientation === "horizontal" ? container.scrollLeft : container.scrollTop;
+      const estPage = Math.max(1, Math.min(totalPages, Math.floor(scrollOffset / approxStep) + 1));
+
+      const candidateSet = new Set<HTMLElement>();
+      const startP = Math.max(1, estPage - 4);
+      const endP = Math.min(totalPages, estPage + 4);
+      for (let p = startP; p <= endP; p++) {
+        const el = document.getElementById(`pdf-page-container-${p}`);
+        if (el) candidateSet.add(el);
+      }
+      // Also include a small window around activeVisiblePageRef as safety net for variable-size PDFs
+      const curStart = Math.max(1, activeVisiblePageRef.current - 2);
+      const curEnd = Math.min(totalPages, activeVisiblePageRef.current + 2);
+      for (let p = curStart; p <= curEnd; p++) {
+        const el = document.getElementById(`pdf-page-container-${p}`);
+        if (el) candidateSet.add(el);
+      }
+
+      const evaluateElements = (els: Iterable<HTMLElement>) => {
+        let bestPage = -1;
+        let bestScore = -Infinity;
+        const containerArea = cRect.width * cRect.height;
+
+        for (const el of els) {
+          const pNum = Number(el.getAttribute("data-page-number"));
+          if (!pNum) continue;
+          const pRect = el.getBoundingClientRect();
+          const overlapX = Math.max(
+            0,
+            Math.min(pRect.right, cRect.right) - Math.max(pRect.left, cRect.left)
+          );
+          const overlapY = Math.max(
+            0,
+            Math.min(pRect.bottom, cRect.bottom) - Math.max(pRect.top, cRect.top)
+          );
+          const visibleArea = overlapX * overlapY;
+          if (visibleArea <= 0) continue;
+
+          const pageArea = Math.max(1, pRect.width * pRect.height);
+          const denom = Math.min(pageArea, containerArea);
+          const visibleRatio = visibleArea / Math.max(1, denom);
+
+          const pCenter =
+            scrollOrientation === "horizontal"
+              ? (pRect.left + pRect.right) / 2
+              : (pRect.top + pRect.bottom) / 2;
+          const centerDist = Math.abs(pCenter - containerCenter);
+          const score = visibleRatio * 1000 - centerDist * 0.05;
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestPage = pNum;
+          }
+        }
+        return bestPage;
+      };
+
+      let winner = evaluateElements(candidateSet);
+      if (winner === -1) {
+        const allEls = container.querySelectorAll<HTMLElement>("[data-page-number]");
+        winner = evaluateElements(allEls);
+      }
+
+      return winner !== -1 ? winner : activeVisiblePageRef.current;
+    }, [totalPages, scrollOrientation, docPageSize, computedScale]);
+
+    // Programmatic scroll aligned directly on scroll container (auto for distant jumps, smooth for +/- 1)
+    const scrollToPageElement = useCallback(
+      (
+        targetPage: number,
+        behavior: ScrollBehavior,
+        orientationOverride?: "vertical" | "horizontal"
+      ) => {
+        const container = containerRef.current;
+        const pageEl = document.getElementById(`pdf-page-container-${targetPage}`);
+        if (!container || !pageEl) {
+          isInternalScrollRef.current = false;
+          return;
+        }
+
+        scrollCleanupRef.current?.();
+        scrollCleanupRef.current = null;
+
+        const effectiveOrientation = orientationOverride || scrollOrientation;
+        isInternalScrollRef.current = true;
+        if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+
+        const cRect = container.getBoundingClientRect();
+        const pRect = pageEl.getBoundingClientRect();
+
+        if (effectiveOrientation === "horizontal") {
+          const containerCenter = cRect.left + cRect.width / 2;
+          const pageCenter = pRect.left + pRect.width / 2;
+          const targetLeft = Math.max(0, container.scrollLeft + (pageCenter - containerCenter));
+          container.scrollTo({ left: targetLeft, behavior });
+        } else {
+          const targetTop = Math.max(0, container.scrollTop + (pRect.top - cRect.top) - 8);
+          container.scrollTo({ top: targetTop, behavior });
+        }
+
+        const unlockDelay = behavior === "auto" ? 140 : 480;
+        const finishScroll = () => {
+          isInternalScrollRef.current = false;
+          cleanup();
+        };
+        const cleanup = () => {
+          container.removeEventListener("scrollend", finishScroll);
+          if (scrollTimeoutRef.current) {
+            clearTimeout(scrollTimeoutRef.current);
+            scrollTimeoutRef.current = null;
+          }
+          if (scrollCleanupRef.current === cleanup) {
+            scrollCleanupRef.current = null;
+          }
+        };
+
+        scrollCleanupRef.current = cleanup;
+        container.addEventListener("scrollend", finishScroll, { once: true });
+        scrollTimeoutRef.current = setTimeout(finishScroll, unlockDelay);
+      },
+      [scrollOrientation]
+    );
+
+    const handleJumpToPage = useCallback(
+      (newPage: number) => {
+        const maxP = Math.max(1, totalPages || 1);
+        const clamped = Math.max(1, Math.min(newPage, maxP));
+        const prevPage = activeVisiblePageRef.current;
+        const distance = Math.abs(clamped - prevPage);
+        const behavior: ScrollBehavior = distance <= 1 ? "smooth" : "auto";
+
+        if (pageNotifyTimerRef.current) {
+          clearTimeout(pageNotifyTimerRef.current);
+          pageNotifyTimerRef.current = null;
+        }
+
+        activeVisiblePageRef.current = clamped;
+        lastReportedPageRef.current = clamped;
+        setActiveVisiblePage(clamped);
+
+        extractAndNotifyPage(clamped);
+        scrollToPageElement(clamped, behavior);
+      },
+      [totalPages, extractAndNotifyPage, scrollToPageElement]
+    );
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        extractPageText,
+        capturePageSnapshot,
+        jumpToPage: handleJumpToPage,
+      }),
+      [extractPageText, capturePageSnapshot, handleJumpToPage]
+    );
+
+    // User manual scroll handler using RAF + geometric page detection
+    const handleContainerScroll = useCallback(() => {
       if (isInternalScrollRef.current) return;
 
-      let maxRatio = 0;
-      let mostVisible = activeVisiblePageRef.current;
-      visiblePageRatios.current.forEach((r, p) => {
-        if (r > maxRatio) {
-          maxRatio = r;
-          mostVisible = p;
+      if (scrollRafRef.current !== null) return;
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null;
+        if (isInternalScrollRef.current) return;
+
+        const mostVisible = findMostVisiblePage();
+        if (mostVisible && mostVisible !== activeVisiblePageRef.current) {
+          activeVisiblePageRef.current = mostVisible;
+          lastReportedPageRef.current = mostVisible;
+          setActiveVisiblePage(mostVisible);
+
+          if (pageNotifyTimerRef.current) clearTimeout(pageNotifyTimerRef.current);
+          pageNotifyTimerRef.current = setTimeout(() => {
+            if (isInternalScrollRef.current) return;
+            extractAndNotifyPage(mostVisible);
+          }, 120);
         }
       });
+    }, [findMostVisiblePage, extractAndNotifyPage]);
 
-      if (mostVisible && mostVisible !== activeVisiblePageRef.current) {
-        activeVisiblePageRef.current = mostVisible;
-        lastReportedPageRef.current = mostVisible;
-        setActiveVisiblePage(mostVisible);
-
-        // Debounce text extraction and parent notification so rapid scrollbar dragging doesn't flood React
-        if (pageNotifyTimerRef.current) clearTimeout(pageNotifyTimerRef.current);
-        pageNotifyTimerRef.current = setTimeout(() => {
-          if (isInternalScrollRef.current) return;
-          const doc = pdfDocRef.current;
-          if (doc) {
-            doc.getPage(mostVisible).then(async (pageObj: any) => {
-              try {
-                const textContent = await pageObj.getTextContent();
-                const pageString = textContent.items
-                  .map((item: any) => item.str)
-                  .join(" ");
-                callbacksRef.current.onPageChange?.(mostVisible, pageString);
-              } catch {
-                callbacksRef.current.onPageChange?.(mostVisible);
-              }
-            }).catch(() => {
-              callbacksRef.current.onPageChange?.(mostVisible);
-            });
-          } else {
-            callbacksRef.current.onPageChange?.(mostVisible);
-          }
-        }, 120);
-      }
-    },
-    []
-  );
-
-  // Initial scroll when pdfDoc finishes loading and currentPage > 1
-  const initialScrollDoneRef = useRef<boolean>(false);
-  useEffect(() => {
-    if (!loading && pdfDoc && currentPage > 1 && !initialScrollDoneRef.current) {
-      initialScrollDoneRef.current = true;
+    // Stable toggle handler for orientation
+    const handleToggleScrollOrientation = useCallback(() => {
+      const next = scrollOrientation === "vertical" ? "horizontal" : "vertical";
       isInternalScrollRef.current = true;
-      visiblePageRatios.current.clear();
-      visiblePageRatios.current.set(currentPage, 1.0);
-      activeVisiblePageRef.current = currentPage;
-      lastReportedPageRef.current = currentPage;
-      setActiveVisiblePage(currentPage);
+      if (pageNotifyTimerRef.current) {
+        clearTimeout(pageNotifyTimerRef.current);
+        pageNotifyTimerRef.current = null;
+      }
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+        scrollTimeoutRef.current = null;
+      }
+
+      const targetPage = activeVisiblePageRef.current || currentPage || 1;
+      setScrollOrientation(next);
+      callbacksRef.current.onScrollOrientationChange?.(next);
 
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          const pageEl = document.getElementById(`pdf-page-container-${currentPage}`);
-          if (pageEl && containerRef.current) {
-            pageEl.scrollIntoView({
-              behavior: "auto",
-              block: scrollOrientation === "horizontal" ? "nearest" : "start",
-              inline: scrollOrientation === "horizontal" ? "center" : "nearest",
-            });
-            pageEl.classList.add("ring-4", "ring-[color:var(--orange)]", "shadow-xl", "transition-all", "duration-1000");
-            setTimeout(() => {
-              pageEl.classList.remove("ring-4", "ring-[color:var(--orange)]", "shadow-xl");
-            }, 2000);
-          }
-          if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-          scrollTimeoutRef.current = setTimeout(() => {
-            isInternalScrollRef.current = false;
-          }, 800);
+          scrollToPageElement(targetPage, "auto", next);
         });
       });
-    }
-  }, [loading, pdfDoc, currentPage, scrollOrientation]);
+    }, [scrollOrientation, currentPage, scrollToPageElement]);
 
-  // 6. External Jump to Page (with strict loop guard against scroll fighting)
-  useEffect(() => {
-    // If invalid, already at page, just reported by our own scroll, or user is currently scrolling: DO NOT scroll!
-    if (
-      !currentPage ||
-      currentPage === activeVisiblePageRef.current ||
-      currentPage === lastReportedPageRef.current ||
-      isUserScrollingRef.current
-    ) {
-      return;
-    }
+    // Sync external changes to initialScrollOrientation
+    const prevOrientationRef = useRef<"vertical" | "horizontal">(initialScrollOrientation);
+    useEffect(() => {
+      if (initialScrollOrientation && initialScrollOrientation !== prevOrientationRef.current) {
+        prevOrientationRef.current = initialScrollOrientation;
+        if (initialScrollOrientation !== scrollOrientation) {
+          const targetPage = activeVisiblePageRef.current || currentPage || 1;
+          isInternalScrollRef.current = true;
+          if (pageNotifyTimerRef.current) clearTimeout(pageNotifyTimerRef.current);
+          setScrollOrientation(initialScrollOrientation);
 
-    activeVisiblePageRef.current = currentPage;
-    lastReportedPageRef.current = currentPage;
-    setActiveVisiblePage(currentPage);
-
-    const doc = pdfDocRef.current;
-    if (doc) {
-      doc.getPage(currentPage).then(async (pageObj: any) => {
-        try {
-          const textContent = await pageObj.getTextContent();
-          const pageString = textContent.items
-            .map((item: any) => item.str)
-            .join(" ");
-          callbacksRef.current.onPageChange?.(currentPage, pageString);
-        } catch { }
-      }).catch(() => { });
-    }
-
-    const pageEl = document.getElementById(`pdf-page-container-${currentPage}`);
-    if (pageEl && containerRef.current) {
-      isInternalScrollRef.current = true;
-      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-
-      pageEl.scrollIntoView({
-        behavior: "smooth",
-        block: scrollOrientation === "horizontal" ? "nearest" : "start",
-        inline: scrollOrientation === "horizontal" ? "center" : "nearest",
-      });
-
-      scrollTimeoutRef.current = setTimeout(() => {
-        isInternalScrollRef.current = false;
-      }, 700);
-    }
-  }, [currentPage, scrollOrientation]);
-
-  // 7. Handle Native Text Selection on the TextLayer
-  const handleSelectionCheck = useCallback(() => {
-    if (isSnipActive) return;
-
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed) return;
-
-    const text = sel.toString().trim();
-    if (text.length > 3 && containerRef.current) {
-      try {
-        const range = sel.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        const containerRect = containerRef.current.getBoundingClientRect();
-
-        const x =
-          rect.left - containerRect.left + containerRef.current.scrollLeft;
-        const y =
-          rect.top - containerRect.top + containerRef.current.scrollTop;
-
-        callbacksRef.current.onTextSelection?.(text, { x, y });
-      } catch {
-        callbacksRef.current.onTextSelection?.(text, { x: 50, y: 100 });
-      }
-    }
-  }, [isSnipActive]);
-
-  // 8. Snip Diagram Mouse Handlers
-  const handleSnipMouseDown = (e: React.MouseEvent, pageNum: number) => {
-    if (!isSnipActive) return;
-    const pageEl = document.getElementById(`pdf-page-container-${pageNum}`);
-    if (!pageEl) return;
-
-    const rect = pageEl.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    setActiveSnipPage(pageNum);
-    setSnipStart({ x, y });
-    setSnipCurrent({ x, y });
-  };
-
-  const handleSnipMouseMove = (e: React.MouseEvent, pageNum: number) => {
-    if (!isSnipActive || !snipStart || activeSnipPage !== pageNum) return;
-    const pageEl = document.getElementById(`pdf-page-container-${pageNum}`);
-    if (!pageEl) return;
-
-    const rect = pageEl.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
-
-    setSnipCurrent({ x, y });
-  };
-
-  const handleSnipMouseUp = () => {
-    if (!isSnipActive || !snipStart || !snipCurrent) {
-      setSnipStart(null);
-      setSnipCurrent(null);
-      return;
-    }
-
-    const canvas = canvasMap.current.get(activeSnipPage);
-    if (!canvas) {
-      setSnipStart(null);
-      setSnipCurrent(null);
-      return;
-    }
-
-    const x1 = Math.min(snipStart.x, snipCurrent.x);
-    const y1 = Math.min(snipStart.y, snipCurrent.y);
-    const x2 = Math.max(snipStart.x, snipCurrent.x);
-    const y2 = Math.max(snipStart.y, snipCurrent.y);
-
-    const width = x2 - x1;
-    const height = y2 - y1;
-
-    if (width > 20 && height > 20) {
-      const pageEl = document.getElementById(
-        `pdf-page-container-${activeSnipPage}`
-      );
-      if (pageEl) {
-        const displayedWidth = pageEl.clientWidth;
-        const displayedHeight = pageEl.clientHeight;
-        const scaleX = canvas.width / displayedWidth;
-        const scaleY = canvas.height / displayedHeight;
-
-        const sourceX = x1 * scaleX;
-        const sourceY = y1 * scaleY;
-        const sourceW = width * scaleX;
-        const sourceH = height * scaleY;
-
-        // Cap max dimension to 960px and encode as compact JPEG (~35-90KB) so Gemini multimodal uploads never stall on slower links
-        const MAX_SNIP_DIM = 960;
-        const downscale = Math.min(1, MAX_SNIP_DIM / Math.max(sourceW, sourceH, 1));
-        const targetW = Math.max(1, Math.round(sourceW * downscale));
-        const targetH = Math.max(1, Math.round(sourceH * downscale));
-
-        const snippetCanvas = document.createElement("canvas");
-        snippetCanvas.width = targetW;
-        snippetCanvas.height = targetH;
-        const ctx = snippetCanvas.getContext("2d");
-
-        if (ctx) {
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(0, 0, targetW, targetH);
-          ctx.drawImage(
-            canvas,
-            sourceX,
-            sourceY,
-            sourceW,
-            sourceH,
-            0,
-            0,
-            targetW,
-            targetH
-          );
-
-          let dataUrl = snippetCanvas.toDataURL("image/jpeg", 0.72);
-          if (dataUrl.length > 140_000) {
-            dataUrl = snippetCanvas.toDataURL("image/jpeg", 0.55);
-          }
-
-          // Keep selection box visibly confirmed on canvas!
-          setConfirmedSnip({
-            pageNum: activeSnipPage,
-            x: x1,
-            y: y1,
-            width,
-            height,
-            dataUrl,
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              scrollToPageElement(targetPage, "auto", initialScrollOrientation);
+            });
           });
-
-          // Trigger snip callback
-          callbacksRef.current.onSnipDiagram?.(dataUrl, activeSnipPage);
         }
       }
-    }
+    }, [initialScrollOrientation, scrollOrientation, currentPage, scrollToPageElement]);
 
-    setSnipStart(null);
-    setSnipCurrent(null);
-    setIsSnipActive(false);
-  };
-
-  const handleSnipAction = (action: "morph" | "chat" | "qbank") => {
-    if (!confirmedSnip) return;
-    callbacksRef.current.onSnipDiagram?.(confirmedSnip.dataUrl, confirmedSnip.pageNum, action);
-  };
-
-  const clearConfirmedSnip = () => {
-    setConfirmedSnip(null);
-  };
-
-  // Render Dragging Box + Confirmed Box with Action Toolbar
-  const renderSnipOverlay = (pageNum: number) => {
-    const isActivelyDragging =
-      isSnipActive && snipStart && snipCurrent && activeSnipPage === pageNum;
-    const hasConfirmedSnipOnThisPage =
-      confirmedSnip && confirmedSnip.pageNum === pageNum;
-
-    return (
-      <>
-        {/* Active dragging box */}
-        {isActivelyDragging && (
-          <div
-            className="pointer-events-none absolute z-40 rounded border-2 border-dashed border-amber-400 bg-amber-400/25 shadow-xl"
-            style={{
-              left: Math.min(snipStart.x, snipCurrent.x),
-              top: Math.min(snipStart.y, snipCurrent.y),
-              width: Math.abs(snipCurrent.x - snipStart.x),
-              height: Math.abs(snipCurrent.y - snipStart.y),
-            }}
-          >
-            <span className="absolute -top-6 left-0 rounded bg-[color:var(--ink)] px-2 py-0.5 text-[9.5px] font-bold text-[color:var(--orange)] shadow">
-              Select Area ({Math.round(Math.abs(snipCurrent.x - snipStart.x))}×
-              {Math.round(Math.abs(snipCurrent.y - snipStart.y))}px)
-            </span>
-          </div>
-        )}
-
-        {/* Confirmed visible selection box with floating action buttons */}
-        {hasConfirmedSnipOnThisPage && confirmedSnip && (
-          <div
-            className="absolute z-40 rounded border-2 border-amber-500 bg-amber-500/15 shadow-xl ring-2 ring-amber-400/50"
-            style={{
-              left: confirmedSnip.x,
-              top: confirmedSnip.y,
-              width: confirmedSnip.width,
-              height: confirmedSnip.height,
-            }}
-          >
-            {/* Top pill: Confirmed badge */}
-            <div className="absolute -top-6 left-0 flex items-center gap-1.5 rounded-full bg-[color:var(--ink)] px-2.5 py-0.5 text-[10px] font-bold text-[color:var(--orange)] shadow-md">
-              <Check className="size-3 text-emerald-400" />
-              <span>Diagram Selected</span>
-            </div>
-
-            {/* Bottom floating action bar */}
-            <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-[var(--study-surface-solid)] p-1 rounded-full border border-[var(--study-border-strong)] shadow-[var(--study-shadow-lg)] backdrop-blur-md z-50">
-              <button
-                type="button"
-                onClick={() => handleSnipAction("morph")}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-[color:var(--orange)] text-[color:var(--ink)] hover:opacity-90 cursor-pointer shadow-xs"
-                title="Morph this diagram into interactive causal flow and simulator"
-              >
-                <Sparkles className="size-3" />
-                <span>Morph</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSnipAction("chat")}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-[var(--study-surface-muted)] text-[var(--study-text)] hover:bg-[var(--study-glass-hover)] cursor-pointer"
-                title="Ask AI mentor about this specific diagram"
-              >
-                <MessageSquare className="size-3" />
-                <span>Ask AI</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSnipAction("qbank")}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-[var(--study-surface-muted)] text-[var(--study-text)] hover:bg-[var(--study-glass-hover)] cursor-pointer"
-                title="Generate clinical practice vignette from this diagram"
-              >
-                <HelpCircle className="size-3" />
-                <span>QBank</span>
-              </button>
-              <button
-                type="button"
-                onClick={clearConfirmedSnip}
-                className="p-1 rounded-full text-[var(--study-text-muted)] hover:text-rose-500 hover:bg-[var(--study-glass-hover)] cursor-pointer ml-1"
-                title="Clear selected area"
-              >
-                <Trash2 className="size-3" />
-              </button>
-            </div>
-          </div>
-        )}
-      </>
-    );
-  };
-
-  const handleJumpToPage = (newPage: number) => {
-    const clamped = Math.max(1, Math.min(newPage, totalPages));
-    isInternalScrollRef.current = true;
-    visiblePageRatios.current.clear();
-    visiblePageRatios.current.set(clamped, 1.0);
-    activeVisiblePageRef.current = clamped;
-    lastReportedPageRef.current = clamped;
-    isUserScrollingRef.current = false;
-    setActiveVisiblePage(clamped);
-
-    const doc = pdfDocRef.current;
-    if (doc) {
-      doc.getPage(clamped).then(async (pageObj: any) => {
-        try {
-          const textContent = await pageObj.getTextContent();
-          const pageString = textContent.items
-            .map((item: any) => item.str)
-            .join(" ");
-          callbacksRef.current.onPageChange?.(clamped, pageString);
-        } catch {
-          callbacksRef.current.onPageChange?.(clamped);
-        }
-      }).catch(() => {
-        callbacksRef.current.onPageChange?.(clamped);
-      });
-    } else {
-      callbacksRef.current.onPageChange?.(clamped);
-    }
-
-    const pageEl = document.getElementById(`pdf-page-container-${clamped}`);
-    if (pageEl) {
-      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-
-      pageEl.scrollIntoView({
-        behavior: "smooth",
-        block: scrollOrientation === "horizontal" ? "nearest" : "start",
-        inline: scrollOrientation === "horizontal" ? "center" : "nearest",
-      });
-
-      scrollTimeoutRef.current = setTimeout(() => {
-        isInternalScrollRef.current = false;
-      }, 700);
-    } else {
-      isInternalScrollRef.current = false;
-    }
-  };
-
-  // Keyboard arrow navigation for horizontal reading
-  useEffect(() => {
-    if (scrollOrientation !== "horizontal") return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
+    // Initial scroll when pdfDoc finishes loading and containerSize is measured
+    const initialScrollDoneRef = useRef<boolean>(false);
+    useEffect(() => {
       if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        e.ctrlKey ||
-        e.metaKey ||
-        e.altKey
+        !loading &&
+        pdfDoc &&
+        readyToRender &&
+        currentPage > 1 &&
+        !initialScrollDoneRef.current
+      ) {
+        initialScrollDoneRef.current = true;
+        const clamped = Math.max(1, Math.min(currentPage, pdfDoc.numPages || currentPage));
+        activeVisiblePageRef.current = clamped;
+        lastReportedPageRef.current = clamped;
+        setActiveVisiblePage(clamped);
+
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            scrollToPageElement(clamped, "auto");
+            const pageEl = document.getElementById(`pdf-page-container-${clamped}`);
+            if (pageEl) {
+              pageEl.classList.add(
+                "ring-4",
+                "ring-[color:var(--orange)]",
+                "shadow-xl",
+                "transition-all",
+                "duration-1000"
+              );
+              setTimeout(() => {
+                pageEl.classList.remove("ring-4", "ring-[color:var(--orange)]", "shadow-xl");
+              }, 2000);
+            }
+          });
+        });
+      } else if (!loading && pdfDoc && readyToRender && currentPage <= 1 && !initialScrollDoneRef.current) {
+        initialScrollDoneRef.current = true;
+        isInternalScrollRef.current = false;
+      }
+    }, [loading, pdfDoc, readyToRender, currentPage, scrollToPageElement]);
+
+    // 6. External Jump to Page (instant for distant jumps, never blocked by scroll state)
+    useEffect(() => {
+      if (loading || !pdfDoc || !currentPage) return;
+      if (
+        currentPage === activeVisiblePageRef.current ||
+        currentPage === lastReportedPageRef.current
       ) {
         return;
       }
 
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        handleJumpToPage(activeVisiblePageRef.current - 1);
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        handleJumpToPage(activeVisiblePageRef.current + 1);
+      const maxP = Math.max(1, totalPages || pdfDoc.numPages || 1);
+      const clamped = Math.max(1, Math.min(currentPage, maxP));
+      const distance = Math.abs(clamped - activeVisiblePageRef.current);
+      const behavior: ScrollBehavior = distance <= 1 ? "smooth" : "auto";
+
+      activeVisiblePageRef.current = clamped;
+      lastReportedPageRef.current = clamped;
+      setActiveVisiblePage(clamped);
+
+      extractAndNotifyPage(clamped);
+      scrollToPageElement(clamped, behavior);
+    }, [currentPage, loading, pdfDoc, totalPages, extractAndNotifyPage, scrollToPageElement]);
+
+    // 7. Handle Native Text Selection on the TextLayer
+    const handleSelectionCheck = useCallback(() => {
+      if (isSnipActive) return;
+
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return;
+
+      const text = sel.toString().trim();
+      if (text.length > 3 && containerRef.current) {
+        try {
+          const range = sel.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+          const containerRect = containerRef.current.getBoundingClientRect();
+
+          const x = rect.left - containerRect.left + containerRef.current.scrollLeft;
+          const y = rect.top - containerRect.top + containerRef.current.scrollTop;
+
+          callbacksRef.current.onTextSelection?.(text, { x, y });
+        } catch {
+          callbacksRef.current.onTextSelection?.(text, { x: 50, y: 100 });
+        }
       }
+    }, [isSnipActive]);
+
+    // 8. Snip Diagram Mouse Handlers
+    const handleSnipMouseDown = (e: React.MouseEvent, pageNum: number) => {
+      if (!isSnipActive) return;
+      const pageEl = document.getElementById(`pdf-page-container-${pageNum}`);
+      if (!pageEl) return;
+
+      const rect = pageEl.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      setActiveSnipPage(pageNum);
+      setSnipStart({ x, y });
+      setSnipCurrent({ x, y });
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [scrollOrientation, totalPages]);
+    const handleSnipMouseMove = (e: React.MouseEvent, pageNum: number) => {
+      if (!isSnipActive || !snipStart || activeSnipPage !== pageNum) return;
+      const pageEl = document.getElementById(`pdf-page-container-${pageNum}`);
+      if (!pageEl) return;
 
-  // =========================================================================
-  // VIEW RENDER
-  // =========================================================================
+      const rect = pageEl.getBoundingClientRect();
+      const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+      const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
 
-  if (loading) {
-    return (
-      <div className="flex h-full w-full flex-col items-center justify-center p-6 bg-transparent">
-        <div className="study-floating-panel flex max-w-sm flex-col items-center justify-center gap-3 rounded-[22px] p-8 text-center">
-          <div className="flex size-14 items-center justify-center rounded-2xl border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip animate-pulse">
-            <FileText className="size-7" />
+      setSnipCurrent({ x, y });
+    };
+
+    const handleSnipMouseUp = () => {
+      if (!isSnipActive || !snipStart || !snipCurrent) {
+        setSnipStart(null);
+        setSnipCurrent(null);
+        return;
+      }
+
+      const canvas = canvasMap.current.get(activeSnipPage);
+      if (!canvas) {
+        setSnipStart(null);
+        setSnipCurrent(null);
+        return;
+      }
+
+      const x1 = Math.min(snipStart.x, snipCurrent.x);
+      const y1 = Math.min(snipStart.y, snipCurrent.y);
+      const x2 = Math.max(snipStart.x, snipCurrent.x);
+      const y2 = Math.max(snipStart.y, snipCurrent.y);
+
+      const width = x2 - x1;
+      const height = y2 - y1;
+
+      if (width > 20 && height > 20) {
+        const pageEl = document.getElementById(`pdf-page-container-${activeSnipPage}`);
+        if (pageEl) {
+          const displayedWidth = pageEl.clientWidth;
+          const displayedHeight = pageEl.clientHeight;
+          const scaleX = canvas.width / displayedWidth;
+          const scaleY = canvas.height / displayedHeight;
+
+          const dataUrl = downscaleCanvasToJpeg(
+            canvas,
+            x1 * scaleX,
+            y1 * scaleY,
+            width * scaleX,
+            height * scaleY
+          );
+
+          if (dataUrl) {
+            setConfirmedSnip({
+              pageNum: activeSnipPage,
+              x: x1,
+              y: y1,
+              width,
+              height,
+              dataUrl,
+            });
+            callbacksRef.current.onSnipDiagram?.(dataUrl, activeSnipPage);
+          }
+        }
+      }
+
+      setSnipStart(null);
+      setSnipCurrent(null);
+      setIsSnipActive(false);
+    };
+
+    const handleSnipAction = (action: "morph" | "chat" | "qbank") => {
+      if (!confirmedSnip) return;
+      callbacksRef.current.onSnipDiagram?.(confirmedSnip.dataUrl, confirmedSnip.pageNum, action);
+    };
+
+    const clearConfirmedSnip = () => {
+      setConfirmedSnip(null);
+    };
+
+    const renderSnipOverlay = (pageNum: number) => {
+      const isActivelyDragging =
+        isSnipActive && snipStart && snipCurrent && activeSnipPage === pageNum;
+      const hasConfirmedSnipOnThisPage =
+        confirmedSnip && confirmedSnip.pageNum === pageNum;
+
+      return (
+        <>
+          {isActivelyDragging && (
+            <div
+              className="pointer-events-none absolute z-40 rounded border-2 border-dashed border-amber-400 bg-amber-400/25 shadow-xl"
+              style={{
+                left: Math.min(snipStart.x, snipCurrent.x),
+                top: Math.min(snipStart.y, snipCurrent.y),
+                width: Math.abs(snipCurrent.x - snipStart.x),
+                height: Math.abs(snipCurrent.y - snipStart.y),
+              }}
+            >
+              <span className="absolute -top-6 left-0 rounded bg-[color:var(--ink)] px-2 py-0.5 text-[9.5px] font-bold text-[color:var(--orange)] shadow">
+                Select Area ({Math.round(Math.abs(snipCurrent.x - snipStart.x))}×
+                {Math.round(Math.abs(snipCurrent.y - snipStart.y))}px)
+              </span>
+            </div>
+          )}
+
+          {hasConfirmedSnipOnThisPage && confirmedSnip && (
+            <div
+              className="absolute z-40 rounded border-2 border-amber-500 bg-amber-500/15 shadow-xl ring-2 ring-amber-400/50"
+              style={{
+                left: confirmedSnip.x,
+                top: confirmedSnip.y,
+                width: confirmedSnip.width,
+                height: confirmedSnip.height,
+              }}
+            >
+              <div className="absolute -top-6 left-0 flex items-center gap-1.5 rounded-full bg-[color:var(--ink)] px-2.5 py-0.5 text-[10px] font-bold text-[color:var(--orange)] shadow-md">
+                <Check className="size-3 text-emerald-400" />
+                <span>Diagram Selected</span>
+              </div>
+
+              <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-[var(--study-surface-solid)] p-1 rounded-full border border-[var(--study-border-strong)] shadow-[var(--study-shadow-lg)] backdrop-blur-md z-50">
+                <button
+                  type="button"
+                  onClick={() => handleSnipAction("morph")}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-[color:var(--orange)] text-[color:var(--ink)] hover:opacity-90 cursor-pointer shadow-xs"
+                  title="Morph this diagram into interactive causal flow and simulator"
+                >
+                  <Sparkles className="size-3" />
+                  <span>Morph</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSnipAction("chat")}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-[var(--study-surface-muted)] text-[var(--study-text)] hover:bg-[var(--study-glass-hover)] cursor-pointer"
+                  title="Ask AI mentor about this specific diagram"
+                >
+                  <MessageSquare className="size-3" />
+                  <span>Ask AI</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSnipAction("qbank")}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-[var(--study-surface-muted)] text-[var(--study-text)] hover:bg-[var(--study-glass-hover)] cursor-pointer"
+                  title="Generate clinical practice vignette from this diagram"
+                >
+                  <HelpCircle className="size-3" />
+                  <span>QBank</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={clearConfirmedSnip}
+                  className="p-1 rounded-full text-[var(--study-text-muted)] hover:text-rose-500 hover:bg-[var(--study-glass-hover)] cursor-pointer ml-1"
+                  title="Clear selected area"
+                >
+                  <Trash2 className="size-3" />
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      );
+    };
+
+    // Keyboard arrow navigation for horizontal reading
+    useEffect(() => {
+      if (scrollOrientation !== "horizontal") return;
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (
+          e.target instanceof HTMLInputElement ||
+          e.target instanceof HTMLTextAreaElement ||
+          (e.target as HTMLElement)?.getAttribute?.("contenteditable") === "true" ||
+          e.ctrlKey ||
+          e.metaKey ||
+          e.altKey
+        ) {
+          return;
+        }
+
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          handleJumpToPage(activeVisiblePageRef.current - 1);
+        } else if (e.key === "ArrowRight") {
+          e.preventDefault();
+          handleJumpToPage(activeVisiblePageRef.current + 1);
+        }
+      };
+
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [scrollOrientation, handleJumpToPage]);
+
+    // Cleanup RAF and timers on unmount
+    useEffect(() => {
+      return () => {
+        if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current);
+        scrollCleanupRef.current?.();
+        scrollCleanupRef.current = null;
+        if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+        if (pageNotifyTimerRef.current) clearTimeout(pageNotifyTimerRef.current);
+      };
+    }, []);
+
+    const submitPageJumpInput = () => {
+      if (didSubmitPageInputRef.current) return;
+      didSubmitPageInputRef.current = true;
+      const p = parseInt(pageInputValue, 10);
+      if (!isNaN(p) && p >= 1 && p <= totalPages) {
+        handleJumpToPage(p);
+      }
+      setIsEditingPage(false);
+    };
+
+    if (loading) {
+      return (
+        <div className="flex h-full w-full flex-col items-center justify-center p-6 bg-transparent">
+          <div className="study-floating-panel flex max-w-sm flex-col items-center justify-center gap-3 rounded-[22px] p-8 text-center">
+            <div className="flex size-14 items-center justify-center rounded-2xl border-2 border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] shadow-chip animate-pulse">
+              <FileText className="size-7" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <h4 className="display text-base text-[var(--study-text)]">
+                Loading Study Source PDF
+              </h4>
+              <p className="text-xs text-[var(--study-text-muted)]">
+                Synchronizing document engine and preparing interactive canvas...
+              </p>
+            </div>
+            <div className="flex items-center gap-2 pt-2 text-xs font-semibold text-[color:var(--orange)]">
+              <Loader2 className="size-4 animate-spin" />
+              <span>Synchronizing pages</span>
+            </div>
           </div>
-          <div className="flex flex-col gap-1">
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="flex h-full w-full flex-col items-center justify-center p-6 bg-transparent">
+          <div className="study-floating-panel flex max-w-md flex-col items-center justify-center gap-3 rounded-[22px] p-6 text-center">
+            <div className="flex size-12 items-center justify-center rounded-full bg-red-500/10 text-red-500 border border-red-500/30">
+              <AlertCircle className="size-6" />
+            </div>
             <h4 className="display text-base text-[var(--study-text)]">
-              Loading Study Source PDF
+              Document Preview Unavailable
             </h4>
-            <p className="text-xs text-[var(--study-text-muted)]">
-              Synchronizing document engine and preparing interactive canvas...
+            <p className="max-w-md text-xs leading-relaxed text-[var(--study-text-muted)]">
+              {error}
             </p>
           </div>
-          <div className="flex items-center gap-2 pt-2 text-xs font-semibold text-[color:var(--orange)]">
-            <Loader2 className="size-4 animate-spin" />
-            <span>Synchronizing pages</span>
-          </div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  if (error) {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center p-6 bg-transparent">
-        <div className="study-floating-panel flex max-w-md flex-col items-center justify-center gap-3 rounded-[22px] p-6 text-center">
-          <div className="flex size-12 items-center justify-center rounded-full bg-red-500/10 text-red-500 border border-red-500/30">
-            <AlertCircle className="size-6" />
-          </div>
-          <h4 className="display text-base text-[var(--study-text)]">
-            Document Preview Unavailable
-          </h4>
-          <p className="max-w-md text-xs leading-relaxed text-[var(--study-text-muted)]">
-            {error}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={cn("relative flex h-full flex-col overflow-hidden bg-transparent", className)}>
-      {/* ================================================================= */}
-      {/* FLOATING TOOLBAR PILL: PAGE SYNC, FIT, ZOOM & SNIP TOOL           */}
-      {/* ================================================================= */}
-      <div className="shrink-0 z-30 flex justify-center px-2 sm:px-3 pt-2 pb-1.5 pointer-events-none">
-        <div className="pointer-events-auto flex h-10 max-w-full items-center justify-between rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] backdrop-blur-xl px-2.5 sm:px-3.5 text-xs text-[var(--study-text)] shadow-[var(--study-shadow)] gap-1.5 sm:gap-2.5 overflow-x-auto no-scrollbar flex-nowrap">
-          {/* Page Jumper */}
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => handleJumpToPage(activeVisiblePage - 1)}
-              disabled={activeVisiblePage <= 1}
-              className="flex size-6 cursor-pointer items-center justify-center rounded-full border border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text)] transition-colors hover:bg-[var(--study-glass-hover)] disabled:opacity-30"
-              title="Previous Page"
-            >
-              <ChevronLeft className="size-3.5" />
-            </button>
-
-            {isEditingPage ? (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const p = parseInt(pageInputValue, 10);
-                  if (!isNaN(p) && p >= 1 && p <= totalPages) {
-                    handleJumpToPage(p);
-                  }
-                  setIsEditingPage(false);
-                }}
-                className="flex items-center gap-1 font-mono text-[11px]"
+      <div
+        data-theme={theme}
+        className={cn("relative flex h-full flex-col overflow-hidden bg-transparent", className)}
+      >
+        {/* FLOATING TOOLBAR PILL */}
+        <div className="shrink-0 z-30 flex justify-center px-2 sm:px-3 pt-2 pb-1.5 pointer-events-none">
+          <div className="pointer-events-auto flex h-10 max-w-full items-center justify-between rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] backdrop-blur-xl px-2.5 sm:px-3.5 text-xs text-[var(--study-text)] shadow-[var(--study-shadow)] gap-1.5 sm:gap-2.5 overflow-x-auto no-scrollbar flex-nowrap">
+            {/* Page Jumper */}
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => handleJumpToPage(activeVisiblePage - 1)}
+                disabled={activeVisiblePage <= 1}
+                className="flex size-6 cursor-pointer items-center justify-center rounded-full border border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text)] transition-colors hover:bg-[var(--study-glass-hover)] disabled:opacity-30"
+                title="Previous Page"
               >
-                <input
-                  ref={pageInputRef}
-                  autoFocus
-                  type="number"
-                  min={1}
-                  max={totalPages}
-                  value={pageInputValue}
-                  onChange={(e) => setPageInputValue(e.target.value)}
-                  onBlur={() => {
-                    const p = parseInt(pageInputValue, 10);
-                    if (!isNaN(p) && p >= 1 && p <= totalPages) {
-                      handleJumpToPage(p);
-                    }
-                    setIsEditingPage(false);
+                <ChevronLeft className="size-3.5" />
+              </button>
+
+              {isEditingPage ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submitPageJumpInput();
                   }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") {
-                      setIsEditingPage(false);
-                    }
+                  className="flex items-center gap-1 font-mono text-[11px]"
+                >
+                  <input
+                    ref={pageInputRef}
+                    autoFocus
+                    type="number"
+                    min={1}
+                    max={totalPages}
+                    value={pageInputValue}
+                    onChange={(e) => setPageInputValue(e.target.value)}
+                    onBlur={submitPageJumpInput}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        didSubmitPageInputRef.current = true;
+                        setIsEditingPage(false);
+                      }
+                    }}
+                    className="w-12 rounded-md border border-[color:var(--orange)] bg-[var(--study-surface-solid)] px-1 py-0.5 text-center font-bold text-[color:var(--orange)] outline-none shadow-inner"
+                  />
+                  <span className="opacity-40">/</span>
+                  <span className="opacity-70">{totalPages}</span>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    didSubmitPageInputRef.current = false;
+                    setPageInputValue(String(activeVisiblePage));
+                    setIsEditingPage(true);
                   }}
-                  className="w-12 rounded-md border border-[color:var(--orange)] bg-[var(--study-surface-solid)] px-1 py-0.5 text-center font-bold text-[color:var(--orange)] outline-none shadow-inner"
-                />
-                <span className="opacity-40">/</span>
-                <span className="opacity-70">{totalPages}</span>
-              </form>
-            ) : (
+                  className="group flex cursor-pointer items-center gap-1 rounded-full px-1.5 py-0.5 font-mono text-[11px] transition-colors hover:bg-[var(--study-glass-hover)] hover:ring-1 hover:ring-[color:var(--orange)]/50"
+                  title="Click to jump to a page number"
+                >
+                  <span className="font-bold text-[color:var(--orange)] underline decoration-dotted underline-offset-2 group-hover:decoration-solid">
+                    {activeVisiblePage}
+                  </span>
+                  <span className="opacity-40">/</span>
+                  <span className="opacity-70">{totalPages}</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => handleJumpToPage(activeVisiblePage + 1)}
+                disabled={activeVisiblePage >= totalPages}
+                className="flex size-6 cursor-pointer items-center justify-center rounded-full border border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text)] transition-colors hover:bg-[var(--study-glass-hover)] disabled:opacity-30"
+                title="Next Page"
+              >
+                <ChevronRight className="size-3.5" />
+              </button>
+            </div>
+
+            {/* Fit & Zoom */}
+            <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-0.5 text-[10px]">
+                <button
+                  type="button"
+                  onClick={handleTriggerFitWidth}
+                  className={cn(
+                    "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 font-bold transition-all whitespace-nowrap",
+                    activeFitMode === "fit-width"
+                      ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs"
+                      : "text-[var(--study-text-muted)] hover:text-[var(--study-text)]"
+                  )}
+                  title="Fit to Screen Width (No Horizontal Overflow)"
+                >
+                  <span className="sm:hidden">Width</span>
+                  <span className="hidden sm:inline">Fit Width</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTriggerFitPage}
+                  className={cn(
+                    "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 font-bold transition-all whitespace-nowrap",
+                    activeFitMode === "fit-page"
+                      ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs"
+                      : "text-[var(--study-text-muted)] hover:text-[var(--study-text)]"
+                  )}
+                  title="Fit Full Page to Screen"
+                >
+                  <span className="sm:hidden">Page</span>
+                  <span className="hidden sm:inline">Fit Page</span>
+                </button>
+              </div>
+
+              <div className="flex items-center rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-0.5 text-[10px]">
+                <button
+                  type="button"
+                  onClick={handleTriggerZoomOut}
+                  className="flex size-5 cursor-pointer items-center justify-center rounded-full text-[var(--study-text-muted)] hover:bg-[var(--study-glass-hover)] hover:text-[var(--study-text)]"
+                  title="Zoom Out"
+                >
+                  <ZoomOut className="size-2.5 sm:size-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTriggerZoomReset}
+                  className="px-1 text-[9.5px] sm:text-[10px] font-mono font-bold text-[var(--study-text)] hover:text-[color:var(--orange)] cursor-pointer"
+                  title="Click to reset zoom"
+                >
+                  {activeFitMode === "normal" ? `${activeZoomLevel}%` : "Auto"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTriggerZoomIn}
+                  className="flex size-5 cursor-pointer items-center justify-center rounded-full text-[var(--study-text-muted)] hover:bg-[var(--study-glass-hover)] hover:text-[var(--study-text)]"
+                  title="Zoom In"
+                >
+                  <ZoomIn className="size-2.5 sm:size-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Orientation & Snip */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleToggleScrollOrientation}
+                className={cn(
+                  "flex cursor-pointer items-center gap-1 rounded-full border px-2 py-1 text-[10.5px] font-bold transition-all shadow-xs",
+                  scrollOrientation === "horizontal"
+                    ? "border-[var(--study-teal-border)] bg-[var(--study-teal-bg)] text-[var(--study-teal-text)]"
+                    : "border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text-soft)] hover:border-[var(--study-border-strong)] hover:bg-[var(--study-glass-hover)]"
+                )}
+                title={`Switch to ${
+                  scrollOrientation === "vertical" ? "Horizontal" : "Vertical"
+                } page scroll`}
+              >
+                {scrollOrientation === "horizontal" ? (
+                  <>
+                    <ArrowLeftRight className="size-3 text-[var(--study-teal-text)]" />
+                    <span className="hidden sm:inline">Horizontal</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowDownUp className="size-3 text-[var(--study-text-muted)]" />
+                    <span className="hidden sm:inline">Vertical</span>
+                  </>
+                )}
+              </button>
+
+              {confirmedSnip && (
+                <button
+                  type="button"
+                  onClick={clearConfirmedSnip}
+                  className="inline-flex items-center gap-1 rounded-full border border-[var(--study-amber-border)] bg-[var(--study-amber-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--study-amber-text)] hover:brightness-105 cursor-pointer"
+                >
+                  <Check className="size-2.5" />
+                  <span>Diagram Selected</span>
+                  <X className="size-2.5 ml-0.5 opacity-70" />
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
-                  setPageInputValue(String(activeVisiblePage));
-                  setIsEditingPage(true);
+                  setIsSnipActive((prev) => !prev);
+                  setSnipStart(null);
+                  setSnipCurrent(null);
                 }}
-                className="group flex cursor-pointer items-center gap-1 rounded-full px-1.5 py-0.5 font-mono text-[11px] transition-colors hover:bg-[var(--study-glass-hover)] hover:ring-1 hover:ring-[color:var(--orange)]/50"
-                title="Click to jump to a page number"
-              >
-                <span className="font-bold text-[color:var(--orange)] underline decoration-dotted underline-offset-2 group-hover:decoration-solid">
-                  {activeVisiblePage}
-                </span>
-                <span className="opacity-40">/</span>
-                <span className="opacity-70">{totalPages}</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => handleJumpToPage(activeVisiblePage + 1)}
-              disabled={activeVisiblePage >= totalPages}
-              className="flex size-6 cursor-pointer items-center justify-center rounded-full border border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text)] transition-colors hover:bg-[var(--study-glass-hover)] disabled:opacity-30"
-              title="Next Page"
-            >
-              <ChevronRight className="size-3.5" />
-            </button>
-          </div>
-
-          {/* View Mode & Fit Options (Mobile & Desktop Responsive) */}
-          <div className="flex items-center gap-1 shrink-0">
-            {/* Fit Width / Fit Page Controls */}
-            <div className="flex items-center rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-0.5 text-[10px]">
-              <button
-                type="button"
-                onClick={handleTriggerFitWidth}
                 className={cn(
-                  "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 font-bold transition-all whitespace-nowrap",
-                  activeFitMode === "fit-width"
-                    ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs"
-                    : "text-[var(--study-text-muted)] hover:text-[var(--study-text)]"
+                  "flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-[10.5px] font-bold transition-all shadow-xs",
+                  isSnipActive
+                    ? "border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] animate-pulse"
+                    : "border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text-soft)] hover:border-[color:var(--orange)] hover:bg-[var(--study-glass-hover)]"
                 )}
-                title="Fit to Screen Width (No Horizontal Overflow)"
+                title="Drag a box to capture an anatomical diagram, ECG, or chart for AI analysis"
               >
-                <span className="sm:hidden">Width</span>
-                <span className="hidden sm:inline">Fit Width</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleTriggerFitPage}
-                className={cn(
-                  "cursor-pointer rounded-full px-1.5 sm:px-2 py-0.5 font-bold transition-all whitespace-nowrap",
-                  activeFitMode === "fit-page"
-                    ? "bg-[color:var(--orange)] text-[color:var(--ink)] shadow-xs"
-                    : "text-[var(--study-text-muted)] hover:text-[var(--study-text)]"
-                )}
-                title="Fit Full Page to Screen"
-              >
-                <span className="sm:hidden">Page</span>
-                <span className="hidden sm:inline">Fit Page</span>
-              </button>
-            </div>
-
-            {/* Zoom In/Out Pill */}
-            <div className="flex items-center rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-0.5 text-[10px]">
-              <button
-                type="button"
-                onClick={handleTriggerZoomOut}
-                className="flex size-5 cursor-pointer items-center justify-center rounded-full text-[var(--study-text-muted)] hover:bg-[var(--study-glass-hover)] hover:text-[var(--study-text)]"
-                title="Zoom Out"
-              >
-                <ZoomOut className="size-2.5 sm:size-3" />
-              </button>
-              <button
-                type="button"
-                onClick={handleTriggerZoomReset}
-                className="px-1 text-[9.5px] sm:text-[10px] font-mono font-bold text-[var(--study-text)] hover:text-[color:var(--orange)] cursor-pointer"
-                title="Click to reset zoom"
-              >
-                {activeFitMode === "normal" ? `${activeZoomLevel}%` : "Auto"}
-              </button>
-              <button
-                type="button"
-                onClick={handleTriggerZoomIn}
-                className="flex size-5 cursor-pointer items-center justify-center rounded-full text-[var(--study-text-muted)] hover:bg-[var(--study-glass-hover)] hover:text-[var(--study-text)]"
-                title="Zoom In"
-              >
-                <ZoomIn className="size-2.5 sm:size-3" />
+                <Crop className="size-3" />
+                <span>{isSnipActive ? "Cancel Snip" : "Snip Diagram"}</span>
               </button>
             </div>
           </div>
+        </div>
 
-          {/* Tools: Scroll Orientation & Snip Diagram */}
-          <div className="flex items-center gap-1.5">
-            {/* Scroll Orientation Toggle: Vertical vs Horizontal */}
+        {/* SNIP ACTIVE BANNER */}
+        {isSnipActive && (
+          <div className="mx-auto mb-1 flex shrink-0 items-center justify-between gap-3 rounded-full border-[1.5px] border-[color:var(--orange)] bg-[var(--study-surface)] backdrop-blur-md px-3.5 py-1 text-[11px] text-[var(--study-text)] shadow-[var(--study-shadow)] z-30">
+            <span className="flex items-center gap-1.5 font-medium">
+              <Camera className="size-3 text-[color:var(--orange)]" />
+              <span>Click and drag a box over any diagram, equation, or figure on the page</span>
+            </span>
             <button
               type="button"
-              onClick={handleToggleScrollOrientation}
-              className={cn(
-                "flex cursor-pointer items-center gap-1 rounded-full border px-2 py-1 text-[10.5px] font-bold transition-all shadow-xs",
-                scrollOrientation === "horizontal"
-                  ? "border-[var(--study-teal-border)] bg-[var(--study-teal-bg)] text-[var(--study-teal-text)]"
-                  : "border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text-soft)] hover:border-[var(--study-border-strong)] hover:bg-[var(--study-glass-hover)]"
-              )}
-              title={`Switch to ${scrollOrientation === "vertical" ? "Horizontal" : "Vertical"
-                } page scroll`}
+              onClick={() => setIsSnipActive(false)}
+              className="rounded-full p-0.5 hover:bg-[var(--study-glass-hover)] cursor-pointer"
             >
-              {scrollOrientation === "horizontal" ? (
-                <>
-                  <ArrowLeftRight className="size-3 text-[var(--study-teal-text)]" />
-                  <span className="hidden sm:inline">Horizontal</span>
-                </>
-              ) : (
-                <>
-                  <ArrowDownUp className="size-3 text-[var(--study-text-muted)]" />
-                  <span className="hidden sm:inline">Vertical</span>
-                </>
-              )}
-            </button>
-
-            {confirmedSnip && (
-              <button
-                type="button"
-                onClick={clearConfirmedSnip}
-                className="inline-flex items-center gap-1 rounded-full border border-[var(--study-amber-border)] bg-[var(--study-amber-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--study-amber-text)] hover:brightness-105 cursor-pointer"
-              >
-                <Check className="size-2.5" />
-                <span>Diagram Selected</span>
-                <X className="size-2.5 ml-0.5 opacity-70" />
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => {
-                setIsSnipActive((prev) => !prev);
-                setSnipStart(null);
-                setSnipCurrent(null);
-              }}
-              className={cn(
-                "flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-[10.5px] font-bold transition-all shadow-xs",
-                isSnipActive
-                  ? "border-[color:var(--ink)] bg-[color:var(--orange)] text-[color:var(--ink)] animate-pulse"
-                  : "border-[var(--study-border)] bg-[var(--study-glass)] text-[var(--study-text-soft)] hover:border-[color:var(--orange)] hover:bg-[var(--study-glass-hover)]"
-              )}
-              title="Drag a box to capture an anatomical diagram, ECG, or chart for AI analysis"
-            >
-              <Crop className="size-3" />
-              <span>{isSnipActive ? "Cancel Snip" : "Snip Diagram"}</span>
+              <X className="size-3" />
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* SNIP ACTIVE BANNER */}
-      {isSnipActive && (
-        <div className="mx-auto mb-1 flex shrink-0 items-center justify-between gap-3 rounded-full border-[1.5px] border-[color:var(--orange)] bg-[var(--study-surface)] backdrop-blur-md px-3.5 py-1 text-[11px] text-[var(--study-text)] shadow-[var(--study-shadow)] z-30">
-          <span className="flex items-center gap-1.5 font-medium">
-            <Camera className="size-3 text-[color:var(--orange)]" />
-            <span>Click and drag a box over any diagram, equation, or figure on the page</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => setIsSnipActive(false)}
-            className="rounded-full p-0.5 hover:bg-[var(--study-glass-hover)] cursor-pointer"
-          >
-            <X className="size-3" />
-          </button>
-        </div>
-      )}
-
-      {/* ================================================================= */}
-      {/* SCROLL CONTAINER FOR PAGES (FLOATING DIRECTLY OVER DOTTED CANVAS) */}
-      {/* ================================================================= */}
-      <div
-        ref={containerRef}
-        onScroll={handleContainerScroll}
-        onMouseUp={handleSelectionCheck}
-        onTouchEnd={handleSelectionCheck}
-        className={cn(
-          "study-scrollbar relative flex-1 min-h-0 bg-transparent transition-colors select-text",
-          scrollOrientation === "horizontal"
-            ? "overflow-x-auto overflow-y-auto overscroll-contain p-2 sm:p-3 flex items-start snap-x snap-mandatory"
-            : "p-1.5 sm:p-3 overflow-y-auto overflow-x-auto overscroll-y-contain w-full max-w-full",
-          isSnipActive && "cursor-crosshair select-none"
         )}
-      >
+
+        {/* SCROLL CONTAINER FOR PAGES */}
         <div
+          ref={setContainerNode}
+          onScroll={handleContainerScroll}
+          onMouseUp={handleSelectionCheck}
+          onTouchEnd={handleSelectionCheck}
           className={cn(
-            "flex items-center",
+            "study-scrollbar relative flex-1 min-h-0 bg-transparent transition-colors select-text",
             scrollOrientation === "horizontal"
-              ? "flex-row flex-nowrap gap-6 sm:gap-8 min-h-full min-w-max px-3 sm:px-6 py-1.5 sm:py-2"
-              : "flex-col w-full"
+              ? "overflow-x-auto overflow-y-auto overscroll-contain p-2 sm:p-3 flex items-start snap-x snap-mandatory"
+              : "p-1.5 sm:p-3 overflow-y-auto overflow-x-auto overscroll-y-contain w-full max-w-full",
+            isSnipActive && "cursor-crosshair select-none"
           )}
         >
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-            <PdfPageItem
-              key={pageNum}
-              pageNum={pageNum}
-              pdfDoc={pdfDoc}
-              scale={computedScale}
-              fitMode={activeFitMode}
-              scrollOrientation={scrollOrientation}
-              defaultPageSize={docPageSize}
-              isActivePage={pageNum === activeVisiblePage}
-              isSnipActive={isSnipActive}
-              onSnipMouseDown={handleSnipMouseDown}
-              onSnipMouseMove={handleSnipMouseMove}
-              onSnipMouseUp={handleSnipMouseUp}
-              renderSnipOverlay={renderSnipOverlay}
-              onVisibleChange={handleVisibleChange}
-              onRegisterCanvas={handleRegisterCanvas}
-            />
-          ))}
+          <div
+            className={cn(
+              "flex items-center",
+              scrollOrientation === "horizontal"
+                ? "flex-row flex-nowrap gap-6 sm:gap-8 min-h-full min-w-max px-3 sm:px-6 py-1.5 sm:py-2"
+                : "flex-col w-full"
+            )}
+          >
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+              <PdfPageItem
+                key={pageNum}
+                pageNum={pageNum}
+                pdfDoc={pdfDoc}
+                scale={computedScale}
+                readyToRender={readyToRender}
+                fitMode={activeFitMode}
+                scrollOrientation={scrollOrientation}
+                scrollRoot={scrollContainerEl}
+                defaultPageSize={docPageSize}
+                isActivePage={pageNum === activeVisiblePage}
+                isNearActive={Math.abs(pageNum - activeVisiblePage) <= 2}
+                isFarFromActive={Math.abs(pageNum - activeVisiblePage) > 4}
+                isSnipActive={isSnipActive}
+                onSnipMouseDown={handleSnipMouseDown}
+                onSnipMouseMove={handleSnipMouseMove}
+                onSnipMouseUp={handleSnipMouseUp}
+                renderSnipOverlay={renderSnipOverlay}
+                onRegisterCanvas={handleRegisterCanvas}
+              />
+            ))}
+          </div>
         </div>
+
+        {/* HORIZONTAL PAGE NAVIGATION ARROWS */}
+        {scrollOrientation === "horizontal" && totalPages > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleJumpToPage(activeVisiblePage - 1);
+              }}
+              disabled={activeVisiblePage <= 1}
+              className={cn(
+                "group/arrow absolute left-3 top-1/2 -translate-y-1/2 z-30 flex size-11 items-center justify-center rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] backdrop-blur-xl text-[var(--study-text)] shadow-[var(--study-shadow-lg)] transition-all duration-200 cursor-pointer hover:scale-110 hover:bg-[color:var(--orange)] hover:text-[#0f0e10] active:scale-95 disabled:pointer-events-none disabled:opacity-0",
+                activeVisiblePage <= 1
+                  ? "opacity-0 pointer-events-none"
+                  : "opacity-95 hover:opacity-100"
+              )}
+              title={`Previous Page (${activeVisiblePage - 1})`}
+              aria-label="Previous Page"
+            >
+              <ChevronLeft className="size-6 stroke-[2.75] transition-transform group-hover/arrow:-translate-x-0.5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleJumpToPage(activeVisiblePage + 1);
+              }}
+              disabled={activeVisiblePage >= totalPages}
+              className={cn(
+                "group/arrow absolute right-3 top-1/2 -translate-y-1/2 z-30 flex size-11 items-center justify-center rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] backdrop-blur-xl text-[var(--study-text)] shadow-[var(--study-shadow-lg)] transition-all duration-200 cursor-pointer hover:scale-110 hover:bg-[color:var(--orange)] hover:text-[#0f0e10] active:scale-95 disabled:pointer-events-none disabled:opacity-0",
+                activeVisiblePage >= totalPages
+                  ? "opacity-0 pointer-events-none"
+                  : "opacity-95 hover:opacity-100"
+              )}
+              title={`Next Page (${activeVisiblePage + 1})`}
+              aria-label="Next Page"
+            >
+              <ChevronRight className="size-6 stroke-[2.75] transition-transform group-hover/arrow:translate-x-0.5" />
+            </button>
+          </>
+        )}
       </div>
+    );
+  }
+);
 
-      {/* HORIZONTAL PAGE NAVIGATION ARROWS (FLOATING OVER CANVAS) */}
-      {scrollOrientation === "horizontal" && totalPages > 1 && (
-        <>
-          {/* Previous Page (Left Arrow) */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleJumpToPage(activeVisiblePage - 1);
-            }}
-            disabled={activeVisiblePage <= 1}
-            className={cn(
-              "group/arrow absolute left-3 top-1/2 -translate-y-1/2 z-30 flex size-11 items-center justify-center rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] backdrop-blur-xl text-[var(--study-text)] shadow-[var(--study-shadow-lg)] transition-all duration-200 cursor-pointer hover:scale-110 hover:bg-[color:var(--orange)] hover:text-[#0f0e10] active:scale-95 disabled:pointer-events-none disabled:opacity-0",
-              activeVisiblePage <= 1 ? "opacity-0 pointer-events-none" : "opacity-95 hover:opacity-100"
-            )}
-            title={`Previous Page (${activeVisiblePage - 1})`}
-            aria-label="Previous Page"
-          >
-            <ChevronLeft className="size-6 stroke-[2.75] transition-transform group-hover/arrow:-translate-x-0.5" />
-          </button>
-
-          {/* Next Page (Right Arrow) */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleJumpToPage(activeVisiblePage + 1);
-            }}
-            disabled={activeVisiblePage >= totalPages}
-            className={cn(
-              "group/arrow absolute right-3 top-1/2 -translate-y-1/2 z-30 flex size-11 items-center justify-center rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] backdrop-blur-xl text-[var(--study-text)] shadow-[var(--study-shadow-lg)] transition-all duration-200 cursor-pointer hover:scale-110 hover:bg-[color:var(--orange)] hover:text-[#0f0e10] active:scale-95 disabled:pointer-events-none disabled:opacity-0",
-              activeVisiblePage >= totalPages ? "opacity-0 pointer-events-none" : "opacity-95 hover:opacity-100"
-            )}
-            title={`Next Page (${activeVisiblePage + 1})`}
-            aria-label="Next Page"
-          >
-            <ChevronRight className="size-6 stroke-[2.75] transition-transform group-hover/arrow:translate-x-0.5" />
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
+export default OriginalPdfViewer;

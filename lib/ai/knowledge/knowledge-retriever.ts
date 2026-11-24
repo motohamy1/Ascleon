@@ -13,6 +13,12 @@ import { connectToDatabase } from "@/database/mongoose";
 import KnowledgeNode from "@/database/models/knowledge-node.model";
 
 import { GoogleGenAI } from "@google/genai";
+import {
+  clearModelCooldown,
+  FAST_GEMINI_MODEL_CHAIN,
+  markModelCooldownFromError,
+  orderModelsByHealth,
+} from "@/lib/ai/model-cooldown";
 
 // In-memory cache for dynamic DB knowledge nodes and LLM-resolved canonical references
 const knowledgeNodeCache = new Map<string, any[]>();
@@ -76,18 +82,47 @@ STRICT RULES:
   }
 ]`;
 
-    const genPromise = ai.models.generateContent({
-      model: "gemini-3.5-flash-lite",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { responseMimeType: "application/json", temperature: 0.1 },
-    });
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Dynamic ref timeout")), 2500)
-    );
-    const resp: any = await Promise.race([genPromise, timeoutPromise]);
-    const raw = resp?.text?.trim();
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
+    const candidateModels = orderModelsByHealth(FAST_GEMINI_MODEL_CHAIN);
+    let parsed: any = null;
+    for (const candidateModel of candidateModels) {
+      const abortCtrl = new AbortController();
+      const timer = setTimeout(() => abortCtrl.abort(), 2500);
+      try {
+        const resp: any = await Promise.race([
+          ai.models.generateContent({
+            model: candidateModel,
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            config: {
+              responseMimeType: "application/json",
+              temperature: 0.1,
+              abortSignal: abortCtrl.signal,
+            },
+          }),
+          new Promise<never>((_, reject) =>
+            abortCtrl.signal.addEventListener("abort", () =>
+              reject(new Error(`Dynamic ref ${candidateModel} timeout`))
+            )
+          ),
+        ]);
+        const raw = (resp?.text || "")
+          .trim()
+          .replace(/^```(?:json)?\s*/i, "")
+          .replace(/\s*```$/i, "")
+          .trim();
+        if (raw) {
+          const candidateParsed = JSON.parse(raw);
+          if (Array.isArray(candidateParsed)) {
+            parsed = candidateParsed;
+            clearModelCooldown(`gemini:${candidateModel}`);
+            break;
+          }
+        }
+      } catch (err) {
+        markModelCooldownFromError(`gemini:${candidateModel}`, err);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
     if (!Array.isArray(parsed)) return [];
 
     const refs: ReferenceResource[] = parsed

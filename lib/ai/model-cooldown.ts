@@ -17,6 +17,13 @@ export const GEMINI_MODEL_CHAIN = [
   ...FALLBACK_GEMINI_MODELS,
 ] as const;
 
+export const FAST_GEMINI_MODEL_CHAIN = [
+  "gemini-3.6-flash",
+  "gemini-3.8-flash",
+  "gemini-3.5-flash",
+  "gemini-4-hydrogen",
+] as const;
+
 const TRANSIENT_COOLDOWN_MS = 180_000; // 3 min
 const DAILY_QUOTA_COOLDOWN_MS = 1_800_000; // 30 min
 

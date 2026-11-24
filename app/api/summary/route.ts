@@ -10,6 +10,8 @@ import {
 
 export const maxDuration = 60;
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
+import { retrieveFromBookRAG } from "@/lib/ai/rag/book-rag-retriever";
+import { isPlaceholderPageText } from "@/lib/ai/rag/chunker";
 import {
   calculateDynamicCreditCost,
   getScopePageSpan,
@@ -37,26 +39,62 @@ export async function POST(req: NextRequest) {
       forceRefresh = false,
     } = body;
 
-    let focalText = (selectedText || pageText || "").trim();
+    const rawLiveText = (selectedText || pageText || "").trim();
+    const hasRealLiveText = Boolean(rawLiveText) && !isPlaceholderPageText(rawLiveText);
+    let focalText = rawLiveText;
     let scopeLabel = `Page ${pageNumber}`;
 
-    if (bookId && studyScope && (studyScope.type === "range" || studyScope.type === "topic")) {
+    const isMultiPageScope =
+      Boolean(studyScope && (studyScope.type === "range" || studyScope.type === "topic"));
+
+    if (bookId && isMultiPageScope) {
       try {
-        const rangeRes = await getBookSegmentsByRange(
+        const ragRes = await retrieveFromBookRAG({
           bookId,
-          studyScope.startPage,
-          studyScope.endPage
-        );
-        if (rangeRes.success && rangeRes.data && rangeRes.data.length > 0) {
-          focalText = rangeRes.data
-            .map((s) => `[Page ${s.pageNumber}]\n${s.content}`)
-            .join("\n\n");
+          query: studyScope?.topicTitle || "executive summary",
+          scope: studyScope,
+          activePage: pageNumber,
+          livePageText: rawLiveText,
+          topK: 6,
+        });
+        if (ragRes.combinedContext) {
+          focalText = ragRes.combinedContext;
           scopeLabel = studyScope.type === "topic" && studyScope.topicTitle
             ? `Topic "${studyScope.topicTitle}" (Pages ${studyScope.startPage}–${studyScope.endPage})`
             : `Pages ${studyScope.startPage}–${studyScope.endPage}`;
+        } else {
+          const rangeRes = await getBookSegmentsByRange(
+            bookId,
+            studyScope.startPage,
+            studyScope.endPage
+          );
+          if (rangeRes.success && rangeRes.data && rangeRes.data.length > 0) {
+            focalText = rangeRes.data
+              .map((s) => `[Page ${s.pageNumber}]\n${s.content}`)
+              .join("\n\n");
+            scopeLabel = studyScope.type === "topic" && studyScope.topicTitle
+              ? `Topic "${studyScope.topicTitle}" (Pages ${studyScope.startPage}–${studyScope.endPage})`
+              : `Pages ${studyScope.startPage}–${studyScope.endPage}`;
+          }
         }
       } catch (err) {
         console.warn("Could not fetch segments by range for Summary:", err);
+      }
+    } else if (bookId && !hasRealLiveText) {
+      try {
+        const ragRes = await retrieveFromBookRAG({
+          bookId,
+          query: "executive summary",
+          scope: studyScope,
+          activePage: pageNumber,
+          livePageText: rawLiveText,
+          topK: 2,
+        });
+        if (ragRes.combinedContext) {
+          focalText = ragRes.combinedContext;
+        }
+      } catch (err) {
+        console.warn("Could not retrieve RAG page fallback for Summary:", err);
       }
     }
 
