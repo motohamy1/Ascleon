@@ -23,13 +23,31 @@ export interface LessonAudioEngineState {
   pause: () => void;
 }
 
+function computeWordDurationMs(cues?: LessonVoiceSectionTrack["cues"]): number {
+  if (!cues || cues.length === 0) return 0;
+  const words = cues
+    .map((c) => c.text || "")
+    .join(" ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+  return words > 0 ? Math.max(3000, Math.round((words / 2.3) * 1000)) : 0;
+}
+
 function getSectionDurationMs(sec?: LessonVoiceSectionTrack): number {
   if (!sec) return 10_000;
-  if (sec.audioDurationMs && sec.audioDurationMs > 500) return sec.audioDurationMs;
+  const wordFallbackMs = computeWordDurationMs(sec.cues);
+  if (sec.audioDurationMs && sec.audioDurationMs > 1200) {
+    return sec.audioDurationMs;
+  }
   if (sec.cues && sec.cues.length > 0) {
     const last = sec.cues[sec.cues.length - 1];
-    if (last.endMs > 500) return last.endMs;
+    if (last.endMs > 1200) {
+      return Math.max(last.endMs, wordFallbackMs);
+    }
   }
+  if (wordFallbackMs > 0) return wordFallbackMs;
+  if (sec.audioDurationMs && sec.audioDurationMs > 500) return sec.audioDurationMs;
   return 10_000;
 }
 
@@ -166,8 +184,15 @@ export function useLessonAudioEngine({
 
       stopCurrentSource();
 
-      // Path A: Decoded real WAV audio available
-      if (sec.status === "ready" && buf && ctx) {
+      // Path A: Decoded real WAV audio available and healthy
+      const expectedMs = getSectionDurationMs(sec);
+      const hasHealthyBuffer = Boolean(
+        sec.status === "ready" &&
+          buf &&
+          ctx &&
+          !(buf.duration < 0.6 && expectedMs >= 2500)
+      );
+      if (hasHealthyBuffer && buf && ctx) {
         const safeOffset = Math.max(0, Math.min(buf.duration - 0.05, startOffsetSec));
         const src = ctx.createBufferSource();
         src.buffer = buf;
@@ -212,47 +237,44 @@ export function useLessonAudioEngine({
         return true;
       }
 
-      // Path B: Resilient Virtual Clock when audio failed or is still generating
-      if (sec.status === "failed" || !url) {
-        activeIndexRef.current = index;
-        virtualElapsedMsRef.current = Math.round(startOffsetSec * 1000);
-        virtualLastTickMsRef.current = performance.now();
-        isVirtualClockRef.current = true;
-        isPlayingRef.current = true;
-        setActiveSectionIndex(index);
-        setSectionElapsedMs(virtualElapsedMsRef.current);
-        setIsVirtualClock(true);
-        setIsPlaying(true);
-        return true;
-      }
-
-      // Audio URL exists and is still decoding; wait briefly or fall back after timeout
-      isPlayingRef.current = false;
-      setIsPlaying(false);
-      return false;
+      // Path B: Resilient Virtual Reading Clock when audio is pending, decoding, failed, or too short
+      activeIndexRef.current = index;
+      virtualElapsedMsRef.current = Math.round(startOffsetSec * 1000);
+      virtualLastTickMsRef.current = performance.now();
+      isVirtualClockRef.current = true;
+      isPlayingRef.current = true;
+      setActiveSectionIndex(index);
+      setSectionElapsedMs(virtualElapsedMsRef.current);
+      setIsVirtualClock(true);
+      setIsPlaying(true);
+      return true;
     },
     [ensureContext, stopCurrentSource]
   );
 
-  // Auto-start active section when its decoded AudioBuffer arrives (or switch from virtual clock)
+  // Auto-start active section when its decoded AudioBuffer arrives (or upgrade from virtual clock)
   useEffect(() => {
     if (!wantAutoPlay || isOverview) return;
     const sec = sections[activeSectionIndex];
-    const url = sec?.audioUrl;
+    if (!sec) return;
+    const url = sec.audioUrl;
+    const buf = url ? buffersRef.current.get(url) : undefined;
+    const expectedMs = getSectionDurationMs(sec);
+    const hasHealthyBuffer = Boolean(
+      sec.status === "ready" &&
+        url &&
+        buf &&
+        !(buf.duration < 0.6 && expectedMs >= 2500)
+    );
     if (
-      sec?.status === "ready" &&
-      url &&
-      buffersRef.current.has(url) &&
+      hasHealthyBuffer &&
       (!isPlayingRef.current || isVirtualClockRef.current)
     ) {
       const resumeSec = isVirtualClockRef.current
         ? virtualElapsedMsRef.current / 1000
         : offsetAtStartSecRef.current;
       startSectionPlayback(activeSectionIndex, resumeSec);
-    } else if (
-      sec?.status === "failed" &&
-      !isPlayingRef.current
-    ) {
+    } else if (!isPlayingRef.current) {
       startSectionPlayback(activeSectionIndex, offsetAtStartSecRef.current);
     }
   }, [

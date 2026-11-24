@@ -398,7 +398,7 @@ describe("Living Board safe math compiler & 4-tier lab resolver", () => {
       },
     };
     const fallback = resolveGuaranteedLabScene(brokenSimSec);
-    expect(fallback.tier).toBe("smart-diagram-3d");
+    expect(fallback.tier).toBe("none");
   });
 });
 

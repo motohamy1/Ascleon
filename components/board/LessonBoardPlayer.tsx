@@ -19,6 +19,7 @@ import {
   Pause,
   PenTool,
   Play,
+  Printer,
   Redo2,
   RefreshCw,
   RotateCcw,
@@ -213,6 +214,7 @@ export function LessonBoardPlayer({
     if (!activeSection) return null;
     return resolveGuaranteedLabScene(activeSection, lesson.title);
   }, [activeSection, lesson.title]);
+  const has3DScene = Boolean(activeLabScene && activeLabScene.tier !== "none");
 
   const activeChallenge = useMemo(() => {
     if (!activeSection) return null;
@@ -284,6 +286,10 @@ export function LessonBoardPlayer({
       const contextText = activeSection.nodes
         .map((n) => `${n.text}${n.detail ? ` (${n.detail})` : ""}: "${n.source.quote}"`)
         .join("\n");
+      const inkDataUrl =
+        inkHistory.count > 0
+          ? boardSurfaceRef.current?.exportToCanvas(1200)?.toDataURL("image/png") || undefined
+          : undefined;
       const res = await fetch("/api/reader-assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -292,7 +298,10 @@ export function LessonBoardPlayer({
           bookTitle: lesson.bookTitle,
           query: q,
           currentPageNumber: activeSection.nodes[0]?.source.page || 1,
-          currentSegmentContent: `Section "${activeSection.title}":\n${contextText}`,
+          currentSegmentContent: `Section "${activeSection.title}":\n${contextText}${
+            inkDataUrl ? "\n[Student drew an annotation sketch on the attached whiteboard image.]" : ""
+          }`,
+          selectedImage: inkDataUrl,
           language: lesson.language,
         }),
       });
@@ -389,6 +398,58 @@ export function LessonBoardPlayer({
     }
   };
 
+  const handlePrintStudySheet = () => {
+    const boardCanvas = boardSurfaceRef.current?.exportToCanvas(1600);
+    if (!boardCanvas) {
+      toast.error("Nothing on the board to print yet.");
+      return;
+    }
+    const esc = (s: string) =>
+      s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    const boardUrl = boardCanvas.toDataURL("image/png");
+    const win = window.open("", "_blank", "width=1024,height=768");
+    if (!win) {
+      window.print();
+      return;
+    }
+    const notesHtml = (activeSection?.nodes || [])
+      .map(
+        (n) =>
+          `<li><strong>${esc(n.text)}</strong>${
+            n.detail ? ` — ${esc(n.detail)}` : ""
+          } <span style="color:#64748b;font-size:12px;">(p.${n.source.page})</span></li>`
+      )
+      .join("");
+    const scriptHtml = (activeSection?.script || [])
+      .map((s) => `<p>${esc(s.text)}</p>`)
+      .join("");
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${esc(
+      lesson.title
+    )} — ${esc(activeSection?.title || "")}</title><style>
+      body { font-family: system-ui, -apple-system, sans-serif; color: #18181b; margin: 28px; line-height: 1.5; }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      .meta { font-size: 12px; color: #52525b; margin-bottom: 16px; }
+      img { width: 100%; max-width: 960px; border: 2px solid #18181b; border-radius: 10px; display: block; margin-bottom: 18px; }
+      h2 { font-size: 15px; margin: 14px 0 6px; border-bottom: 1px solid #e4e4e7; padding-bottom: 4px; }
+      ul { margin: 6px 0 14px; padding-left: 20px; }
+      li { margin-bottom: 4px; font-size: 13px; }
+      p { margin: 6px 0; font-size: 13px; color: #27272a; }
+      @media print { body { margin: 12px; } }
+    </style></head><body>
+      <h1>${esc(lesson.title)} — ${esc(activeSection?.title || "")}</h1>
+      <div class="meta">${esc(lesson.bookTitle)} · Step ${engine.activeSectionIndex + 1} of ${lesson.sections.length}</div>
+      <img src="${boardUrl}" alt="Whiteboard study sheet" />
+      ${notesHtml ? `<h2>Key Concepts</h2><ul>${notesHtml}</ul>` : ""}
+      ${scriptHtml ? `<h2>Narration Summary</h2>${scriptHtml}` : ""}
+      <script>window.onload = function () { window.focus(); window.print(); };</script>
+    </body></html>`);
+    win.document.close();
+  };
+
   return (
     <div
       className={cn(
@@ -445,7 +506,7 @@ export function LessonBoardPlayer({
           )}
 
           {/* Stage Split Toggle */}
-          {mode !== "challenge" && !isOverview && (
+          {mode !== "challenge" && !isOverview && has3DScene && (
             <div className="flex items-center rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface-muted)] p-0.5">
               <button
                 type="button"
@@ -514,6 +575,15 @@ export function LessonBoardPlayer({
             className="cursor-pointer rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface-muted)] p-1 text-[var(--study-text)] hover:bg-[var(--study-glass-hover)]"
           >
             <Download className="size-3.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={handlePrintStudySheet}
+            title="Print / Save PDF Study Sheet"
+            className="cursor-pointer rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface-muted)] p-1 text-[var(--study-text)] hover:bg-[var(--study-glass-hover)]"
+          >
+            <Printer className="size-3.5" />
           </button>
 
           <button
@@ -716,6 +786,18 @@ export function LessonBoardPlayer({
             >
               <Trash2 className="size-3" />
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                engine.pause();
+                setShowAskBox(true);
+              }}
+              title="Ask AI about your sketch or step"
+              className="cursor-pointer flex items-center gap-1 rounded-full border border-[var(--study-panel-border)] bg-[color:var(--orange)] px-2 py-0.5 font-mono text-[10px] font-black text-[#0f0e10] transition-transform hover:brightness-105"
+            >
+              <MessageCircleQuestion className="size-3" />
+              <span>Ask Sketch</span>
+            </button>
           </div>
         </div>
       )}
@@ -749,7 +831,7 @@ export function LessonBoardPlayer({
               challenge={activeChallenge}
               sectionTitle={activeSection.title}
             />
-            {isCinema && activeLabScene && (
+            {isCinema && has3DScene && activeLabScene && (
               <LabScene3D
                 ref={lab3DRef}
                 scene={activeLabScene}
@@ -766,14 +848,14 @@ export function LessonBoardPlayer({
           <div
             className={cn(
               "grid size-full gap-2.5",
-              stageSplit === "split"
+              stageSplit === "split" && has3DScene
                 ? isCinema
                   ? "grid-cols-1 lg:grid-cols-[1.25fr_1fr]"
                   : "grid-cols-1 grid-rows-[1fr_1fr] xl:grid-cols-[1.2fr_1fr] xl:grid-rows-1"
                 : "grid-cols-1"
             )}
           >
-            {stageSplit !== "3d" && (
+            {(!has3DScene || stageSplit !== "3d") && (
               <div className="flex items-center justify-center min-h-0 min-w-0">
                 <HandwrittenBoardSurface
                   ref={boardSurfaceRef}
@@ -790,7 +872,7 @@ export function LessonBoardPlayer({
               </div>
             )}
 
-            {stageSplit !== "2d" && activeLabScene && activeSection && (
+            {has3DScene && stageSplit !== "2d" && activeLabScene && activeSection && (
               <div className="min-h-0 min-w-0">
                 <LabScene3D
                   ref={lab3DRef}

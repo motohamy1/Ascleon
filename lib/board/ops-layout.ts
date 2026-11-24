@@ -14,6 +14,7 @@ import {
   SketchPoint,
 } from "./prng-sketch";
 import { synthesizeOpsFromSection } from "./validate";
+import { compileMathExpr } from "./math-presets";
 
 export const BOARD = {
   w: 1000,
@@ -144,6 +145,14 @@ function estimateOpHeight(op: BoardOp): number {
       return 126;
     case "formula":
       return 84;
+    case "function_plot":
+      return 196;
+    case "data_chart":
+      return op.chartType === "pie"
+        ? 184
+        : Math.min(214, 64 + op.items.length * 26);
+    case "source_figure":
+      return Math.min(184, 92 + (op.callouts?.length || 0) * 22);
     case "pointer":
       return 0;
     default:
@@ -959,6 +968,363 @@ export function layoutBoardOps(params: {
         tex: op.tex,
         label: op.label,
         color: "#0F172A",
+      });
+      cursorY += h + Math.round(BOARD.gap * yScale);
+      continue;
+    }
+
+    if (op.t === "function_plot") {
+      seq++;
+      const h = Math.round(188 * yScale);
+      const wash = BOARD_FILL_HEX[op.wash || "sky"];
+      pushFill(innerX, cursorY, innerW, h, 14, wash, op.nodeId, 0.52);
+      pushStroke(
+        sketchRoundedRect(innerX, cursorY, innerW, h, 14, nextId("fnbox")),
+        "#18181B",
+        2.0,
+        op.nodeId
+      );
+      pushText({
+        x: innerX + 16,
+        y: cursorY + 8,
+        w: innerW - 260,
+        h: 24,
+        text: op.title || "Quantitative Plot",
+        fontSize: 17,
+        weight: 700,
+        color: "#18181B",
+        fontKind: "hand",
+        nodeId: op.nodeId,
+      });
+      pushText({
+        x: innerX + innerW - 245,
+        y: cursorY + 8,
+        w: 229,
+        h: 22,
+        text: `y = ${op.expr}`,
+        fontSize: 13,
+        weight: 600,
+        color: "#1E3A8A",
+        align: "right",
+        fontKind: "mono",
+        nodeId: op.nodeId,
+      });
+
+      const px = innerX + 68;
+      const py = cursorY + 38;
+      const pw = innerW - 108;
+      const ph = Math.max(78, h - 72);
+      const [xMin, xMax] =
+        op.xRange && op.xRange[0] < op.xRange[1] ? op.xRange : [0, 10];
+      let fn: ((v: Record<string, number>) => number) | null = null;
+      try {
+        fn = compileMathExpr(op.expr);
+      } catch {
+        fn = null;
+      }
+
+      const samples: Array<{ x: number; y: number }> = [];
+      if (fn) {
+        const steps = 44;
+        for (let i = 0; i <= steps; i++) {
+          const x = xMin + ((xMax - xMin) * i) / steps;
+          const y = fn({ x });
+          if (Number.isFinite(y) && Math.abs(y) < 1e6) {
+            samples.push({ x, y });
+          }
+        }
+      }
+
+      let yMin = op.yRange && op.yRange[0] < op.yRange[1] ? op.yRange[0] : -10;
+      let yMax = op.yRange && op.yRange[0] < op.yRange[1] ? op.yRange[1] : 10;
+      if (!op.yRange && samples.length > 0) {
+        let minS = Infinity;
+        let maxS = -Infinity;
+        for (const pt of samples) {
+          if (pt.y < minS) minS = pt.y;
+          if (pt.y > maxS) maxS = pt.y;
+        }
+        const pad = Math.max(0.5, (maxS - minS) * 0.14);
+        yMin = minS - pad;
+        yMax = maxS + pad;
+      }
+      if (yMax <= yMin) yMax = yMin + 1;
+
+      const mapX = (vx: number) =>
+        px + Math.max(0, Math.min(1, (vx - xMin) / (xMax - xMin))) * pw;
+      const mapY = (vy: number) =>
+        py + ph - Math.max(0, Math.min(1, (vy - yMin) / (yMax - yMin))) * ph;
+
+      const xAxisY = yMin <= 0 && yMax >= 0 ? mapY(0) : py + ph;
+      const yAxisX = xMin <= 0 && xMax >= 0 ? mapX(0) : px;
+      pushStroke(
+        sketchLine(px, xAxisY, px + pw, xAxisY, nextId("fnax"), 0.8),
+        "#64748B",
+        1.6,
+        op.nodeId
+      );
+      pushStroke(
+        sketchLine(yAxisX, py, yAxisX, py + ph, nextId("fnay"), 0.8),
+        "#64748B",
+        1.6,
+        op.nodeId
+      );
+
+      if (samples.length >= 2) {
+        const curvePts: SketchPoint[] = samples.map((pt) => ({
+          x: mapX(pt.x),
+          y: mapY(pt.y),
+          p: 1,
+        }));
+        pushStroke(curvePts, "#FF4C00", 2.8, op.nodeId);
+      }
+
+      if (fn && op.highlightPoints) {
+        for (const hp of op.highlightPoints.slice(0, 4)) {
+          const hyVal = fn({ x: hp.x });
+          if (!Number.isFinite(hyVal)) continue;
+          const hx = mapX(hp.x);
+          const hy = mapY(hyVal);
+          pushStroke(
+            sketchEllipse(hx, hy, 5.5, 5.5, nextId("fnhp")),
+            "#1D4ED8",
+            2.6,
+            op.nodeId
+          );
+          pushText({
+            x: Math.min(px + pw - 90, hx + 8),
+            y: Math.max(py, hy - 14),
+            w: 96,
+            h: 20,
+            text: hp.label,
+            fontSize: 12,
+            weight: 700,
+            color: "#1D4ED8",
+            fontKind: "body",
+            nodeId: op.nodeId,
+          });
+        }
+      }
+
+      pushText({
+        x: innerX + 10,
+        y: py,
+        w: 54,
+        h: 18,
+        text: Number.isInteger(yMax) ? String(yMax) : yMax.toFixed(1),
+        fontSize: 11,
+        weight: 600,
+        color: "#475569",
+        align: "right",
+        fontKind: "mono",
+      });
+      pushText({
+        x: innerX + 10,
+        y: py + ph - 16,
+        w: 54,
+        h: 18,
+        text: Number.isInteger(yMin) ? String(yMin) : yMin.toFixed(1),
+        fontSize: 11,
+        weight: 600,
+        color: "#475569",
+        align: "right",
+        fontKind: "mono",
+      });
+      pushText({
+        x: px,
+        y: py + ph + 4,
+        w: pw,
+        h: 20,
+        text: `${op.xLabel || "x"}: [${xMin} .. ${xMax}]${op.yLabel ? `  |  ${op.yLabel}` : ""}`,
+        fontSize: 12,
+        weight: 600,
+        color: "#475569",
+        align: "center",
+        fontKind: "body",
+      });
+      pushNodeBadge(op.nodeId, innerX, cursorY, innerW);
+      cursorY += h + Math.round(BOARD.gap * yScale);
+      continue;
+    }
+
+    if (op.t === "data_chart") {
+      seq++;
+      const items = op.items.slice(0, 6);
+      const isPie = op.chartType === "pie";
+      const h = Math.round((isPie ? 178 : Math.min(206, 58 + items.length * 26)) * yScale);
+      const wash = BOARD_FILL_HEX[op.wash || "sand"];
+      pushFill(innerX, cursorY, innerW, h, 14, wash, op.nodeId, 0.52);
+      pushStroke(
+        sketchRoundedRect(innerX, cursorY, innerW, h, 14, nextId("dcbox")),
+        "#18181B",
+        2.0,
+        op.nodeId
+      );
+      pushText({
+        x: innerX + 16,
+        y: cursorY + 8,
+        w: innerW - 96,
+        h: 24,
+        text: op.title || "Clinical Breakdown",
+        fontSize: 17,
+        weight: 700,
+        color: "#18181B",
+        fontKind: "hand",
+        nodeId: op.nodeId,
+      });
+
+      const palette = ["#2563EB", "#FF4C00", "#10B981", "#7C3AED", "#D97706", "#DC2626"];
+      const unitStr = op.unit ? op.unit : "";
+
+      if (isPie) {
+        const total = Math.max(
+          1e-6,
+          items.reduce((acc, it) => acc + Math.max(0, it.value), 0)
+        );
+        const cx = innerX + 126;
+        const cy = cursorY + 34 + (h - 42) / 2;
+        const radius = Math.max(30, Math.min(50, (h - 56) * 0.42));
+        let startAngle = -Math.PI / 2;
+        items.forEach((it, idx) => {
+          const sliceColor =
+            it.tone === "pathology" ? "#DC2626" : palette[idx % palette.length];
+          const sweep = (Math.max(0, it.value) / total) * Math.PI * 2;
+          if (sweep > 0.01) {
+            const steps = Math.max(6, Math.round(sweep * 10));
+            const arcPts: SketchPoint[] = [];
+            for (let s = 0; s <= steps; s++) {
+              const a = startAngle + (sweep * s) / steps;
+              arcPts.push({
+                x: cx + Math.cos(a) * radius,
+                y: cy + Math.sin(a) * radius,
+                p: 1,
+              });
+            }
+            pushStroke(arcPts, sliceColor, 18, op.nodeId, 0.88);
+          }
+          startAngle += sweep;
+
+          const ly = cursorY + 38 + idx * Math.min(24, Math.floor((h - 46) / Math.max(1, items.length)));
+          const pct = Math.round((Math.max(0, it.value) / total) * 100);
+          pushFill(innerX + 230, ly + 4, 12, 12, 3, sliceColor, op.nodeId, 0.95);
+          pushText({
+            x: innerX + 250,
+            y: ly,
+            w: innerW - 270,
+            h: 22,
+            text: `${it.label}: ${it.value}${unitStr} (${pct}%)`,
+            fontSize: 14,
+            weight: 600,
+            color: "#18181B",
+            fontKind: "body",
+            nodeId: op.nodeId,
+          });
+        });
+      } else {
+        const maxVal = Math.max(1e-6, ...items.map((it) => it.value));
+        const rowH = Math.min(26, Math.floor((h - 42) / Math.max(1, items.length)));
+        const barX = innerX + 210;
+        const maxBarW = innerW - 320;
+        items.forEach((it, idx) => {
+          const ry = cursorY + 38 + idx * rowH;
+          const barColor =
+            it.tone === "pathology" ? "#DC2626" : palette[idx % palette.length];
+          const bw = Math.max(10, Math.round((it.value / maxVal) * maxBarW));
+          pushText({
+            x: innerX + 16,
+            y: ry,
+            w: 186,
+            h: rowH - 2,
+            text: it.label,
+            fontSize: 14,
+            weight: 600,
+            color: "#18181B",
+            fontKind: "body",
+            nodeId: op.nodeId,
+          });
+          pushFill(barX, ry + 3, bw, Math.max(14, rowH - 8), 5, barColor, op.nodeId, 0.82);
+          pushStroke(
+            sketchRoundedRect(barX, ry + 3, bw, Math.max(14, rowH - 8), 5, nextId(`dbar_${idx}`)),
+            "#18181B",
+            1.4,
+            op.nodeId
+          );
+          pushText({
+            x: barX + bw + 8,
+            y: ry,
+            w: 96,
+            h: rowH - 2,
+            text: `${it.value}${unitStr}`,
+            fontSize: 13,
+            weight: 700,
+            color: barColor,
+            fontKind: "mono",
+            nodeId: op.nodeId,
+          });
+        });
+      }
+      pushNodeBadge(op.nodeId, innerX, cursorY, innerW);
+      cursorY += h + Math.round(BOARD.gap * yScale);
+      continue;
+    }
+
+    if (op.t === "source_figure") {
+      seq++;
+      const callouts = (op.callouts || []).slice(0, 4);
+      const h = Math.round(Math.min(178, 92 + callouts.length * 22) * yScale);
+      const wash = BOARD_FILL_HEX[op.wash || "head"];
+      pushFill(innerX, cursorY, innerW, h, 14, wash, op.nodeId, 0.72);
+      pushStroke(
+        sketchRoundedRect(innerX, cursorY, innerW, h, 14, nextId("figbox")),
+        "#1D4ED8",
+        2.2,
+        op.nodeId
+      );
+      primitives.push({
+        k: "badge",
+        id: nextId("figpage"),
+        seq,
+        nodeId: op.nodeId,
+        x: innerX + innerW - 88,
+        y: cursorY + 10,
+        w: 74,
+        h: 22,
+        label: `Fig p.${op.page}`,
+        page: op.page,
+        quote: op.caption,
+      });
+      pushText({
+        x: innerX + 16,
+        y: cursorY + 10,
+        w: innerW - 118,
+        h: 42,
+        text: `Source Figure (p.${op.page}): ${op.caption}`,
+        fontSize: 16,
+        weight: 700,
+        color: "#1E3A8A",
+        fontKind: "hand",
+        nodeId: op.nodeId,
+      });
+      callouts.forEach((callout, idx) => {
+        const cy = cursorY + 56 + idx * 22;
+        pushStroke(
+          sketchEllipse(innerX + 26, cy + 10, 4.5, 4.5, nextId(`figdot_${idx}`)),
+          "#FF4C00",
+          2.2,
+          op.nodeId
+        );
+        pushText({
+          x: innerX + 40,
+          y: cy,
+          w: innerW - 60,
+          h: 20,
+          text: `${idx + 1}. ${callout}`,
+          fontSize: 14,
+          weight: 600,
+          color: "#18181B",
+          fontKind: "body",
+          nodeId: op.nodeId,
+        });
       });
       cursorY += h + Math.round(BOARD.gap * yScale);
       continue;

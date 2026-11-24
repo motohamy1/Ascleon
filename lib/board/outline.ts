@@ -100,8 +100,43 @@ function buildOutlineJsonSchema(limits: BoardLimits) {
                       "cycle",
                       "timeline",
                       "formula",
+                      "function_plot",
+                      "data_chart",
+                      "source_figure",
                     ],
                   },
+                  title: { type: "string" },
+                  expr: { type: "string" },
+                  xRange: { type: "array", items: { type: "number" } },
+                  yRange: { type: "array", items: { type: "number" } },
+                  xLabel: { type: "string" },
+                  yLabel: { type: "string" },
+                  highlightPoints: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        x: { type: "number" },
+                        label: { type: "string" },
+                      },
+                    },
+                  },
+                  chartType: { type: "string", enum: ["bar", "pie"] },
+                  chartItems: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        label: { type: "string" },
+                        value: { type: "number" },
+                        tone: { type: "string" },
+                      },
+                    },
+                  },
+                  unit: { type: "string" },
+                  caption: { type: "string" },
+                  page: { type: "integer" },
+                  callouts: { type: "array", items: { type: "string" } },
                   text: { type: "string" },
                   subtitle: { type: "string" },
                   heading: { type: "string" },
@@ -171,13 +206,17 @@ function buildOutlineJsonSchema(limits: BoardLimits) {
                 tier: {
                   type: "string",
                   enum: [
+                    "glb-anatomy",
+                    "molecule-3d",
                     "anatomy-rig",
                     "procedural-3d",
                     "interactive-sim",
                     "smart-diagram-3d",
+                    "none",
                   ],
                 },
                 title: { type: "string" },
+                compoundName: { type: "string" },
                 model: { type: "string", enum: [...ANATOMY_RIG_MODELS] },
                 blueprint: { type: "string", enum: [...PROCEDURAL_3D_BLUEPRINTS] },
                 cam: { type: "string", enum: ["front", "side", "iso", "top"] },
@@ -401,11 +440,15 @@ BOARD & 3D LAB RULES:
    - { "t": "term", "term": "...", "definition": "...", "tone": "...", "wash": "sky|mint|sand|coral|lilac", "nodeId": "..." }
    - { "t": "bullets", "heading": "...", "items": ["..."], "wash": "sky|mint|sand|coral" }
    - { "t": "formula", "tex": "LaTeX equation if relevant", "label": "..." }
-5. SYNCHRONIZED 3D / LAB SCENE ("labScene") — pick the BEST tier for this section (NEVER leave blank):
-   - Tier 1 "anatomy-rig": model in [${ANATOMY_RIG_MODELS.join(", ")}], optional cam ("front"|"side"|"iso"|"top"), highlight, labels.
-   - Tier 2 "procedural-3d": blueprint in [${PROCEDURAL_3D_BLUEPRINTS.join(", ")}] for salivary/exocrine glands (glandular-acinus), neoplasia/invasion (tumor-architecture), inflammation/autoimmunity (immune-cascade), vessels/plaques, receptors/membranes, axons, compartment diffusion, molecular binding, 3D math fields, or biomechanics.
-   - Tier 3 "interactive-sim": for physiological/PK curves (use presetId in [frank_starling, michaelis_menten, dose_response, oxyhemoglobin, pk_washout, action_potential] or valid xLabel/yLabel).
-   - Tier 4 "smart-diagram-3d": for pure concepts/lists.
+   - { "t": "function_plot", "title": "...", "expr": "sin(x)", "xRange": [0, 6.28], "yRange": [-1.2, 1.2], "xLabel": "x", "yLabel": "y", "highlightPoints": [{ "x": 1.57, "label": "Peak" }] } (for quantitative curves/functions)
+   - { "t": "data_chart", "title": "...", "chartType": "bar"|"pie", "chartItems": [{ "label": "...", "value": 45, "tone": "normal|pathology|neutral" }], "unit": "%" } (for statistics/comparisons/proportions)
+   - { "t": "source_figure", "caption": "...", "page": 1, "callouts": ["..."] } (to reference a figure or diagram from the PDF page)
+5. SYNCHRONIZED 3D / LAB SCENE ("labScene") — pick the BEST matching tier (use "none" if the section has no physical 3D object):
+   - "anatomy-rig": model in [${ANATOMY_RIG_MODELS.join(", ")}], optional cam ("front"|"side"|"iso"|"top"), highlight, labels.
+   - "molecule-3d": set "compoundName" (e.g. "aspirin", "dopamine", "glucose") when teaching a specific small-molecule drug or metabolite.
+   - "procedural-3d": blueprint in [${PROCEDURAL_3D_BLUEPRINTS.join(", ")}] for salivary/exocrine glands (glandular-acinus), neoplasia/invasion (tumor-architecture), inflammation/autoimmunity (immune-cascade), vessels/plaques, receptors/membranes, axons, compartment diffusion, molecular binding, 3D math fields, or biomechanics.
+   - "interactive-sim": for physiological/PK curves (use presetId in [frank_starling, michaelis_menten, dose_response, oxyhemoglobin, pk_washout, action_potential] or valid xLabel/yLabel).
+   - "none": for pure conceptual text, history, classification tables, or policies where 2D whiteboard alone is clearest.
 6. LINKS: Connect nodes meaningfully with "links" ({ "from", "to", "kind": "leads_to"|"causes"|"contrasts"|"treats", "label"? }) both within and across sections.
 7. TEACHER SCRIPT (${limits.minSegmentsPerSection} to ${limits.maxSegmentsPerSection} segments): Natural spoken teaching sentences (10–28 words each, ZERO markdown, NO emojis) referencing "nodeId" for live pen tracking.
 

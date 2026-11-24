@@ -26,7 +26,7 @@ const navItems: NavItem[] = [
   { href: '/', label: 'Home', match: '/' },
   { href: '/space/active', label: 'Study Space', match: '/space/active', extraMatch: '/books' },
   { href: '/library', label: 'Library', match: '/library' },
-  { href: '/progress', label: 'Progress', match: '/progress' },
+  { href: '/progress', label: 'Study Hub', match: '/progress' },
   { href: '/space/revision', label: 'Revision', match: '/space/revision', disabled: true },
 ];
 
