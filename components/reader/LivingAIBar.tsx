@@ -24,6 +24,7 @@ interface LivingAIBarProps {
 }
 
 interface Message {
+  streamId?: string;
   role: "user" | "assistant";
   content: string;
   keyPoints?: string[];
@@ -59,8 +60,119 @@ export default function LivingAIBar({
           bookTopic,
           query: q,
           currentSegmentContent,
+          stream: true,
         }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        if (res.status === 402 || errData?.isBillingError) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: `${errData?.error || "Monthly AI credit limit reached."} [Upgrade your plan](/subscriptions?reason=limit) to continue.`,
+            },
+          ]);
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: errData?.error || "Sorry, I could not process your query at this moment.",
+            },
+          ]);
+        }
+        return;
+      }
+
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/x-ndjson") && res.body) {
+        const streamId = `bar-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        let hasStreamedBubble = false;
+        let donePayload: any = null;
+
+        const handleLine = (rawLine: string) => {
+          const trimmed = rawLine.trim();
+          if (!trimmed) return;
+          try {
+            const evt = JSON.parse(trimmed);
+            if (evt?.type === "delta" && typeof evt.text === "string" && evt.text.length > 0) {
+              if (!hasStreamedBubble) {
+                hasStreamedBubble = true;
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    streamId,
+                    role: "assistant",
+                    content: evt.text,
+                  },
+                ]);
+              } else {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.streamId === streamId ? { ...m, content: m.content + evt.text } : m
+                  )
+                );
+              }
+            } else if (evt?.type === "done" && evt.payload) {
+              donePayload = evt.payload;
+            }
+          } catch {
+            // Ignore malformed chunk
+          }
+        };
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            handleLine(line);
+          }
+        }
+        if (buffer.trim()) {
+          handleLine(buffer);
+        }
+
+        const data = donePayload || {};
+        if (hasStreamedBubble) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.streamId === streamId
+                ? {
+                    ...m,
+                    content: data.answer || m.content,
+                    keyPoints: data.keyPoints,
+                  }
+                : m
+            )
+          );
+        } else if (data.success) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: data.answer,
+              keyPoints: data.keyPoints,
+            },
+          ]);
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: data?.error || "Sorry, I could not process your query at this moment.",
+            },
+          ]);
+        }
+        return;
+      }
 
       const data = await res.json();
       if (res.status === 402 || data?.isBillingError) {

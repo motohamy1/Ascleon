@@ -49,6 +49,53 @@ export interface BookRagRetrievalResult {
 const CROSS_BOOK_LOOKUP_RE =
   /\b(where else|other chapters?|across the book|compare with|earlier in the book|whole book|entire book|all pages)\b|في الكتاب|فصل آخر|فصول أخرى|قارن مع|في باقي الكتاب/i;
 
+const BOOK_CHUNKS_CACHE_TTL_MS = 10 * 60 * 1000;
+const BOOK_CHUNKS_CACHE_MAX_ENTRIES = 20;
+
+interface BookChunksCacheEntry {
+  chunks: PageChunk[];
+  expiresAt: number;
+}
+
+const globalForBookChunks = globalThis as typeof globalThis & {
+  __ascleonBookChunksCache?: Map<string, BookChunksCacheEntry>;
+};
+
+const bookChunksCache =
+  globalForBookChunks.__ascleonBookChunksCache ??
+  (globalForBookChunks.__ascleonBookChunksCache = new Map<string, BookChunksCacheEntry>());
+
+async function getCachedBookChunks(bookId: string): Promise<PageChunk[]> {
+  const now = Date.now();
+  const cached = bookChunksCache.get(bookId);
+  if (cached && cached.expiresAt > now) {
+    return cached.chunks;
+  }
+
+  const allSegments = (await BookSegment.find({ bookId })
+    .sort({ pageNumber: 1, segmentIndex: 1 })
+    .limit(400)
+    .lean()) as any[];
+
+  const chunks: PageChunk[] = [];
+  for (const seg of allSegments) {
+    if (isPlaceholderPageText(seg.content)) continue;
+    const pNum = segmentPageNumber(seg);
+    chunks.push(...chunkPageText(pNum, String(seg.content || "")));
+  }
+
+  if (bookChunksCache.size >= BOOK_CHUNKS_CACHE_MAX_ENTRIES) {
+    const oldestKey = bookChunksCache.keys().next().value;
+    if (oldestKey) bookChunksCache.delete(oldestKey);
+  }
+  bookChunksCache.set(bookId, {
+    chunks,
+    expiresAt: now + BOOK_CHUNKS_CACHE_TTL_MS,
+  });
+
+  return chunks;
+}
+
 function buildSyntheticSegment(pageNumber: number, liveText: string): RetrievedSegmentResult {
   const meta = extractDeterministicPageMetadata(pageNumber, liveText);
   return {
@@ -291,21 +338,35 @@ export async function retrieveFromBookRAG(params: {
       (!referencesCurrentPageOnly && queryTokens.length >= 2 && !hasActiveOverlap);
 
     if (shouldSearchOffPageTopic && query.trim().length > 3) {
-      const allSegments = (await BookSegment.find({ bookId })
-        .sort({ pageNumber: 1, segmentIndex: 1 })
-        .limit(400)
-        .lean()) as any[];
+      let candidateChunks: PageChunk[] = [];
 
-      const allChunks: PageChunk[] = [];
-      for (const seg of allSegments) {
-        const pNum = segmentPageNumber(seg);
-        if (pNum === activePage) continue;
-        if (isPlaceholderPageText(seg.content)) continue;
-        allChunks.push(...chunkPageText(pNum, String(seg.content || "")));
+      // Fast path: use indexed MongoDB text search before falling back to full-book scan/cache
+      try {
+        const textMatchedSegments = (await BookSegment.find(
+          { bookId, $text: { $search: query } },
+          { score: { $meta: "textScore" } }
+        )
+          .sort({ score: { $meta: "textScore" } })
+          .limit(12)
+          .lean()) as any[];
+
+        for (const seg of textMatchedSegments) {
+          const pNum = segmentPageNumber(seg);
+          if (pNum === activePage) continue;
+          if (isPlaceholderPageText(seg.content)) continue;
+          candidateChunks.push(...chunkPageText(pNum, String(seg.content || "")));
+        }
+      } catch {
+        // Fallback below if text index is unavailable
+      }
+
+      if (candidateChunks.length === 0) {
+        const cachedChunks = await getCachedBookChunks(bookId);
+        candidateChunks = cachedChunks.filter((c) => c.pageNumber !== activePage);
       }
 
       const minScore = wantsCrossBookLookup ? 1.5 : 2.2;
-      const scoredChunks = scoreChunksBM25(query, allChunks)
+      const scoredChunks = scoreChunksBM25(query, candidateChunks)
         .filter((c) => c.bm25Score > minScore)
         .slice(0, 3);
 

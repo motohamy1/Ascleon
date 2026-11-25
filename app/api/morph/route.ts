@@ -12,6 +12,7 @@ import {
   GEMINI_MODEL_CHAIN,
   markModelCooldownFromError,
   orderModelsByHealth,
+  PRIMARY_GEMINI_MODEL,
 } from "@/lib/ai/model-cooldown";
 
 export const maxDuration = 60;
@@ -439,8 +440,9 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
           const maxAttempts = isLastModel ? 2 : 1;
 
           for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            const timeoutMs = idx === 0 ? 22_000 : 14_000;
+            const timeoutMs = idx === 0 ? 16_000 : 11_000;
             const supportsThinking = !candidateModel.includes("lite");
+            const thinkingBudget = candidateModel === PRIMARY_GEMINI_MODEL ? 128 : 0;
             const abortCtrl = new AbortController();
             const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
             try {
@@ -452,7 +454,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                   temperature: attempt === 0 ? 0.2 : 0.1,
                   maxOutputTokens: 8192,
                   abortSignal: abortCtrl.signal,
-                  ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 128 } } : {}),
+                  ...(supportsThinking ? { thinkingConfig: { thinkingBudget } } : {}),
                 },
               });
 

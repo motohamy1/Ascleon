@@ -12,17 +12,8 @@ import {
 import { connectToDatabase } from "@/database/mongoose";
 import KnowledgeNode from "@/database/models/knowledge-node.model";
 
-import { GoogleGenAI } from "@google/genai";
-import {
-  clearModelCooldown,
-  FAST_GEMINI_MODEL_CHAIN,
-  markModelCooldownFromError,
-  orderModelsByHealth,
-} from "@/lib/ai/model-cooldown";
-
-// In-memory cache for dynamic DB knowledge nodes and LLM-resolved canonical references
+// In-memory cache for dynamic DB knowledge nodes
 const knowledgeNodeCache = new Map<string, any[]>();
-const dynamicRefCache = new Map<string, ReferenceResource[]>();
 
 function isGenericReferenceName(name: string): boolean {
   const low = name.trim().toLowerCase();
@@ -34,118 +25,6 @@ function isGenericReferenceName(name: string): boolean {
     low === "peer-reviewed academic review literature" ||
     low === "authoritative society guidelines & textbooks"
   );
-}
-
-/**
- * Resolves exact, topic-specific canonical textbooks and guidelines using Gemini
- * when the book has no pre-digested blueprint references or the static corpus doesn't cover the topic.
- */
-async function resolveDynamicCanonicalReferences(params: {
-  bookTitle: string;
-  domain: string;
-  text: string;
-  query: string;
-}): Promise<ReferenceResource[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === "your_gemini_api_key_here") return [];
-
-  const topicHint = (params.query || params.text.slice(0, 200))
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120);
-  const cacheKey = `${params.domain}:${params.bookTitle}:${topicHint.slice(0, 60)}`.toLowerCase();
-  const cached = dynamicRefCache.get(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const prompt = `Identify 2-3 REAL, authoritative, world-class textbooks or official clinical/academic guidelines that directly cover the EXACT topic in the study excerpt below.
-Book Title: "${params.bookTitle}"
-Detected Field: "${params.domain}"
-Student Query: "${params.query}"
-Excerpt:
-"""
-${params.text.slice(0, 900)}
-"""
-
-STRICT RULES:
-- Return ONLY references that genuinely match the subject of the Book Title and Excerpt (e.g., for MRCP / Internal Medicine on Pulmonary Embolism -> NICE NG158, ESC Guidelines on Acute Pulmonary Embolism, Kumar & Clark's Clinical Medicine; NEVER return surgery textbooks for internal medicine topics).
-- Return ONLY valid JSON array of 2-3 objects:
-[
-  {
-    "source": "Exact Textbook or Guideline Name",
-    "type": "textbook" | "guideline",
-    "title": "Relevant Chapter or Guideline Section",
-    "chapterOrSection": "Chapter/Section",
-    "excerpt": "1-2 sentence concise authoritative principle",
-    "clinicalPearls": ["1 concise high-yield pearl"]
-  }
-]`;
-
-    const candidateModels = orderModelsByHealth(FAST_GEMINI_MODEL_CHAIN);
-    let parsed: any = null;
-    for (const candidateModel of candidateModels) {
-      const abortCtrl = new AbortController();
-      const timer = setTimeout(() => abortCtrl.abort(), 2500);
-      try {
-        const resp: any = await Promise.race([
-          ai.models.generateContent({
-            model: candidateModel,
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            config: {
-              responseMimeType: "application/json",
-              temperature: 0.1,
-              abortSignal: abortCtrl.signal,
-            },
-          }),
-          new Promise<never>((_, reject) =>
-            abortCtrl.signal.addEventListener("abort", () =>
-              reject(new Error(`Dynamic ref ${candidateModel} timeout`))
-            )
-          ),
-        ]);
-        const raw = (resp?.text || "")
-          .trim()
-          .replace(/^```(?:json)?\s*/i, "")
-          .replace(/\s*```$/i, "")
-          .trim();
-        if (raw) {
-          const candidateParsed = JSON.parse(raw);
-          if (Array.isArray(candidateParsed)) {
-            parsed = candidateParsed;
-            clearModelCooldown(`gemini:${candidateModel}`);
-            break;
-          }
-        }
-      } catch (err) {
-        markModelCooldownFromError(`gemini:${candidateModel}`, err);
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    if (!Array.isArray(parsed)) return [];
-
-    const refs: ReferenceResource[] = parsed
-      .filter((r: any) => r?.source && !isGenericReferenceName(String(r.source)))
-      .slice(0, 3)
-      .map((r: any, idx: number) => ({
-        id: `ref-llm-${idx + 1}`,
-        source: String(r.source),
-        type: r.type === "guideline" ? "guideline" : "textbook",
-        title: String(r.title || r.source),
-        chapterOrSection: String(r.chapterOrSection || "Core Reference"),
-        excerpt: String(r.excerpt || ""),
-        clinicalPearls: Array.isArray(r.clinicalPearls) ? r.clinicalPearls.map(String) : [],
-        relevanceTag: params.domain,
-      }));
-
-    if (refs.length > 0) {
-      dynamicRefCache.set(cacheKey, refs);
-    }
-    return refs;
-  } catch {
-    return [];
-  }
 }
 
 export interface ContextRetrievalOptions {
@@ -517,80 +396,69 @@ export async function retrieveEnrichedContext(
         if (handgrip) matchingMnemonics.push(handgrip);
       } else {
         focalTopic = "Clinical Medicine & Evidence-Based Guidelines";
-        // Dynamically resolve exact canonical references for this specific medical topic (e.g., PE, ALS, Renal, etc.)
-        const llmRefs = await resolveDynamicCanonicalReferences({
-          bookTitle,
-          domain,
-          text,
-          query,
-        });
-        if (llmRefs.length > 0) {
-          matchingRefs.push(...llmRefs);
-        } else {
-          // Topic-aware clinical fallback (never surgery distractors)
-          const isPEorVTE =
-            combined.includes("pulmonary embolism") ||
-            combined.includes("dvt") ||
-            combined.includes("thrombolysis") ||
-            combined.includes("doac") ||
-            combined.includes("lmwh") ||
-            combined.includes("spesi");
-          const isPeriArrest =
-            combined.includes("peri-arrest") ||
-            combined.includes("bradycardia") ||
-            combined.includes("tachycardia") ||
-            combined.includes("atropine") ||
-            combined.includes("cardioversion") ||
-            combined.includes("asystole");
+        // Deterministic topic-aware clinical fallback (avoids blocking chat with an extra pre-flight LLM call)
+        const isPEorVTE =
+          combined.includes("pulmonary embolism") ||
+          combined.includes("dvt") ||
+          combined.includes("thrombolysis") ||
+          combined.includes("doac") ||
+          combined.includes("lmwh") ||
+          combined.includes("spesi");
+        const isPeriArrest =
+          combined.includes("peri-arrest") ||
+          combined.includes("bradycardia") ||
+          combined.includes("tachycardia") ||
+          combined.includes("atropine") ||
+          combined.includes("cardioversion") ||
+          combined.includes("asystole");
 
-          if (isPEorVTE) {
-            focalTopic = "Venous Thromboembolism & Pulmonary Embolism";
-            matchingRefs.push({
-              id: "ref-nice-ng158",
-              source: "NICE Guideline NG158: Venous thromboembolic diseases",
-              type: "guideline",
-              title: "Diagnosis, Risk Stratification & Anticoagulation for PE",
-              chapterOrSection: "Initial & Long-Term PE Management",
-              excerpt:
-                "Offer apixaban or rivaroxaban as first-line anticoagulation for confirmed PE unless contraindicated; consider thrombolysis (e.g. alteplase) for haemodynamically unstable massive PE.",
-              clinicalPearls: [
-                "Use sPESI to assess suitability for outpatient management in haemodynamically stable PE.",
-                "Use LMWH throughout pregnancy and for at least 6 weeks postpartum.",
-              ],
-              relevanceTag: "pulmonary_embolism_nice",
-            });
-          }
-          if (isPeriArrest) {
-            focalTopic = "Peri-Arrest Arrhythmias & Resuscitation";
-            matchingRefs.push({
-              id: "ref-resus-uk-als",
-              source: "Resuscitation Council UK: Adult Advanced Life Support Guidelines",
-              type: "guideline",
-              title: "Peri-Arrest Bradycardia & Tachycardia Algorithms",
-              chapterOrSection: "Section: Peri-Arrest Arrhythmias",
-              excerpt:
-                "Assess for adverse signs (shock, syncope, myocardial ischaemia, heart failure). First-line for unstable bradycardia is atropine 500 mcg IV; unstable tachycardia requires immediate synchronised DC cardioversion.",
-              clinicalPearls: [
-                "Screen for reversible causes: 4 Hs (Hypoxia, Hypovolaemia, Hypo/hyperkalaemia, Hypothermia) and 4 Ts (Thrombosis, Tension pneumothorax, Tamponade, Toxins).",
-              ],
-              relevanceTag: "peri_arrest_als",
-            });
-          }
-          if (matchingRefs.length === 0) {
-            matchingRefs.push({
-              id: "ref-kumar-clark",
-              source: "Kumar & Clark's Clinical Medicine",
-              type: "textbook",
-              title: "Core Internal Medicine & Clinical Management",
-              chapterOrSection: "Internal Medicine Canon",
-              excerpt:
-                "Evidence-based internal medicine integrates pathophysiology, bedside clinical signs, and societal guidelines to guide diagnostic investigation and first-line therapy.",
-              clinicalPearls: [
-                "Prioritize haemodynamic stability and reversible causes before definitive workup.",
-              ],
-              relevanceTag: "internal_medicine_canon",
-            });
-          }
+        if (isPEorVTE) {
+          focalTopic = "Venous Thromboembolism & Pulmonary Embolism";
+          matchingRefs.push({
+            id: "ref-nice-ng158",
+            source: "NICE Guideline NG158: Venous thromboembolic diseases",
+            type: "guideline",
+            title: "Diagnosis, Risk Stratification & Anticoagulation for PE",
+            chapterOrSection: "Initial & Long-Term PE Management",
+            excerpt:
+              "Offer apixaban or rivaroxaban as first-line anticoagulation for confirmed PE unless contraindicated; consider thrombolysis (e.g. alteplase) for haemodynamically unstable massive PE.",
+            clinicalPearls: [
+              "Use sPESI to assess suitability for outpatient management in haemodynamically stable PE.",
+              "Use LMWH throughout pregnancy and for at least 6 weeks postpartum.",
+            ],
+            relevanceTag: "pulmonary_embolism_nice",
+          });
+        }
+        if (isPeriArrest) {
+          focalTopic = "Peri-Arrest Arrhythmias & Resuscitation";
+          matchingRefs.push({
+            id: "ref-resus-uk-als",
+            source: "Resuscitation Council UK: Adult Advanced Life Support Guidelines",
+            type: "guideline",
+            title: "Peri-Arrest Bradycardia & Tachycardia Algorithms",
+            chapterOrSection: "Section: Peri-Arrest Arrhythmias",
+            excerpt:
+              "Assess for adverse signs (shock, syncope, myocardial ischaemia, heart failure). First-line for unstable bradycardia is atropine 500 mcg IV; unstable tachycardia requires immediate synchronised DC cardioversion.",
+            clinicalPearls: [
+              "Screen for reversible causes: 4 Hs (Hypoxia, Hypovolaemia, Hypo/hyperkalaemia, Hypothermia) and 4 Ts (Thrombosis, Tension pneumothorax, Tamponade, Toxins).",
+            ],
+            relevanceTag: "peri_arrest_als",
+          });
+        }
+        if (matchingRefs.length === 0) {
+          matchingRefs.push({
+            id: "ref-kumar-clark",
+            source: "Kumar & Clark's Clinical Medicine",
+            type: "textbook",
+            title: "Core Internal Medicine & Clinical Management",
+            chapterOrSection: "Internal Medicine Canon",
+            excerpt:
+              "Evidence-based internal medicine integrates pathophysiology, bedside clinical signs, and societal guidelines to guide diagnostic investigation and first-line therapy.",
+            clinicalPearls: [
+              "Prioritize haemodynamic stability and reversible causes before definitive workup.",
+            ],
+            relevanceTag: "internal_medicine_canon",
+          });
         }
       }
 
@@ -799,8 +667,8 @@ export async function retrieveEnrichedContext(
           .limit(3)
           .lean();
 
-        // 1.5s timeout guard so DB stalls never slow down the AI assistant
-        const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 1500));
+        // 600ms timeout guard so DB stalls never slow down the AI assistant
+        const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 600));
         const dbNodes = await Promise.race([dbNodesPromise, timeoutPromise]);
 
         if (dbNodes && dbNodes.length > 0) {

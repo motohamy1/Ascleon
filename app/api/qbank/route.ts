@@ -6,6 +6,7 @@ import {
   GEMINI_MODEL_CHAIN,
   markModelCooldownFromError,
   orderModelsByHealth,
+  PRIMARY_GEMINI_MODEL,
 } from "@/lib/ai/model-cooldown";
 
 export const maxDuration = 60;
@@ -427,8 +428,9 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
       const qbankGeminiModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
       for (let idx = 0; idx < qbankGeminiModels.length; idx++) {
         const candidateModel = qbankGeminiModels[idx];
-        const timeoutMs = idx === 0 ? 22_000 : 14_000;
+        const timeoutMs = idx === 0 ? 16_000 : 11_000;
         const supportsThinking = !candidateModel.includes("lite");
+        const thinkingBudget = candidateModel === PRIMARY_GEMINI_MODEL ? 128 : 0;
         const abortCtrl = new AbortController();
         const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
         try {
@@ -440,7 +442,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                 responseMimeType: "application/json",
                 temperature: 0.35,
                 abortSignal: abortCtrl.signal,
-                ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 128 } } : {}),
+                ...(supportsThinking ? { thinkingConfig: { thinkingBudget } } : {}),
               },
             }),
             new Promise((_, reject) =>

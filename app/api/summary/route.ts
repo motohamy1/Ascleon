@@ -3,9 +3,10 @@ import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import {
   clearModelCooldown,
-  GEMINI_MODEL_CHAIN,
+  FAST_GEMINI_MODEL_CHAIN,
   markModelCooldownFromError,
   orderModelsByHealth,
+  PRIMARY_GEMINI_MODEL,
 } from "@/lib/ai/model-cooldown";
 
 export const maxDuration = 60;
@@ -153,11 +154,12 @@ Return ONLY the JSON object.
 
 ${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
-        const summaryModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
+        const summaryModels = orderModelsByHealth(FAST_GEMINI_MODEL_CHAIN);
         for (let idx = 0; idx < summaryModels.length; idx++) {
           const candidateModel = summaryModels[idx];
-          const timeoutMs = idx === 0 ? 22_000 : 14_000;
+          const timeoutMs = idx === 0 ? 15_000 : 10_000;
           const supportsThinking = !candidateModel.includes("lite");
+          const thinkingBudget = candidateModel === PRIMARY_GEMINI_MODEL ? 128 : 0;
           const abortCtrl = new AbortController();
           const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
           try {
@@ -168,7 +170,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                 responseMimeType: "application/json",
                 temperature: 0.2,
                 abortSignal: abortCtrl.signal,
-                ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 128 } } : {}),
+                ...(supportsThinking ? { thinkingConfig: { thinkingBudget } } : {}),
               },
             });
 

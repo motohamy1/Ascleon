@@ -18,7 +18,13 @@ import {
   sanitizeTopicCandidates,
 } from "@/lib/ai/rag/topic-resolution";
 import { isPlaceholderPageText, tokenizeText } from "@/lib/ai/rag/chunker";
-import type { RagAlignmentStatus } from "@/lib/ai/rag/book-rag-retriever";
+import {
+  retrieveFromBookRAG,
+  type BookRagRetrievalResult,
+  type RagAlignmentStatus,
+} from "@/lib/ai/rag/book-rag-retriever";
+import { retrieveEnrichedContext } from "@/lib/ai/knowledge/knowledge-retriever";
+import type { EnrichedStudyContext } from "@/types/knowledge";
 
 import type { StudyScope } from "@/components/reader/StudyScopeBar";
 
@@ -46,6 +52,7 @@ interface ReaderAssistantRequestBody {
   }>;
   studyScope?: StudyScope;
   topicMap?: { topics?: unknown[] };
+  stream?: boolean;
 }
 
 export async function POST(request: Request) {
@@ -83,6 +90,12 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  const acceptHeader = request.headers.get("accept") || "";
+  const wantStream =
+    Boolean(body?.stream) ||
+    acceptHeader.includes("application/x-ndjson") ||
+    acceptHeader.includes("text/event-stream");
 
   const cleanQuery = query.trim();
   const historyArray = Array.isArray(history)
@@ -221,14 +234,36 @@ export async function POST(request: Request) {
     }
   }
 
-  // 2. UNIVERSAL BOOK RAG RETRIEVAL WITH ACTIVE-PAGE SUPREMACY
+  const isTopicDeepDive =
+    Boolean(isTopicSummaryIntent) ||
+    effectiveScope.type === "topic" ||
+    effectiveScope.type === "range";
+
+  const dynamicCost = calculateDynamicCreditCost({
+    feature: "reader_assistant",
+    scopeType: effectiveScope.type,
+    pageSpan: getScopePageSpan(effectiveScope),
+    hasVisionInput: Boolean(typeof selectedImage === "string" && selectedImage),
+    isTopicDeepDive,
+  });
+
+  // 2. PARALLEL PRE-FLIGHT: Credits + Book RAG + Knowledge Enrichment
   let ragCitedPages: number[] = [];
   let ragAlignmentStatus: RagAlignmentStatus = hasRealLiveText ? "live_only" : "verified";
 
-  if (bookId) {
-    try {
-      const { retrieveFromBookRAG } = await import("@/lib/ai/rag/book-rag-retriever");
-      const ragRes = await Promise.race([
+  const normalizedBookRefs = Array.isArray(bookReferences)
+    ? bookReferences.map(String).filter(Boolean)
+    : [];
+  const emptyEnriched: EnrichedStudyContext = {
+    focalTopic: String(bookTopic || bookTitle || "General Study"),
+    groundingSnippet: "",
+    authoritativeReferences: [],
+    qbankVignettes: [],
+    mnemonics: [],
+  };
+
+  const ragPromise: Promise<BookRagRetrievalResult | null> = bookId
+    ? Promise.race([
         retrieveFromBookRAG({
           bookId: String(bookId),
           query: cleanQuery,
@@ -238,10 +273,39 @@ export async function POST(request: Request) {
           topK: effectiveScope.type === "page" ? 2 : 6,
         }),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Book RAG lookup timed out after 3s")), 3000)
+          setTimeout(() => reject(new Error("Book RAG lookup timed out after 2s")), 2000)
         ),
-      ]);
+      ]).catch((ragErr) => {
+        console.warn("[reader-assistant] Book RAG retrieval fallback:", ragErr);
+        return null;
+      })
+    : Promise.resolve(null);
 
+  const enrichedPromise: Promise<EnrichedStudyContext> = Promise.race([
+    retrieveEnrichedContext({
+      text: livePageText,
+      query: cleanQuery,
+      bookTitle: String(bookTitle || "Active Document"),
+      bookTopic: String(bookTopic || ""),
+      bookReferences: normalizedBookRefs,
+    }).catch(() => emptyEnriched),
+    new Promise<EnrichedStudyContext>((resolve) =>
+      setTimeout(() => resolve(emptyEnriched), 1000)
+    ),
+  ]);
+
+  const [creditCheck, ragRes, enrichedContext] = await Promise.all([
+    consumeCredits(authCheck.userId, dynamicCost.total),
+    ragPromise,
+    enrichedPromise,
+  ]);
+
+  if (!creditCheck.allowed) {
+    return buildBillingErrorResponse(creditCheck, dynamicCost.total);
+  }
+
+  if (bookId) {
+    if (ragRes) {
       ragAlignmentStatus = ragRes.alignmentStatus;
 
       if (ragRes.combinedContext) {
@@ -314,12 +378,9 @@ export async function POST(request: Request) {
           };
         }
       }
-    } catch (ragErr) {
-      console.warn("[reader-assistant] Book RAG retrieval fallback:", ragErr);
-      if (hasRealLiveText) {
-        effectiveContent = `=== PRIMARY ACTIVE PAGE ${activePageNum} (CURRENTLY ON STUDENT'S SCREEN) ===\n${livePageText}`;
-        ragCitedPages = [activePageNum];
-      }
+    } else if (hasRealLiveText) {
+      effectiveContent = `=== PRIMARY ACTIVE PAGE ${activePageNum} (CURRENTLY ON STUDENT'S SCREEN) ===\n${livePageText}`;
+      ragCitedPages = [activePageNum];
     }
   } else if (
     effectiveScope.startPage &&
@@ -337,7 +398,7 @@ export async function POST(request: Request) {
     bookId: String(bookId || ""),
     bookTitle: String(bookTitle || "Active Document"),
     bookTopic: String(bookTopic || ""),
-    bookReferences: Array.isArray(bookReferences) ? bookReferences.map(String).filter(Boolean) : [],
+    bookReferences: normalizedBookRefs,
     currentSegmentIndex: Number(currentSegmentIndex) || 0,
     currentPageNumber: activePageNum,
     currentSegmentContent: effectiveContent,
@@ -350,56 +411,7 @@ export async function POST(request: Request) {
     topicMap,
   };
 
-  const isTopicDeepDive =
-    Boolean(isTopicSummaryIntent) ||
-    effectiveScope.type === "topic" ||
-    effectiveScope.type === "range";
-
-  const dynamicCost = calculateDynamicCreditCost({
-    feature: "reader_assistant",
-    scopeType: effectiveScope.type,
-    pageSpan: getScopePageSpan(effectiveScope),
-    hasVisionInput: Boolean(typeof selectedImage === "string" && selectedImage),
-    isTopicDeepDive,
-  });
-
-  const creditCheck = await consumeCredits(authCheck.userId, dynamicCost.total);
-  if (!creditCheck.allowed) {
-    return buildBillingErrorResponse(creditCheck, dynamicCost.total);
-  }
-
-  try {
-    const output = await runStudyAgent(cleanQuery, context);
-    const finalCitations = ragCitedPages.length > 0
-      ? Array.from(new Set([...(output.citations || []), ...ragCitedPages.map((p) => `Page ${p}`)]))
-      : output.citations;
-
-    return NextResponse.json({
-      success: true,
-      answer: output.text,
-      routedTier: output.routedTier,
-      intent: output.intent,
-      toolsUsed: output.toolsUsed,
-      citations: finalCitations,
-      generatedMorph: output.generatedMorph,
-      generatedQuiz: output.generatedQuiz,
-      authoritativeReferences: output.authoritativeReferences,
-      qbankVignettes: output.qbankVignettes,
-      mnemonics: output.mnemonics,
-      topicLocation: effectiveTopicLocation || output.topicLocation,
-      ragMeta: {
-        alignmentStatus: ragAlignmentStatus,
-        activePage: activePageNum,
-        citedPages: finalCitations,
-      },
-      creditsCharged: dynamicCost.total,
-      creditsRemaining: creditCheck.remaining,
-      creditBreakdown: dynamicCost.summary,
-    });
-  } catch (error) {
-    console.error("Reader assistant agent error, falling back gracefully:", error);
-
-    // Attempt to invoke runDeterministicFallback if exported by agent-harness
+  const buildFallbackPayload = () => {
     type DeterministicFn = (
       q: string,
       ctx: typeof context,
@@ -430,38 +442,34 @@ export async function POST(request: Request) {
           context,
           {
             groundingSnippet: context.currentSegmentContent,
-            authoritativeReferences: [],
-            qbankVignettes: [],
-            mnemonics: [],
+            authoritativeReferences: enrichedContext.authoritativeReferences,
+            qbankVignettes: enrichedContext.qbankVignettes,
+            mnemonics: enrichedContext.mnemonics,
           }
         );
         if (fallbackOutput && fallbackOutput.text) {
-          return NextResponse.json(
-            {
-              success: true,
-              answer: fallbackOutput.text,
-              provider: fallbackOutput.provider || "deterministic",
-              model: fallbackOutput.model || "ascleon-clinical-grounding-v1",
-              toolsUsed: fallbackOutput.toolsUsed || ["deep_reference_retriever"],
-              citations: fallbackOutput.citations || [`Section ${context.currentSegmentIndex + 1}`],
-              generatedMorph: fallbackOutput.generatedMorph,
-              generatedQuiz: fallbackOutput.generatedQuiz,
-              authoritativeReferences: fallbackOutput.authoritativeReferences || [],
-              qbankVignettes: fallbackOutput.qbankVignettes || [],
-              mnemonics: fallbackOutput.mnemonics || [],
-              creditsCharged: dynamicCost.total,
-              creditsRemaining: creditCheck.remaining,
-              creditBreakdown: dynamicCost.summary,
-            },
-            { status: 200 }
-          );
+          return {
+            success: true,
+            answer: fallbackOutput.text,
+            provider: fallbackOutput.provider || "deterministic",
+            model: fallbackOutput.model || "ascleon-clinical-grounding-v1",
+            toolsUsed: fallbackOutput.toolsUsed || ["deep_reference_retriever"],
+            citations: fallbackOutput.citations || [`Section ${context.currentSegmentIndex + 1}`],
+            generatedMorph: fallbackOutput.generatedMorph,
+            generatedQuiz: fallbackOutput.generatedQuiz,
+            authoritativeReferences: fallbackOutput.authoritativeReferences || [],
+            qbankVignettes: fallbackOutput.qbankVignettes || [],
+            mnemonics: fallbackOutput.mnemonics || [],
+            creditsCharged: dynamicCost.total,
+            creditsRemaining: creditCheck.remaining,
+            creditBreakdown: dynamicCost.summary,
+          };
         }
       } catch (fallbackErr) {
         console.warn("Deterministic fallback execution threw, using grounded response generator:", fallbackErr);
       }
     }
 
-    // Helpful grounded response with status 200 so the client never receives an unhandled 500
     const sectionNum = context.currentSegmentIndex + 1;
     const focusSnippet = context.selectedText
       ? context.selectedText.trim()
@@ -481,23 +489,132 @@ export async function POST(request: Request) {
         `Based on **${context.bookTitle}**, review Section ${sectionNum} to trace foundational mechanisms and invariant dynamics governing this topic.\n\n` +
         `*Ascleon Clinical Grounding Engine (Grounded Offline Mode)*`;
 
-    return NextResponse.json(
-      {
-        success: true,
-        answer: fallbackAnswer,
-        provider: "deterministic",
-        model: "ascleon-clinical-grounding-v1",
-        toolsUsed: ["deep_reference_retriever"],
-        citations: [`Section ${sectionNum}`, context.bookTitle],
-        authoritativeReferences: [],
-        qbankVignettes: [],
-        mnemonics: [],
-        creditsCharged: dynamicCost.total,
-        creditsRemaining: creditCheck.remaining,
-        creditBreakdown: dynamicCost.summary,
+    return {
+      success: true,
+      answer: fallbackAnswer,
+      provider: "deterministic",
+      model: "ascleon-clinical-grounding-v1",
+      toolsUsed: ["deep_reference_retriever"],
+      citations: [`Section ${sectionNum}`, context.bookTitle],
+      authoritativeReferences: [],
+      qbankVignettes: [],
+      mnemonics: [],
+      creditsCharged: dynamicCost.total,
+      creditsRemaining: creditCheck.remaining,
+      creditBreakdown: dynamicCost.summary,
+    };
+  };
+
+  if (wantStream) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const sendEvent = (event: Record<string, unknown>) => {
+          try {
+            controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          } catch {
+            // Stream already closed by client
+          }
+        };
+
+        try {
+          const output = await runStudyAgent(cleanQuery, context, {
+            precomputedEnriched: enrichedContext,
+            onDelta: (text) => {
+              if (text) sendEvent({ type: "delta", text });
+            },
+          });
+          const finalCitations =
+            ragCitedPages.length > 0
+              ? Array.from(
+                  new Set([
+                    ...(output.citations || []),
+                    ...ragCitedPages.map((p) => `Page ${p}`),
+                  ])
+                )
+              : output.citations;
+
+          sendEvent({
+            type: "done",
+            payload: {
+              success: true,
+              answer: output.text,
+              routedTier: output.routedTier,
+              intent: output.intent,
+              toolsUsed: output.toolsUsed,
+              citations: finalCitations,
+              generatedMorph: output.generatedMorph,
+              generatedQuiz: output.generatedQuiz,
+              authoritativeReferences: output.authoritativeReferences,
+              qbankVignettes: output.qbankVignettes,
+              mnemonics: output.mnemonics,
+              topicLocation: effectiveTopicLocation || output.topicLocation,
+              ragMeta: {
+                alignmentStatus: ragAlignmentStatus,
+                activePage: activePageNum,
+                citedPages: finalCitations,
+              },
+              creditsCharged: dynamicCost.total,
+              creditsRemaining: creditCheck.remaining,
+              creditBreakdown: dynamicCost.summary,
+            },
+          });
+        } catch (error) {
+          console.error("Reader assistant streaming error, falling back gracefully:", error);
+          sendEvent({ type: "done", payload: buildFallbackPayload() });
+        } finally {
+          try {
+            controller.close();
+          } catch {
+            // Already closed
+          }
+        }
       },
-      { status: 200 }
-    );
+    });
+
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+      },
+    });
+  }
+
+  try {
+    const output = await runStudyAgent(cleanQuery, context, {
+      precomputedEnriched: enrichedContext,
+    });
+    const finalCitations = ragCitedPages.length > 0
+      ? Array.from(new Set([...(output.citations || []), ...ragCitedPages.map((p) => `Page ${p}`)]))
+      : output.citations;
+
+    return NextResponse.json({
+      success: true,
+      answer: output.text,
+      routedTier: output.routedTier,
+      intent: output.intent,
+      toolsUsed: output.toolsUsed,
+      citations: finalCitations,
+      generatedMorph: output.generatedMorph,
+      generatedQuiz: output.generatedQuiz,
+      authoritativeReferences: output.authoritativeReferences,
+      qbankVignettes: output.qbankVignettes,
+      mnemonics: output.mnemonics,
+      topicLocation: effectiveTopicLocation || output.topicLocation,
+      ragMeta: {
+        alignmentStatus: ragAlignmentStatus,
+        activePage: activePageNum,
+        citedPages: finalCitations,
+      },
+      creditsCharged: dynamicCost.total,
+      creditsRemaining: creditCheck.remaining,
+      creditBreakdown: dynamicCost.summary,
+    });
+  } catch (error) {
+    console.error("Reader assistant agent error, falling back gracefully:", error);
+    return NextResponse.json(buildFallbackPayload(), { status: 200 });
   }
 }
 

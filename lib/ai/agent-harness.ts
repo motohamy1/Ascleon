@@ -157,6 +157,42 @@ function buildActiveViewportPrompt(
   return `${pageIntro}\n\nStudent Question / Query:\n${userQuery}`;
 }
 
+function buildArtifactSummaryText(
+  generatedMorph: any,
+  generatedQuiz: any,
+  turn1Text?: string
+): string {
+  const existing = (turn1Text || "").trim();
+  if (existing.length >= 20) {
+    return existing;
+  }
+  const parts: string[] = [];
+  if (generatedMorph) {
+    const title = generatedMorph.title || "Interactive Concept Morph";
+    const steps = Array.isArray(generatedMorph.steps)
+      ? generatedMorph.steps
+          .slice(0, 6)
+          .map((s: any) => s?.title || s?.badge)
+          .filter(Boolean)
+      : [];
+    parts.push(
+      `Generated interactive Morph study block: **${title}**${
+        steps.length > 0 ? ` (${steps.join(" → ")})` : ""
+      }.`
+    );
+  }
+  if (generatedQuiz) {
+    const q = String(generatedQuiz.question || "").trim();
+    const preview = q.length > 180 ? `${q.slice(0, 180)}...` : q;
+    parts.push(
+      preview
+        ? `Generated a board-style clinical vignette:\n\n> ${preview}`
+        : `Generated a board-style clinical vignette quiz.`
+    );
+  }
+  return parts.join("\n\n") || existing || "Generated interactive study artifact.";
+}
+
 /**
  * Executes a call to Google Gemini with tools and deep background references
  */
@@ -164,7 +200,8 @@ async function callGeminiAgent(
   apiKey: string,
   userQuery: string,
   context: AgentContext,
-  enriched: EnrichedStudyContext
+  enriched: EnrichedStudyContext,
+  onDelta?: (text: string) => void
 ): Promise<AgentRunOutput> {
   const ai = new GoogleGenAI({ apiKey });
   // Only attach function-calling tools when the student explicitly asks to generate an interactive artifact
@@ -172,10 +209,9 @@ async function callGeminiAgent(
     userQuery
   );
   const classification = classifyStudyQuery(userQuery, Boolean(context.selectedImage));
-  const selectedChain =
-    classification.tier === "fast" && !needsTools
-      ? FAST_GEMINI_MODEL_CHAIN
-      : GEMINI_MODEL_CHAIN;
+  // Flash-first for interactive chat; reserve heavy model for quantitative math or vision inputs
+  const useHeavyPrimary = classification.intent === "math_calc" || Boolean(context.selectedImage);
+  const selectedChain = useHeavyPrimary ? GEMINI_MODEL_CHAIN : FAST_GEMINI_MODEL_CHAIN;
   const orderedModels = orderModelsByHealth(selectedChain);
   const modelsToTry =
     orderedModels.length > 0
@@ -245,8 +281,10 @@ async function callGeminiAgent(
   for (let i = 0; i < modelsToTry.length; i++) {
     const modelName = modelsToTry[i];
     const isPrimary = i === 0;
-    const timeoutMs = isPrimary ? 22_000 : 14_000;
+    const timeoutMs = isPrimary ? 12_000 : 9_000;
+    const ttftMs = isPrimary ? 6_000 : 5_000;
     const supportsThinking = !modelName.includes("lite");
+    const thinkingBudget = classification.intent === "math_calc" ? 128 : 0;
     const toolsUsed: string[] = [];
     let generatedMorph: any = null;
     let generatedQuiz: any = null;
@@ -279,6 +317,62 @@ async function callGeminiAgent(
       }
     };
 
+    const runStreamWithTimeout = async (
+      config: Record<string, any>,
+      requestContents: any[]
+    ): Promise<string> => {
+      const abort = new AbortController();
+      let gotFirstChunk = false;
+      let streamFailure: Error | null = null;
+      const ttftTimer = setTimeout(() => {
+        if (!gotFirstChunk) {
+          streamFailure = new Error(`Gemini ${modelName} TTFT timed out after ${Math.round(ttftMs / 1000)}s`);
+          abort.abort();
+        }
+      }, ttftMs);
+      const totalTimer = setTimeout(() => {
+        streamFailure = new Error(`Gemini ${modelName} stream timed out after 25s`);
+        abort.abort();
+      }, 25_000);
+
+      let fullText = "";
+      try {
+        const stream = await ai.models.generateContentStream({
+          model: modelName,
+          contents: requestContents,
+          config: {
+            ...config,
+            abortSignal: abort.signal,
+          },
+        });
+
+        for await (const chunk of stream) {
+          const piece = chunk?.text || "";
+          if (piece) {
+            if (!gotFirstChunk) {
+              gotFirstChunk = true;
+              clearTimeout(ttftTimer);
+              clearModelCooldown(`gemini:${modelName}`);
+            }
+            fullText += piece;
+            onDelta?.(piece);
+          }
+        }
+        return fullText;
+      } catch (err) {
+        if (gotFirstChunk && fullText.trim().length >= 2) {
+          return fullText;
+        }
+        if (streamFailure) {
+          throw streamFailure;
+        }
+        throw err;
+      } finally {
+        clearTimeout(ttftTimer);
+        clearTimeout(totalTimer);
+      }
+    };
+
     try {
       const useCodeExecution = classification.enableCodeExecution && !needsTools;
       const baseConfig: Record<string, any> = {
@@ -289,8 +383,60 @@ async function callGeminiAgent(
           : useCodeExecution
             ? { tools: [{ codeExecution: {} }] as any }
             : {}),
-        ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 128 } } : {}),
+        ...(supportsThinking ? { thinkingConfig: { thinkingBudget } } : {}),
       };
+
+      if (onDelta && !needsTools) {
+        let streamedText = "";
+        try {
+          streamedText = await runStreamWithTimeout(baseConfig, contents);
+        } catch (firstErr: any) {
+          const msg = String(firstErr?.message || "").toLowerCase();
+          if (useCodeExecution && (msg.includes("codeexecution") || msg.includes("code_execution") || msg.includes("tool") || msg.includes("400"))) {
+            const { tools: _omitTools, thinkingConfig: _omitThinking, ...cleanConfig } = baseConfig;
+            streamedText = await runStreamWithTimeout(
+              supportsThinking && !msg.includes("thinking")
+                ? { ...cleanConfig, thinkingConfig: { thinkingBudget } }
+                : cleanConfig,
+              contents
+            );
+          } else if (supportsThinking && (msg.includes("thinking") || msg.includes("400"))) {
+            const { thinkingConfig: _omit, ...withoutThinking } = baseConfig;
+            streamedText = await runStreamWithTimeout(withoutThinking, contents);
+          } else {
+            throw firstErr;
+          }
+        }
+
+        const cleanStreamed = streamedText.trim();
+        if (cleanStreamed.length < 2) {
+          throw new Error(`Gemini ${modelName} returned empty streamed text`);
+        }
+        if (useCodeExecution && !toolsUsed.includes("code_execution")) {
+          toolsUsed.push("code_execution");
+        }
+        clearModelCooldown(`gemini:${modelName}`);
+
+        return {
+          text: normalizeScientificNotation(cleanStreamed),
+          provider: "gemini",
+          model: modelName,
+          routedTier: classification.tier,
+          intent: classification.intent,
+          toolsUsed,
+          citations: Array.from(
+            new Set([
+              `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
+              ...filterCitationSources(enriched.authoritativeReferences),
+            ])
+          ),
+          generatedMorph,
+          generatedQuiz,
+          authoritativeReferences: enriched.authoritativeReferences,
+          qbankVignettes: enriched.qbankVignettes,
+          mnemonics: enriched.mnemonics,
+        };
+      }
 
       let response: any;
       try {
@@ -302,7 +448,7 @@ async function callGeminiAgent(
           const { tools: _omitTools, thinkingConfig: _omitThinking, ...cleanConfig } = baseConfig;
           response = await runWithTimeout(
             supportsThinking && !msg.includes("thinking")
-              ? { ...cleanConfig, thinkingConfig: { thinkingBudget: 128 } }
+              ? { ...cleanConfig, thinkingConfig: { thinkingBudget } }
               : cleanConfig,
             contents,
             timeoutMs,
@@ -361,6 +507,40 @@ async function callGeminiAgent(
           });
         }
 
+        const onlyArtifactTools =
+          toolsUsed.length > 0 &&
+          toolsUsed.every(
+            (t) => t === "generate_interactive_morph" || t === "generate_board_quiz"
+          );
+
+        if (onlyArtifactTools) {
+          const artifactText = buildArtifactSummaryText(
+            generatedMorph,
+            generatedQuiz,
+            response?.text
+          );
+          onDelta?.(artifactText);
+          return {
+            text: normalizeScientificNotation(artifactText),
+            provider: "gemini",
+            model: modelName,
+            routedTier: classification.tier,
+            intent: classification.intent,
+            toolsUsed,
+            citations: Array.from(
+              new Set([
+                `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
+                ...filterCitationSources(enriched.authoritativeReferences),
+              ])
+            ),
+            generatedMorph,
+            generatedQuiz,
+            authoritativeReferences: enriched.authoritativeReferences,
+            qbankVignettes: enriched.qbankVignettes,
+            mnemonics: enriched.mnemonics,
+          };
+        }
+
         const followUpContents = [
           ...contents,
           candidate.content,
@@ -374,10 +554,10 @@ async function callGeminiAgent(
           {
             systemInstruction: fullSystemInstruction,
             temperature: 0.3,
-            ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 128 } } : {}),
+            ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
           },
           followUpContents,
-          18_000,
+          10_000,
           "Turn 2"
         );
 
@@ -385,6 +565,7 @@ async function callGeminiAgent(
         if (finalText.length < 2) {
           throw new Error(`Gemini ${modelName} returned empty text on Turn 2`);
         }
+        onDelta?.(finalText);
 
         return {
           text: normalizeScientificNotation(finalText),
@@ -411,6 +592,7 @@ async function callGeminiAgent(
       if (directText.length < 2) {
         throw new Error(`Gemini ${modelName} returned empty text`);
       }
+      onDelta?.(directText);
 
       return {
         text: normalizeScientificNotation(directText),
@@ -451,7 +633,8 @@ async function callOpenAICompatibleAgent(
   provider: AIProvider,
   userQuery: string,
   context: AgentContext,
-  enriched: EnrichedStudyContext
+  enriched: EnrichedStudyContext,
+  onDelta?: (text: string) => void
 ): Promise<AgentRunOutput> {
   // In Groq configuration, use openai/gpt-oss-120b instead of decommissioned llama-3.3-70b-versatile
   const effectiveModel =
@@ -476,7 +659,7 @@ async function callOpenAICompatibleAgent(
   const classification = classifyStudyQuery(userQuery, Boolean(context.selectedImage));
   const intentAddon = buildIntentPromptAddon(classification.intent, context.socraticMode);
   const messages: any[] = [
-    { role: "system", content: `${SOCRATIC_SYSTEM_PROMPT}\n\n${intentAddon}\n\n${langDirective}\n\n${enriched.groundingSnippet}` },
+    { role: "system", content: `${SOCRATIC_SYSTEM_PROMPT}\n\n${intentAddon}\n\n${langDirective}` },
   ];
 
   const activePage = context.currentPageNumber || context.currentSegmentIndex + 1;
@@ -521,6 +704,7 @@ async function callOpenAICompatibleAgent(
   let generatedMorph: any = null;
   let generatedQuiz: any = null;
   const isToolRequest = /morph|quiz|test me|vignette|flashcard|visualize|diagram/i.test(userQuery);
+  const useStreaming = Boolean(onDelta && !isToolRequest);
 
   const res = await fetch(endpoint, {
     method: "POST",
@@ -528,11 +712,12 @@ async function callOpenAICompatibleAgent(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    signal: AbortSignal.timeout(18_000),
+    signal: AbortSignal.timeout(useStreaming ? 25_000 : 12_000),
     body: JSON.stringify({
       model: effectiveModel,
       messages,
       ...(isToolRequest ? { tools: toolsSchema, tool_choice: "auto" } : {}),
+      ...(useStreaming ? { stream: true } : {}),
       temperature: 0.2,
     }),
   });
@@ -540,6 +725,62 @@ async function callOpenAICompatibleAgent(
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`${provider} API error (${res.status}): ${errText}`);
+  }
+
+  if (useStreaming && res.body) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+        try {
+          const parsed = JSON.parse(payload);
+          const delta = parsed?.choices?.[0]?.delta?.content;
+          if (typeof delta === "string" && delta.length > 0) {
+            fullText += delta;
+            onDelta?.(delta);
+          }
+        } catch {
+          // Ignore malformed SSE chunks
+        }
+      }
+    }
+
+    const cleanStreamed = fullText.trim();
+    if (cleanStreamed.length < 2) {
+      throw new Error(`${provider} returned empty streamed response`);
+    }
+
+    return {
+      text: normalizeScientificNotation(cleanStreamed),
+      provider,
+      model: effectiveModel,
+      routedTier: classification.tier,
+      intent: classification.intent,
+      toolsUsed,
+      citations: Array.from(
+        new Set([
+          `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
+          ...filterCitationSources(enriched.authoritativeReferences),
+        ])
+      ),
+      generatedMorph,
+      generatedQuiz,
+      authoritativeReferences: enriched.authoritativeReferences,
+      qbankVignettes: enriched.qbankVignettes,
+      mnemonics: enriched.mnemonics,
+    };
   }
 
   const data = await res.json();
@@ -578,6 +819,40 @@ async function callOpenAICompatibleAgent(
       });
     }
 
+    const onlyArtifactTools =
+      toolsUsed.length > 0 &&
+      toolsUsed.every(
+        (t) => t === "generate_interactive_morph" || t === "generate_board_quiz"
+      );
+
+    if (onlyArtifactTools) {
+      const artifactText = buildArtifactSummaryText(
+        generatedMorph,
+        generatedQuiz,
+        msg?.content
+      );
+      onDelta?.(artifactText);
+      return {
+        text: normalizeScientificNotation(artifactText),
+        provider,
+        model: effectiveModel,
+        routedTier: classification.tier,
+        intent: classification.intent,
+        toolsUsed,
+        citations: Array.from(
+          new Set([
+            `Page ${context.currentPageNumber || context.currentSegmentIndex + 1}`,
+            ...filterCitationSources(enriched.authoritativeReferences),
+          ])
+        ),
+        generatedMorph,
+        generatedQuiz,
+        authoritativeReferences: enriched.authoritativeReferences,
+        qbankVignettes: enriched.qbankVignettes,
+        mnemonics: enriched.mnemonics,
+      };
+    }
+
     // Follow-up call
     const followUpRes = await fetch(endpoint, {
       method: "POST",
@@ -585,7 +860,7 @@ async function callOpenAICompatibleAgent(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      signal: AbortSignal.timeout(16_000),
+      signal: AbortSignal.timeout(10_000),
       body: JSON.stringify({
         model: effectiveModel,
         messages,
@@ -599,10 +874,13 @@ async function callOpenAICompatibleAgent(
       if (followUpText.length < 2) {
         throw new Error(`${provider} returned empty follow-up response`);
       }
+      onDelta?.(followUpText);
       return {
         text: normalizeScientificNotation(followUpText),
         provider,
         model: effectiveModel,
+        routedTier: classification.tier,
+        intent: classification.intent,
         toolsUsed,
         citations: Array.from(
           new Set([
@@ -623,6 +901,7 @@ async function callOpenAICompatibleAgent(
   if (directContent.length < 2) {
     throw new Error(`${provider} returned empty response`);
   }
+  onDelta?.(directContent);
 
   return {
     text: normalizeScientificNotation(directContent),
@@ -703,15 +982,21 @@ export function runDeterministicFallback(
   };
 }
 
+export interface RunStudyAgentOptions {
+  onDelta?: (text: string) => void;
+  precomputedEnriched?: EnrichedStudyContext;
+}
+
 /**
  * Universal Autonomous Study Agent Dispatcher
  * Cascades through free-tier providers in order of preference, enriched with deep textbook and QBank references.
  */
 export async function runStudyAgent(
   userQuery: string,
-  context: AgentContext
+  context: AgentContext,
+  options?: RunStudyAgentOptions
 ): Promise<AgentRunOutput> {
-  // Pre-flight background enrichment with 2.5s cap so slow DB/enrichment never stalls chat
+  // Pre-flight background enrichment with 1s cap so slow DB/enrichment never stalls chat
   const emptyEnriched: EnrichedStudyContext = {
     focalTopic: context.bookTopic || context.bookTitle || "General Study",
     groundingSnippet: "",
@@ -719,19 +1004,22 @@ export async function runStudyAgent(
     qbankVignettes: [],
     mnemonics: [],
   };
-  const enriched = await Promise.race([
-    retrieveEnrichedContext({
-      text: context.currentSegmentContent,
-      query: userQuery,
-      bookTitle: context.bookTitle,
-      bookTopic: context.bookTopic || "",
-      bookReferences: context.bookReferences,
-    }).catch(() => emptyEnriched),
-    new Promise<EnrichedStudyContext>((resolve) =>
-      setTimeout(() => resolve(emptyEnriched), 2500)
-    ),
-  ]);
+  const enriched =
+    options?.precomputedEnriched ??
+    (await Promise.race([
+      retrieveEnrichedContext({
+        text: context.currentSegmentContent,
+        query: userQuery,
+        bookTitle: context.bookTitle,
+        bookTopic: context.bookTopic || "",
+        bookReferences: context.bookReferences,
+      }).catch(() => emptyEnriched),
+      new Promise<EnrichedStudyContext>((resolve) =>
+        setTimeout(() => resolve(emptyEnriched), 1000)
+      ),
+    ]));
 
+  const onDelta = options?.onDelta;
   const geminiKey = process.env.GEMINI_API_KEY;
   const groqKey = process.env.GROQ_API_KEY;
   const openRouterKey = process.env.OPENROUTER_API_KEY;
@@ -740,7 +1028,7 @@ export async function runStudyAgent(
   // 1. Google Gemini (Preferred: 1M context + free tier)
   if (geminiKey && geminiKey !== "your_gemini_api_key_here") {
     try {
-      return await callGeminiAgent(geminiKey, userQuery, context, enriched);
+      return await callGeminiAgent(geminiKey, userQuery, context, enriched, onDelta);
     } catch (err) {
       console.warn("Gemini agent call failed, attempting fallback provider:", err);
     }
@@ -756,7 +1044,8 @@ export async function runStudyAgent(
         "groq",
         userQuery,
         context,
-        enriched
+        enriched,
+        onDelta
       );
     } catch (err) {
       console.warn("Groq agent call failed, attempting fallback provider:", err);
@@ -773,7 +1062,8 @@ export async function runStudyAgent(
         "openrouter",
         userQuery,
         context,
-        enriched
+        enriched,
+        onDelta
       );
     } catch (err) {
       console.warn("OpenRouter agent call failed, attempting fallback provider:", err);
@@ -790,7 +1080,8 @@ export async function runStudyAgent(
         "openai",
         userQuery,
         context,
-        enriched
+        enriched,
+        onDelta
       );
     } catch (err) {
       console.warn("OpenAI agent call failed, attempting deterministic fallback:", err);
@@ -798,5 +1089,7 @@ export async function runStudyAgent(
   }
 
   // 5. Intelligent Fallback: Uses deep references and QBanks, 100% reliable with zero keys
-  return runDeterministicFallback(userQuery, context, enriched);
+  const fallback = runDeterministicFallback(userQuery, context, enriched);
+  onDelta?.(fallback.text);
+  return fallback;
 }
