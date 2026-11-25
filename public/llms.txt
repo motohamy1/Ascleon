@@ -1,0 +1,13 @@
+# Ascleon
+
+> AI study companion for medical students. Study medical lectures and textbooks side-by-side with a live bilingual voice mentor, diagnostic roadmaps, physiology simulators, and case-based medical QBanks.
+
+## Overview
+
+Ascleon helps medical students master dense lectures and textbooks by combining an interactive PDF reader with a real-time bilingual (English and Arabic) AI voice mentor, structured clinical diagnostic roadmaps, interactive physiology simulators, and USMLE-style case-based question banks.
+
+## Key Pages
+
+- [Home](https://www.ascleon.app): Overview of Ascleon and its medical study workflow.
+- [Library](https://www.ascleon.app/library): Browse and open medical textbooks and lecture materials.
+- [Subscriptions](https://www.ascleon.app/subscriptions): Available plans and features.
