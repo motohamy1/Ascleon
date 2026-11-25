@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MorphJourney, MorphJourneyStage } from "@/lib/ai/schemas/decision-models";
-import { BiDiText } from "@/components/ui/BiDiText";
+import { BiDiText, resolveTextDirection } from "@/components/ui/BiDiText";
 
 interface InteractiveJourneyStageProps {
   journey: MorphJourney;
@@ -427,9 +427,7 @@ export default function InteractiveJourneyStage({
                 >
                   {isDone ? "✓" : sIdx + 1}
                 </span>
-                <span className="text-[10.5px] truncate flex-1">
-                  {stg.title}
-                </span>
+                <BiDiText as="span" className="text-[10.5px] truncate flex-1 text-start" text={stg.title} />
               </button>
             );
           })}
@@ -464,12 +462,15 @@ export default function InteractiveJourneyStage({
                   if (!hs) return null;
                   return (
                     <div>
-                      <div className="flex items-center justify-between text-[#ff4c00] font-black pb-1 border-b border-[#f6d7a1]/15 mb-1">
-                        <span>✦ {hs.label}</span>
+                      <div className="flex items-center justify-between gap-2 text-[#ff4c00] font-black pb-1 border-b border-[#f6d7a1]/15 mb-1">
+                        <span className="flex min-w-0 items-center gap-1">
+                          <span className="shrink-0">✦</span>
+                          <BiDiText as="span" className="min-w-0" text={hs.label} />
+                        </span>
                         <button
                           type="button"
                           onClick={() => setSelectedHotspotId(null)}
-                          className="text-[#f6d7a1]/75 hover:text-[#fbf7f0] cursor-pointer"
+                          className="shrink-0 text-[#f6d7a1]/75 hover:text-[#fbf7f0] cursor-pointer"
                         >
                           ✕
                         </button>
@@ -535,14 +536,15 @@ export default function InteractiveJourneyStage({
               <h4 className="text-[10.5px] font-black uppercase text-[var(--study-text)] mb-1.5 tracking-wide">
                 ✦ Core Pathological Invariants:
               </h4>
-              <ul className="space-y-1">
+              <ul className="space-y-1.5">
                 {currentStage.keyPathologyPoints.map((pt, pIdx) => (
                   <li
                     key={pIdx}
-                    className="flex items-start gap-2 text-xs text-[var(--study-text-soft)] leading-snug"
+                    dir={resolveTextDirection(pt)}
+                    className="ascleon-bidi flex items-start gap-2 text-xs text-[var(--study-text-soft)] leading-relaxed text-start"
                   >
-                    <span className="size-1.5 rounded-full bg-[#ff4c00] mt-1.5 shrink-0" />
-                    <BiDiText text={pt} />
+                    <span className="size-1.5 rounded-full bg-[#ff4c00] mt-2 shrink-0" />
+                    <BiDiText as="span" className="min-w-0 flex-1" text={pt} />
                   </li>
                 ))}
               </ul>
@@ -600,11 +602,11 @@ export default function InteractiveJourneyStage({
                     : "border-[var(--study-border-strong)] bg-[var(--study-surface-muted)] hover:border-[var(--study-panel-border)] hover:bg-[var(--study-glass-hover)] text-[var(--study-text)] font-medium"
                 )}
               >
-                <div className="flex items-start gap-2">
-                  <span dir="ltr" className="font-mono font-black text-[11px] shrink-0">
+                <div dir={resolveTextDirection(opt)} className="flex items-start gap-2">
+                  <bdi dir="ltr" className="font-mono font-black text-[11px] shrink-0">
                     {String.fromCharCode(65 + optIdx)}.
-                  </span>
-                  <BiDiText as="span" className="flex-1 text-start" text={opt} />
+                  </bdi>
+                  <BiDiText as="span" className="ascleon-bidi flex-1 text-start" text={opt} />
                 </div>
               </button>
             );
@@ -630,9 +632,11 @@ export default function InteractiveJourneyStage({
                 ) : (
                   <AlertTriangle className="size-4 text-[#e0459a] shrink-0 mt-0.5" />
                 )}
-                <div className="text-[11px]">
-                  <strong>{isCorrect ? "Correct Diagnosis!" : "Clinical Re-evaluation:"}</strong>{" "}
-                  <BiDiText text={currentStage.checkpoint.explanation} />
+                <div className="min-w-0 flex-1 text-[11px] flex flex-col gap-0.5">
+                  <strong className="text-[11px]">
+                    {isCorrect ? "Correct Diagnosis!" : "Clinical Re-evaluation:"}
+                  </strong>
+                  <BiDiText as="p" className="leading-relaxed" text={currentStage.checkpoint.explanation} />
                 </div>
               </div>
 

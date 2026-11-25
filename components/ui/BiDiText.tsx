@@ -12,7 +12,16 @@ interface BiDiTextProps {
 }
 
 const ARABIC_CHAR_REGEX = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g;
+const ARABIC_TEST_REGEX = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
 const LATIN_CHAR_REGEX = /[A-Za-z]/g;
+
+/**
+ * Returns true if the given string contains any Arabic script characters.
+ */
+export function containsArabic(raw: string): boolean {
+  if (!raw) return false;
+  return ARABIC_TEST_REGEX.test(raw);
+}
 
 /**
  * Determines the true paragraph base direction.
@@ -150,13 +159,15 @@ export function BiDiText({
   }, [rawString]);
 
   const isInlineSpan = Component === 'span';
-  const alignmentClass = !isInlineSpan ? 'text-start' : '';
+  const baseClass = isInlineSpan
+    ? '[unicode-bidi:isolate] break-words'
+    : 'ascleon-bidi text-start [unicode-bidi:isolate] break-words';
 
   if (typeof children !== 'string' && children) {
     return (
       <Component
         dir={effectiveDir}
-        className={`${alignmentClass} ${className}`.trim()}
+        className={`${baseClass} ${className}`.trim()}
       >
         {children}
       </Component>
@@ -166,7 +177,7 @@ export function BiDiText({
   return (
     <Component
       dir={effectiveDir}
-      className={`${alignmentClass} ${className}`.trim()}
+      className={`${baseClass} ${className}`.trim()}
     >
       {parsedContent}
     </Component>

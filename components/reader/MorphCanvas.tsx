@@ -11,7 +11,7 @@ import {
 } from "@/types/morph";
 import { ConceptMapCanvas } from "./ConceptMapCanvas";
 import InteractiveJourneyStage from "./InteractiveJourneyStage";
-import { BiDiText } from "@/components/ui/BiDiText";
+import { BiDiText, resolveTextDirection } from "@/components/ui/BiDiText";
 import {
   Sparkles,
   ArrowRight,
@@ -456,17 +456,15 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                         : "border-[var(--study-border)] bg-[var(--study-surface-muted)] hover:border-[var(--study-panel-border)]"
                     )}
                   >
-                    <div className="flex items-center justify-between font-bold text-[var(--study-text)]">
-                      <span className="flex items-center gap-1.5">
+                    <div className="flex items-center justify-between gap-2 font-bold text-[var(--study-text)]">
+                      <span className="flex min-w-0 items-center gap-1.5">
                         <span
-                          className="size-2.5 rounded-full"
+                          className="size-2.5 shrink-0 rounded-full"
                           style={{ backgroundColor: lm.color }}
                         />
-                        <span>{lm.name}</span>
+                        <BiDiText as="span" className="min-w-0" text={lm.name} />
                       </span>
-                      <span className="text-[10px] text-[var(--study-text-muted)] font-mono">
-                        {lm.location}
-                      </span>
+                      <BiDiText as="span" className="shrink-0 text-[10px] text-[var(--study-text-muted)] font-mono" text={lm.location} />
                     </div>
                     <BiDiText as="p" className="text-[11px] leading-relaxed text-[var(--study-text-soft)]">
                       {lm.notes}
@@ -484,45 +482,52 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
       {/* ========================================================================= */}
       {comparisonBlock && comparisonBlock.comparisonData && (activeTab === "all" || activeTab === "matrix") && (
         <div className="flex flex-col gap-3 rounded-[18px] border-[1.5px] border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md p-3.5 shadow-[var(--study-shadow)]">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[var(--study-text)]">
-              <Split className="size-4 text-[color:var(--orange)]" />
-              <span>{comparisonBlock.title}</span>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2 text-xs font-black uppercase tracking-wider text-[var(--study-text)]">
+              <Split className="size-4 shrink-0 text-[color:var(--orange)]" />
+              <BiDiText as="span" className="min-w-0" text={comparisonBlock.title} />
             </div>
-            <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-2 py-0.5 text-[9.5px] font-mono text-[var(--study-text-muted)]">
+            <span className="shrink-0 rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-2 py-0.5 text-[9.5px] font-mono text-[var(--study-text-muted)]">
               Pattern Battle
             </span>
           </div>
-          <p className="text-[11px] text-[var(--study-text-muted)] -mt-1">
-            {comparisonBlock.subtitle}
-          </p>
+          {comparisonBlock.subtitle && (
+            <BiDiText as="p" className="text-[11px] text-[var(--study-text-muted)] -mt-1" text={comparisonBlock.subtitle} />
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Left: Distinctive Accent Column (Orange Fill) */}
             <div className="flex flex-col gap-2 rounded-[18px] border-2 border-[var(--study-panel-border)] bg-[#ff4c00] text-[#0f0e10] p-4 shadow-chip">
-              <div className="flex items-center justify-between">
-                <span className="rounded-full bg-[#0f0e10] px-2.5 py-0.5 text-[10px] font-black text-[#f6d7a1] uppercase tracking-wider">
-                  {comparisonBlock.comparisonData.left.badge}
-                </span>
-                <span className="text-[10px] font-mono font-bold text-[#0f0e10]/80 uppercase">Primary Focus</span>
+              <div className="flex items-center justify-between gap-2">
+                <BiDiText
+                  as="span"
+                  className="rounded-full bg-[#0f0e10] px-2.5 py-0.5 text-[10px] font-black text-[#f6d7a1] uppercase tracking-wider"
+                  text={comparisonBlock.comparisonData.left.badge}
+                />
+                <span className="shrink-0 text-[10px] font-mono font-bold text-[#0f0e10]/80 uppercase">Primary Focus</span>
               </div>
-              <h4 className="text-sm font-black text-[#0f0e10]">
-                {comparisonBlock.comparisonData.left.title}
-              </h4>
+              <BiDiText as="h4" className="text-sm font-black text-[#0f0e10]" text={comparisonBlock.comparisonData.left.title} />
 
-              <div className="flex flex-col gap-1.5 pt-2 border-t border-[#0f0e10]/20 text-[11px]">
+              <div className="flex flex-col gap-2 pt-2 border-t border-[#0f0e10]/20 text-[11px]">
                 {comparisonBlock.comparisonData.left.characteristics.map((c, i) => (
-                  <div key={i} className="flex items-start gap-1.5 leading-snug">
-                    <span className="text-[#0f0e10] font-black">✦</span>
-                    <span className="text-[#0f0e10]">
-                      <strong><BiDiText text={c.label} />:</strong> <BiDiText text={c.value} />
+                  <div
+                    key={i}
+                    dir={resolveTextDirection(`${c.label} ${c.value}`)}
+                    className="ascleon-bidi flex items-start gap-1.5 leading-relaxed text-start"
+                  >
+                    <span className="shrink-0 text-[#0f0e10] font-black">✦</span>
+                    <span className="min-w-0 flex-1 text-[#0f0e10]">
+                      <strong className="[unicode-bidi:isolate]">
+                        <BiDiText text={c.label} />:
+                      </strong>{" "}
+                      <BiDiText text={c.value} />
                     </span>
                   </div>
                 ))}
               </div>
 
               {comparisonBlock.comparisonData.left.visualSnippet && (
-                <div className="mt-2 rounded-lg bg-[#0f0e10] p-2 font-mono text-[10px] text-[#f6d7a1] border border-[#0f0e10] overflow-x-auto whitespace-pre">
+                <div dir="ltr" className="mt-2 rounded-lg bg-[#0f0e10] p-2 font-mono text-[10px] text-[#f6d7a1] border border-[#0f0e10] overflow-x-auto whitespace-pre text-left">
                   {comparisonBlock.comparisonData.left.visualSnippet}
                 </div>
               )}
@@ -530,29 +535,36 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
 
             {/* Right: Clean Standard Column (Mint/Teal Fill) */}
             <div className="flex flex-col gap-2 rounded-[18px] border-2 border-[var(--study-panel-border)] bg-[#7fd8c9] text-[#0f0e10] p-4 shadow-chip">
-              <div className="flex items-center justify-between">
-                <span className="rounded-full bg-[#0f0e10] px-2.5 py-0.5 text-[10px] font-black text-[#7fd8c9] uppercase tracking-wider">
-                  {comparisonBlock.comparisonData.right.badge}
-                </span>
-                <span className="text-[10px] font-mono font-bold text-[#0f0e10]/80 uppercase">Differential Target</span>
+              <div className="flex items-center justify-between gap-2">
+                <BiDiText
+                  as="span"
+                  className="rounded-full bg-[#0f0e10] px-2.5 py-0.5 text-[10px] font-black text-[#7fd8c9] uppercase tracking-wider"
+                  text={comparisonBlock.comparisonData.right.badge}
+                />
+                <span className="shrink-0 text-[10px] font-mono font-bold text-[#0f0e10]/80 uppercase">Differential Target</span>
               </div>
-              <h4 className="text-sm font-black text-[#0f0e10]">
-                {comparisonBlock.comparisonData.right.title}
-              </h4>
+              <BiDiText as="h4" className="text-sm font-black text-[#0f0e10]" text={comparisonBlock.comparisonData.right.title} />
 
-              <div className="flex flex-col gap-1.5 pt-2 border-t border-[#0f0e10]/20 text-[11px]">
+              <div className="flex flex-col gap-2 pt-2 border-t border-[#0f0e10]/20 text-[11px]">
                 {comparisonBlock.comparisonData.right.characteristics.map((c, i) => (
-                  <div key={i} className="flex items-start gap-1.5 leading-snug">
-                    <span className="text-[#0f0e10] font-black">✓</span>
-                    <span className="text-[#0f0e10]">
-                      <strong><BiDiText text={c.label} />:</strong> <BiDiText text={c.value} />
+                  <div
+                    key={i}
+                    dir={resolveTextDirection(`${c.label} ${c.value}`)}
+                    className="ascleon-bidi flex items-start gap-1.5 leading-relaxed text-start"
+                  >
+                    <span className="shrink-0 text-[#0f0e10] font-black">✓</span>
+                    <span className="min-w-0 flex-1 text-[#0f0e10]">
+                      <strong className="[unicode-bidi:isolate]">
+                        <BiDiText text={c.label} />:
+                      </strong>{" "}
+                      <BiDiText text={c.value} />
                     </span>
                   </div>
                 ))}
               </div>
 
               {comparisonBlock.comparisonData.right.visualSnippet && (
-                <div className="mt-2 rounded-lg bg-[#0f0e10] p-2 font-mono text-[10px] text-[#7fd8c9] border border-[#0f0e10] overflow-x-auto whitespace-pre">
+                <div dir="ltr" className="mt-2 rounded-lg bg-[#0f0e10] p-2 font-mono text-[10px] text-[#7fd8c9] border border-[#0f0e10] overflow-x-auto whitespace-pre text-left">
                   {comparisonBlock.comparisonData.right.visualSnippet}
                 </div>
               )}
@@ -566,14 +578,14 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
       {/* ========================================================================= */}
       {roadmapBlock && roadmapBlock.roadmapCards && (activeTab === "all" || activeTab === "cards") && (
         <div className="flex flex-col gap-2.5">
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[var(--study-text)]">
-              <Layers className="size-3.5 text-[color:var(--orange)]" />
-              <span>{roadmapBlock.title}</span>
+          <div className="flex items-center justify-between gap-2 px-1">
+            <div className="flex min-w-0 items-center gap-2 text-xs font-black uppercase tracking-wider text-[var(--study-text)]">
+              <Layers className="size-3.5 shrink-0 text-[color:var(--orange)]" />
+              <BiDiText as="span" className="min-w-0" text={roadmapBlock.title} />
             </div>
-            <span className="text-[10px] text-[var(--study-text-muted)]">
-              {roadmapBlock.subtitle}
-            </span>
+            {roadmapBlock.subtitle && (
+              <BiDiText as="span" className="text-[10px] text-[var(--study-text-muted)] text-end" text={roadmapBlock.subtitle} />
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
@@ -624,14 +636,14 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                 >
                   <div className="flex flex-col gap-2 min-w-0">
                     <div className="flex items-center justify-between gap-2 min-w-0">
-                      <span
+                      <BiDiText
+                        as="span"
                         className={cn(
                           "rounded-full border px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider shrink-0",
                           badgeStyle,
                         )}
-                      >
-                        {card.badge}
-                      </span>
+                        text={card.badge}
+                      />
                       {card.contextLink && (
                         <span className="truncate text-[10px] font-mono font-bold text-[#0f0e10]/65">
                           Section {card.contextLink.targetPageOrSegment}
@@ -639,21 +651,23 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                       )}
                     </div>
 
-                    <h4 className="text-sm font-black leading-snug text-[#0f0e10] break-words">
-                      <BiDiText text={card.title} />
-                    </h4>
+                    <BiDiText as="h4" className="text-sm font-black leading-relaxed text-[#0f0e10]">
+                      {card.title}
+                    </BiDiText>
 
                     <div className={cn("text-xs font-semibold leading-relaxed break-words", subStyle)}>
-                      <BiDiText text={card.subtitle} />
+                      <BiDiText as="p" text={card.subtitle} />
                     </div>
 
                     <ul className={cn("flex flex-col gap-1.5 pt-2 border-t text-[11px] font-medium text-[#0f0e10]", dividerStyle)}>
                       {card.bulletPoints.map((pt, idx) => (
-                        <li key={idx} className="flex items-start gap-1.5 leading-relaxed">
+                        <li
+                          key={idx}
+                          dir={resolveTextDirection(pt)}
+                          className="ascleon-bidi flex items-start gap-1.5 leading-relaxed text-start"
+                        >
                           <span className={cn("shrink-0 font-black", bulletBullet)}>›</span>
-                          <span className="break-words">
-                            <BiDiText text={pt} />
-                          </span>
+                          <BiDiText as="span" className="min-w-0 flex-1" text={pt} />
                         </li>
                       ))}
                     </ul>
@@ -668,17 +682,22 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                             </span>
                             <ul className="space-y-1">
                               {card.mechanismSteps.map((step, sIdx) => (
-                                <li key={sIdx} className="flex items-start gap-1">
-                                  <span className="font-bold text-[#0f0e10]">{sIdx + 1}.</span>
-                                  <BiDiText text={step} />
+                                <li
+                                  key={sIdx}
+                                  dir={resolveTextDirection(step)}
+                                  className="ascleon-bidi flex items-start gap-1.5 leading-relaxed text-start"
+                                >
+                                  <bdi dir="ltr" className="shrink-0 font-bold text-[#0f0e10]">{sIdx + 1}.</bdi>
+                                  <BiDiText as="span" className="min-w-0 flex-1" text={step} />
                                 </li>
                               ))}
                             </ul>
                           </div>
                         )}
                         {card.clinicalSignificance && (
-                          <div className="text-[10.5px] italic text-[#0f0e10]/90">
-                            <strong>Significance:</strong> <BiDiText text={card.clinicalSignificance} />
+                          <div className="text-[10.5px] italic text-[#0f0e10]/90 flex flex-col gap-0.5">
+                            <bdi dir="ltr" className="not-italic font-black uppercase text-[9.5px]">Significance:</bdi>
+                            <BiDiText as="p" className="leading-relaxed" text={card.clinicalSignificance} />
                           </div>
                         )}
                       </div>
@@ -700,11 +719,11 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                             );
                           }
                         }}
-                        className="flex w-full items-center justify-between text-left text-[#0f0e10] font-bold hover:underline transition-colors cursor-pointer"
+                        className="flex w-full items-center justify-between gap-2 text-start text-[#0f0e10] font-bold hover:underline transition-colors cursor-pointer"
                       >
-                        <span className="font-bold flex items-center gap-1 truncate">
-                          <span>🔗</span>
-                          <span className="truncate">{card.contextLink.label}</span>
+                        <span className="font-bold flex min-w-0 items-center gap-1 truncate">
+                          <span className="shrink-0">🔗</span>
+                          <BiDiText as="span" className="truncate" text={card.contextLink.label} />
                         </span>
                         <ArrowRight className="size-3 shrink-0" />
                       </button>
@@ -723,11 +742,11 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
       {simulatorBlock && (activeTab === "all" || activeTab === "simulator") && (
         <div className="flex flex-col gap-3 rounded-[18px] border-[1.5px] border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md p-3.5 shadow-[var(--study-shadow)]">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[var(--study-teal-text)]">
-              <Activity className="size-4 text-[var(--study-teal-text)]" />
-              <span>{simulatorBlock.title}</span>
+            <div className="flex min-w-0 items-center gap-2 text-xs font-black uppercase tracking-wider text-[var(--study-teal-text)]">
+              <Activity className="size-4 shrink-0 text-[var(--study-teal-text)]" />
+              <BiDiText as="span" className="min-w-0" text={simulatorBlock.title} />
             </div>
-            <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-2 py-0.5 text-[9.5px] font-bold text-[var(--study-text-muted)]">
+            <span className="shrink-0 rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-2 py-0.5 text-[9.5px] font-bold text-[var(--study-text-muted)]">
               Interactive Dynamics Engine
             </span>
           </div>
@@ -856,13 +875,16 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
           )}
 
           {currentPreset && (
-            <div className="flex items-start gap-2 rounded-xl bg-[var(--study-surface-muted)] p-3 text-xs leading-relaxed text-[var(--study-text-soft)] border border-[var(--study-border)]">
+            <div
+              dir={resolveTextDirection(`${currentPreset.label} ${currentPreset.caption}`)}
+              className="ascleon-bidi flex items-start gap-2 rounded-xl bg-[var(--study-surface-muted)] p-3 text-xs leading-relaxed text-[var(--study-text-soft)] border border-[var(--study-border)] text-start"
+            >
               <Info className="size-4 shrink-0 text-[var(--study-teal-text)] mt-0.5" />
-              <div>
-                <strong className="text-[var(--study-text)]">
-                  {currentPreset.label}:{" "}
+              <div className="min-w-0 flex-1">
+                <strong className="text-[var(--study-text)] [unicode-bidi:isolate]">
+                  <BiDiText text={currentPreset.label} />:{" "}
                 </strong>
-                <span>{currentPreset.caption}</span>
+                <BiDiText text={currentPreset.caption} />
               </div>
             </div>
           )}

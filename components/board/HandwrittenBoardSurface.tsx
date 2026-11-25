@@ -23,6 +23,7 @@ import {
   SketchPoint,
   strokeToPath2D,
 } from "@/lib/board/prng-sketch";
+import { renderBidiNodes, resolveTextDirection } from "@/components/ui/BiDiText";
 export type InkTool = "none" | "pen" | "highlighter" | "eraser";
 
 export interface HandwrittenBoardSurfaceHandle {
@@ -188,6 +189,7 @@ function MeasuredTextNode({
 
   if (progress <= 0.01) return null;
 
+  const isRtl = Boolean(prim.rtl) || resolveTextDirection(prim.text) === "rtl";
   const revealPct = Math.round((1 - progress) * 100);
   const justify =
     prim.align === "center"
@@ -196,14 +198,14 @@ function MeasuredTextNode({
       ? "flex-end"
       : "flex-start";
 
-  const clipPath = prim.rtl
+  const clipPath = isRtl
     ? `inset(0 0 0 ${revealPct}%)`
     : `inset(0 ${revealPct}% 0 0)`;
 
   return (
     <div
       ref={boxRef}
-      dir={prim.rtl ? "rtl" : "ltr"}
+      dir={isRtl ? "rtl" : "ltr"}
       data-board-text="true"
       style={{
         position: "absolute",
@@ -215,10 +217,10 @@ function MeasuredTextNode({
         alignItems: "center",
         justifyContent: justify,
         color: isActiveNode ? "#0F172A" : prim.color,
-        fontFamily: getFontStack(prim.fontKind, prim.rtl),
+        fontFamily: getFontStack(prim.fontKind, isRtl),
         fontWeight: prim.weight,
         fontSize: `clamp(10px, ${(prim.fontSize / BOARD.w) * 100}cqw, ${prim.fontSize * 1.25}px)`,
-        lineHeight: 1.08,
+        lineHeight: isRtl ? 1.28 : 1.12,
         whiteSpace: "nowrap",
         overflow: "hidden",
         clipPath,
@@ -227,7 +229,7 @@ function MeasuredTextNode({
     >
       <span
         ref={spanRef}
-        dir="auto"
+        dir={isRtl ? "rtl" : "ltr"}
         style={{
           display: "inline-block",
           unicodeBidi: "isolate",
@@ -235,12 +237,12 @@ function MeasuredTextNode({
           transformOrigin:
             prim.align === "center"
               ? "center center"
-              : prim.align === "right" || prim.rtl
+              : prim.align === "right" || isRtl
               ? "right center"
               : "left center",
         }}
       >
-        {prim.text}
+        {renderBidiNodes(prim.text, prim.id)}
       </span>
     </div>
   );

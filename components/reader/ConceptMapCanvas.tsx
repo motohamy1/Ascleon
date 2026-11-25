@@ -18,7 +18,7 @@ import {
   Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { BiDiText } from "@/components/ui/BiDiText";
+import { BiDiText, resolveTextDirection } from "@/components/ui/BiDiText";
 
 interface ConceptMapCanvasProps {
   rootLabel?: string;
@@ -406,18 +406,26 @@ export function ConceptMapCanvas({
               }}
             >
               <div className="flex items-center justify-between gap-1 pb-1">
-                <span className="text-[9px] font-black uppercase tracking-wider opacity-85 truncate">
-                  {node.category || (isRoot ? "Root Topic" : isPillar ? "Core Pillar" : "Key Rule")}
-                </span>
+                <BiDiText
+                  as="span"
+                  className="text-[9px] font-black uppercase tracking-wider opacity-85 truncate"
+                  text={node.category || (isRoot ? "Root Topic" : isPillar ? "Core Pillar" : "Key Rule")}
+                />
                 <Move className="size-2.5 opacity-60 shrink-0" />
               </div>
 
-              <div className="font-bold text-xs leading-snug line-clamp-2">
+              <div
+                dir={resolveTextDirection(node.label)}
+                className="font-bold text-xs leading-relaxed line-clamp-2 text-start"
+              >
                 <BiDiText text={node.label} />
               </div>
 
               {node.sublabel && (
-                <div className="text-[10px] opacity-85 truncate mt-0.5">
+                <div
+                  dir={resolveTextDirection(node.sublabel)}
+                  className="text-[10px] opacity-85 truncate mt-0.5 text-start"
+                >
                   <BiDiText text={node.sublabel} />
                 </div>
               )}
@@ -430,26 +438,28 @@ export function ConceptMapCanvas({
       {activeNode && (
         <div className="mindmap-controls absolute bottom-2 inset-x-2 z-30 rounded-[16px] border-2 border-[#ff4c00] bg-[var(--study-surface-solid)] p-3.5 text-[var(--study-text)] shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-2 duration-150 max-h-56 overflow-y-auto study-scrollbar">
           <div className="flex items-start justify-between gap-2 pb-2 border-b border-[var(--study-border)] mb-2">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="rounded-full bg-[#ff4c00] text-[#0f0e10] px-2 py-0.5 text-[9.5px] font-black uppercase">
-                  {activeNode.category}
-                </span>
-                <h4 className="font-serif font-bold text-xs sm:text-sm text-[var(--study-text)]">
-                  <BiDiText text={activeNode.label} />
-                </h4>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <BiDiText
+                  as="span"
+                  className="rounded-full bg-[#ff4c00] text-[#0f0e10] px-2 py-0.5 text-[9.5px] font-black uppercase"
+                  text={activeNode.category}
+                />
+                <BiDiText as="h4" className="font-serif font-bold text-xs sm:text-sm text-[var(--study-text)]">
+                  {activeNode.label}
+                </BiDiText>
               </div>
               {activeNode.sublabel && (
-                <p className="text-[11px] text-[var(--study-teal-text)] mt-0.5">
-                  <BiDiText text={activeNode.sublabel} />
-                </p>
+                <BiDiText as="p" className="text-[11px] text-[var(--study-teal-text)] mt-0.5">
+                  {activeNode.sublabel}
+                </BiDiText>
               )}
             </div>
 
             <button
               type="button"
               onClick={() => setSelectedNodeId(null)}
-              className="text-[var(--study-text-muted)] hover:text-[var(--study-text)] p-1 rounded-md cursor-pointer"
+              className="text-[var(--study-text-muted)] hover:text-[var(--study-text)] p-1 rounded-md cursor-pointer shrink-0"
               title="Close Drawer"
             >
               <X className="size-4" />
@@ -457,8 +467,11 @@ export function ConceptMapCanvas({
           </div>
 
           {/* Full Non-Truncated Explanation */}
-          <div className="text-xs leading-relaxed text-[var(--study-text-soft)] mb-3">
-            <BiDiText text={activeNode.details} />
+          <div
+            dir={resolveTextDirection(activeNode.details)}
+            className="text-xs leading-relaxed text-[var(--study-text-soft)] mb-3 text-start"
+          >
+            <BiDiText as="p" text={activeNode.details} />
           </div>
 
           {/* Step-by-Step Mechanisms if available */}
@@ -469,9 +482,13 @@ export function ConceptMapCanvas({
               </span>
               <ul className="space-y-1 text-[var(--study-text)]">
                 {activeNode.mechanismSteps.map((step, sIdx) => (
-                  <li key={sIdx} className="flex items-start gap-1.5 text-[11px]">
-                    <span className="font-bold text-[#ff4c00]">{sIdx + 1}.</span>
-                    <BiDiText text={step} />
+                  <li
+                    key={sIdx}
+                    dir={resolveTextDirection(step)}
+                    className="ascleon-bidi flex items-start gap-1.5 text-[11px] leading-relaxed text-start"
+                  >
+                    <bdi dir="ltr" className="shrink-0 font-bold text-[#ff4c00]">{sIdx + 1}.</bdi>
+                    <BiDiText as="span" className="min-w-0 flex-1" text={step} />
                   </li>
                 ))}
               </ul>

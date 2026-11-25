@@ -9,7 +9,7 @@ import {
   getBookDomainContext,
 } from "@/lib/ai/knowledge/sample-book-data";
 import { MorphCanvas } from "@/components/reader/MorphCanvas";
-import { BiDiText } from "@/components/ui/BiDiText";
+import { BiDiText, resolveTextDirection } from "@/components/ui/BiDiText";
 import { AscleonVoiceStudio } from "@/components/reader/AscleonVoiceStudio";
 import {
   VoiceSessionProvider,
@@ -127,6 +127,7 @@ type FitMode = "normal" | "fit-width" | "fit-page";
 type StudyIntent = "morph" | "chat" | "whiteboard" | "voice" | "summary" | "quiz";
 
 interface ChatMessage {
+  streamId?: string;
   sender: "user" | "ai";
   text: string;
   pageNumber?: number;
@@ -1448,6 +1449,7 @@ export default function LivingReader({
           history: historyPayload,
           studyScope,
           topicMap: liveBlueprint?.topicMap,
+          stream: true,
         }),
       });
 
@@ -1476,6 +1478,120 @@ export default function LivingReader({
         }
         throw new Error(errorData.error || `AI error ${res.status}`);
       }
+
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/x-ndjson") && res.body) {
+        const streamId = `stream-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        let hasStreamedBubble = false;
+        let donePayload: any = null;
+
+        const handleStreamLine = (rawLine: string) => {
+          const trimmed = rawLine.trim();
+          if (!trimmed) return;
+          try {
+            const evt = JSON.parse(trimmed);
+            if (evt?.type === "delta" && typeof evt.text === "string" && evt.text.length > 0) {
+              if (!hasStreamedBubble) {
+                hasStreamedBubble = true;
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    streamId,
+                    sender: "ai",
+                    text: evt.text,
+                    pageNumber: activePageNum,
+                    time: new Date().toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }),
+                  },
+                ]);
+              } else {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.streamId === streamId ? { ...m, text: m.text + evt.text } : m
+                  )
+                );
+              }
+            } else if (evt?.type === "done" && evt.payload) {
+              donePayload = evt.payload;
+            }
+          } catch {
+            // Ignore malformed NDJSON chunk
+          }
+        };
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            handleStreamLine(line);
+          }
+        }
+        if (buffer.trim()) {
+          handleStreamLine(buffer);
+        }
+
+        const data = donePayload || {};
+        if (data.authoritativeReferences?.length) {
+          setActiveReferences(data.authoritativeReferences);
+        }
+        if (data.mnemonics?.length) {
+          setActiveMnemonics(data.mnemonics);
+        }
+        if (data.generatedMorph) {
+          setMorphArtifacts((prev) => ({
+            ...prev,
+            [currentIdx]: data.generatedMorph,
+          }));
+        }
+
+        if (hasStreamedBubble) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.streamId === streamId
+                ? {
+                    ...m,
+                    text: data.answer || m.text || "I have analyzed this passage.",
+                    provider: data.provider,
+                    model: data.model,
+                    toolsUsed: data.toolsUsed,
+                    citations: data.citations,
+                    authoritativeReferences: data.authoritativeReferences,
+                    topicLocation: data.topicLocation,
+                  }
+                : m
+            )
+          );
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            {
+              sender: "ai",
+              text: data.answer || "I have analyzed this passage.",
+              pageNumber: activePageNum,
+              time: new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+              provider: data.provider,
+              model: data.model,
+              toolsUsed: data.toolsUsed,
+              citations: data.citations,
+              authoritativeReferences: data.authoritativeReferences,
+              topicLocation: data.topicLocation,
+            },
+          ]);
+        }
+        return;
+      }
+
       const data = await res.json();
 
       if (data.authoritativeReferences?.length) {
@@ -3315,9 +3431,7 @@ export default function LivingReader({
                           </div>
                         )}
                         {m.sender === "ai" ? (
-                          <div dir="auto" className="ascleon-bidi">
-                            <RichStudyMessage content={m.text} />
-                          </div>
+                          <RichStudyMessage content={m.text} />
                         ) : (
                           <BiDiText as="p" className="ascleon-bidi whitespace-pre-line font-bold text-[color:var(--ink)]">
                             {m.text}
@@ -3616,9 +3730,9 @@ export default function LivingReader({
                       <span className="font-black text-[color:var(--ink)] text-[11px] uppercase tracking-wider">
                         Core Principles &amp; Invariants
                       </span>
-                      <ul className="flex flex-col gap-1.5 list-disc list-inside font-medium text-[color:var(--ink)]">
+                      <ul className="flex flex-col gap-1.5 list-disc ps-4 font-medium text-[color:var(--ink)]">
                         {dynamicSummary.keyTakeaways.map((point: string, i: number) => (
-                          <li key={i} className="leading-relaxed">
+                          <li key={i} dir={resolveTextDirection(point)} className="ascleon-bidi leading-relaxed text-start">
                             <BiDiText text={point} />
                           </li>
                         ))}
@@ -3633,8 +3747,13 @@ export default function LivingReader({
                         Exam Tips &amp; High-Yield Pitfalls
                       </span>
                       {dynamicSummary.proTips.map((tip: string, i: number) => (
-                        <p key={i} className="leading-relaxed text-[11.5px] font-semibold">
-                          ✦ <BiDiText text={tip} />
+                        <p
+                          key={i}
+                          dir={resolveTextDirection(tip)}
+                          className="ascleon-bidi flex items-start gap-1.5 leading-relaxed text-[11.5px] font-semibold text-start"
+                        >
+                          <span className="shrink-0">✦</span>
+                          <BiDiText as="span" className="flex-1" text={tip} />
                         </p>
                       ))}
                     </div>
@@ -3651,10 +3770,18 @@ export default function LivingReader({
                         key={idx}
                         className="flex flex-col gap-1 rounded-xl border border-[var(--study-pill-border)]/45 bg-[var(--study-surface-solid)] p-3 text-[var(--study-text)] shadow-xs"
                       >
-                        <span className="font-black text-[#ff4c00]">
-                          • <BiDiText text={mn.mnemonic} />: <span className="font-bold text-[var(--study-text)]"><BiDiText text={mn.expansion} /></span>
-                        </span>
-                        <BiDiText as="span" className="text-[11px] font-medium text-[var(--study-text-muted)]" text={mn.notes || mn.rule} />
+                        <div
+                          dir={resolveTextDirection(`${mn.mnemonic || ""} ${mn.expansion || ""}`)}
+                          className="ascleon-bidi flex flex-wrap items-baseline gap-1 font-black text-[#ff4c00] text-start"
+                        >
+                          <span className="shrink-0">•</span>
+                          <BiDiText text={mn.mnemonic} />
+                          <span>:</span>
+                          <span className="font-bold text-[var(--study-text)]">
+                            <BiDiText text={mn.expansion} />
+                          </span>
+                        </div>
+                        <BiDiText as="p" className="text-[11px] font-medium text-[var(--study-text-muted)]" text={mn.notes || mn.rule} />
                       </div>
                     ))}
                   </div>
@@ -3669,7 +3796,7 @@ export default function LivingReader({
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="flex items-center gap-1.5 font-black text-[var(--study-text)] truncate">
                         <Award className="size-4 shrink-0 text-[#ff4c00]" />
-                        <span className="truncate">{dynamicQBankList[activeQBankIdx]?.examType || "Clinical / Academic QBank"}</span>
+                        <BiDiText as="span" className="truncate" text={dynamicQBankList[activeQBankIdx]?.examType || "Clinical / Academic QBank"} />
                       </span>
                     </div>
 
@@ -3692,8 +3819,11 @@ export default function LivingReader({
 
                   {dynamicQBankList.length > 0 ? (
                     <>
-                      <div className="flex items-center justify-between gap-2 rounded-[14px] border border-[var(--study-pill-border)]/45 bg-[var(--study-surface)] backdrop-blur-md px-3 py-2 text-[11px] font-bold text-[var(--study-text)]" dir="auto">
-                        <BiDiText as="span" className="text-[var(--study-text)] text-start [unicode-bidi:isolate]" text={dynamicQBankList[activeQBankIdx]?.topic || `Question on Page ${currentPageNumber}`} />
+                      <div
+                        dir={resolveTextDirection(dynamicQBankList[activeQBankIdx]?.topic || `Question on Page ${currentPageNumber}`)}
+                        className="flex items-center justify-between gap-2 rounded-[14px] border border-[var(--study-pill-border)]/45 bg-[var(--study-surface)] backdrop-blur-md px-3 py-2 text-[11px] font-bold text-[var(--study-text)]"
+                      >
+                        <BiDiText as="span" className="min-w-0 flex-1 text-[var(--study-text)] text-start" text={dynamicQBankList[activeQBankIdx]?.topic || `Question on Page ${currentPageNumber}`} />
                         <span dir="ltr" className="shrink-0 rounded-full border border-[var(--study-panel-border)] bg-[#ff4c00] px-2.5 py-0.5 text-[10px] font-black text-[color:var(--ink)] shadow-xs">
                           Case {((activeQBankIdx % dynamicQBankList.length) + 1)} / {dynamicQBankList.length}
                         </span>
@@ -3714,6 +3844,7 @@ export default function LivingReader({
                           <button
                             key={idx}
                             type="button"
+                            dir={resolveTextDirection(option)}
                             onClick={() => !quizSubmitted && setQuizAnswer(idx)}
                             className={cn(
                               "flex cursor-pointer items-start gap-2.5 rounded-[14px] border-[1.5px] border-[var(--study-panel-border)] p-3 text-start text-xs transition-all shadow-xs backdrop-blur-md",
@@ -3731,7 +3862,7 @@ export default function LivingReader({
                             </bdi>
                             <BiDiText
                               as="span"
-                              className="flex-1 font-medium text-start [unicode-bidi:isolate]"
+                              className="ascleon-bidi flex-1 font-medium text-start"
                               text={option}
                             />
                           </button>
@@ -3748,21 +3879,24 @@ export default function LivingReader({
                           Submit Answer &amp; Reveal Rationale
                         </button>
                       ) : (
-                        <div className="flex animate-in fade-in flex-col gap-3 rounded-[16px] border-2 border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md p-3.5 text-xs text-[var(--study-text)] shadow-[var(--study-shadow)]" dir="auto">
+                        <div className="flex animate-in fade-in flex-col gap-3 rounded-[16px] border-2 border-[var(--study-panel-border)] bg-[var(--study-surface)] backdrop-blur-md p-3.5 text-xs text-[var(--study-text)] shadow-[var(--study-shadow)]">
                           {/* Answer Banner */}
-                          <div className="flex items-center gap-2 font-black text-sm" dir="auto">
+                          <div
+                            dir={studyLanguage === "ar" || studyLanguage === "mixed" ? "rtl" : "ltr"}
+                            className="flex items-center gap-2 font-black text-sm text-start"
+                          >
                             {quizAnswer === dynamicQBankList[activeQBankIdx]?.correctIndex ? (
                               <>
                                 <CheckCircle2 className="size-5 text-[var(--study-teal-text)] shrink-0" />
-                                <span dir="auto" className="text-start [unicode-bidi:isolate]">
-                                  {studyLanguage === "ar" ? "إجابة صحيحة!" : "Correct!"} <bdi dir="ltr">({String.fromCharCode(65 + dynamicQBankList[activeQBankIdx]?.correctIndex)})</bdi>
+                                <span className="text-start [unicode-bidi:isolate]">
+                                  {studyLanguage === "ar" || studyLanguage === "mixed" ? "إجابة صحيحة!" : "Correct!"} <bdi dir="ltr">({String.fromCharCode(65 + dynamicQBankList[activeQBankIdx]?.correctIndex)})</bdi>
                                 </span>
                               </>
                             ) : (
                               <>
                                 <XCircle className="size-5 text-[#e0459a] shrink-0" />
-                                <span dir="auto" className="text-[#e0459a] text-start [unicode-bidi:isolate]">
-                                  {studyLanguage === "ar" ? "إجابة غير صحيحة. الخيار الصحيح هو" : "Incorrect. Correct choice is"} <bdi dir="ltr">({String.fromCharCode(65 + dynamicQBankList[activeQBankIdx]?.correctIndex)})</bdi>
+                                <span className="text-[#e0459a] text-start [unicode-bidi:isolate]">
+                                  {studyLanguage === "ar" || studyLanguage === "mixed" ? "إجابة غير صحيحة. الخيار الصحيح هو" : "Incorrect. Correct choice is"} <bdi dir="ltr">({String.fromCharCode(65 + dynamicQBankList[activeQBankIdx]?.correctIndex)})</bdi>
                                 </span>
                               </>
                             )}
@@ -3770,14 +3904,17 @@ export default function LivingReader({
 
                           {/* Distractor Breakdown */}
                           {dynamicQBankList[activeQBankIdx]?.distractorRationales && (
-                            <div dir="auto" className="flex flex-col gap-1.5 border-t border-[var(--study-border)] pt-2 text-[11px] leading-relaxed">
-                              <strong dir="auto" className="text-[var(--study-text)] text-start block [unicode-bidi:isolate]">
-                                {studyLanguage === "ar" ? "تحليل الخيارات والاستدلال السريري:" : "Distractor Analysis & Clinical Reasoning:"}
+                            <div className="flex flex-col gap-1.5 border-t border-[var(--study-border)] pt-2 text-[11px] leading-relaxed">
+                              <strong
+                                dir={studyLanguage === "ar" || studyLanguage === "mixed" ? "rtl" : "ltr"}
+                                className="text-[var(--study-text)] text-start block [unicode-bidi:isolate]"
+                              >
+                                {studyLanguage === "ar" || studyLanguage === "mixed" ? "تحليل الخيارات والاستدلال السريري:" : "Distractor Analysis & Clinical Reasoning:"}
                               </strong>
                               {Object.entries(dynamicQBankList[activeQBankIdx].distractorRationales).map(([optIdx, rationale]) => (
                                 <div
                                   key={optIdx}
-                                  dir="auto"
+                                  dir={resolveTextDirection(String(rationale))}
                                   className={cn(
                                     "flex items-start gap-2 rounded-lg p-2.5 text-[10.5px] border border-[var(--study-pill-border)]/35 text-start",
                                     Number(optIdx) === dynamicQBankList[activeQBankIdx].correctIndex
@@ -3790,7 +3927,7 @@ export default function LivingReader({
                                   </bdi>
                                   <BiDiText
                                     as="span"
-                                    className="flex-1 leading-relaxed text-start [unicode-bidi:isolate]"
+                                    className="ascleon-bidi flex-1 leading-relaxed text-start"
                                     text={String(rationale)}
                                   />
                                 </div>
@@ -3799,10 +3936,13 @@ export default function LivingReader({
                           )}
 
                           {/* High Yield Takeaway Box */}
-                          <div dir="auto" className="rounded-xl border-2 border-[var(--study-panel-border)] bg-[#ff4c00] p-3 text-[11px] text-[color:var(--ink)] shadow-xs">
-                            <div className="flex items-center gap-1.5 mb-1 text-start" dir="auto">
+                          <div className="rounded-xl border-2 border-[var(--study-panel-border)] bg-[#ff4c00] p-3 text-[11px] text-[color:var(--ink)] shadow-xs">
+                            <div
+                              dir={studyLanguage === "ar" || studyLanguage === "mixed" ? "rtl" : "ltr"}
+                              className="flex items-center gap-1.5 mb-1 text-start"
+                            >
                               <span className="font-black text-[color:var(--ink)] [unicode-bidi:isolate]">
-                                🎯 {studyLanguage === "ar" ? "اللؤلؤة الامتحانية المركزة:" : "High-Yield Exam Takeaway:"}
+                                🎯 {studyLanguage === "ar" || studyLanguage === "mixed" ? "اللؤلؤة الامتحانية المركزة:" : "High-Yield Exam Takeaway:"}
                               </span>
                             </div>
                             <BiDiText

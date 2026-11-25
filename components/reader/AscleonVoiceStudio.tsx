@@ -21,6 +21,7 @@ import { StudyLanguage } from "@/lib/language";
 import { AVAILABLE_LIVE_VOICES } from "@/lib/voice-config";
 import { StudyLanguageSwitch } from "@/components/reader/StudyLanguageSwitch";
 import { useVoiceSession } from "@/components/reader/VoiceSessionContext";
+import { BiDiText, resolveTextDirection } from "@/components/ui/BiDiText";
 
 interface AscleonVoiceStudioProps {
   currentPageNumber: number;
@@ -553,10 +554,10 @@ export function AscleonVoiceStudio({
               {messages.map((m) => (
                 <div
                   key={m.id}
-                  dir="auto"
-                  className="ascleon-bidi rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-3 text-xs leading-relaxed text-[var(--study-text)]"
+                  dir={resolveTextDirection(m.text)}
+                  className="ascleon-bidi rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-muted)] p-3 text-xs leading-relaxed text-[var(--study-text)] text-start"
                 >
-                  <div className="mb-1 flex items-center justify-between text-[10px] font-bold text-[var(--study-text-muted)]">
+                  <div dir="ltr" className="mb-1 flex items-center justify-between text-[10px] font-bold text-[var(--study-text-muted)]">
                     <span>ASCLEON MENTOR</span>
                     <div className="flex items-center gap-1.5">
                       {m.interrupted && (
@@ -567,15 +568,15 @@ export function AscleonVoiceStudio({
                       <span>{m.time}</span>
                     </div>
                   </div>
-                  <p className="whitespace-pre-wrap">{m.text}</p>
+                  <BiDiText as="p" className="whitespace-pre-wrap" text={m.text} />
                 </div>
               ))}
               {currentCaption && (
                 <div
-                  dir="auto"
-                  className="ascleon-bidi rounded-xl border border-[color:var(--orange)]/45 bg-[color:var(--orange)]/10 p-3 text-xs leading-relaxed text-[var(--study-text)]"
+                  dir={resolveTextDirection(currentCaption)}
+                  className="ascleon-bidi rounded-xl border border-[color:var(--orange)]/45 bg-[color:var(--orange)]/10 p-3 text-xs leading-relaxed text-[var(--study-text)] text-start"
                 >
-                  <p className="whitespace-pre-wrap">{currentCaption}</p>
+                  <BiDiText as="p" className="whitespace-pre-wrap" text={currentCaption} />
                 </div>
               )}
             </div>
@@ -729,11 +730,11 @@ export function AscleonVoiceStudio({
               <button
                 key={chip}
                 type="button"
-                dir="auto"
+                dir={resolveTextDirection(chip)}
                 onClick={() => handleStarterChip(chip)}
                 className="ascleon-bidi cursor-pointer rounded-full border-[1.5px] border-[var(--study-pill-border)] bg-[var(--study-surface)] px-3 py-1.5 text-xs font-medium text-[var(--study-text)] shadow-[var(--study-glass-shadow)] transition-colors hover:border-[color:var(--orange)] hover:bg-[var(--study-glass-hover)]"
               >
-                {chip}
+                <BiDiText text={chip} />
               </button>
             ))}
           </div>
@@ -741,19 +742,25 @@ export function AscleonVoiceStudio({
       ) : (
         <div className="flex flex-1 flex-col overflow-hidden">
           <div ref={transcriptScrollRef} className="study-scrollbar flex-1 space-y-3 overflow-y-auto p-4">
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                dir="auto"
-                className="ascleon-bidi rounded-xl border border-[var(--study-pill-border)]/50 bg-[var(--study-surface)] p-3 text-xs leading-relaxed text-[var(--study-text)]"
-              >
-                <div className="mb-1 flex items-center justify-between text-[10px] font-bold text-[var(--study-text-muted)]">
-                  <span>ASCLEON MENTOR</span>
-                  <span>{m.time}</span>
+            {messages.length === 0 ? (
+              <p className="py-8 text-center text-xs font-medium text-[var(--study-text-muted)]">
+                No captions captured in this session yet.
+              </p>
+            ) : (
+              messages.map((m) => (
+                <div
+                  key={m.id}
+                  dir={resolveTextDirection(m.text)}
+                  className="ascleon-bidi rounded-xl border border-[var(--study-pill-border)]/50 bg-[var(--study-surface)] p-3 text-xs leading-relaxed text-[var(--study-text)] text-start"
+                >
+                  <div dir="ltr" className="mb-1 flex items-center justify-between text-[10px] font-bold text-[var(--study-text-muted)]">
+                    <span>ASCLEON MENTOR</span>
+                    <span>{m.time}</span>
+                  </div>
+                  <BiDiText as="p" className="whitespace-pre-wrap" text={m.text} />
                 </div>
-                <p className="whitespace-pre-wrap">{m.text}</p>
-              </div>
-            ))}
+              ))
+            )}
           </div>
 
           {/* Resume & Continue Actions */}

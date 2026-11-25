@@ -1233,7 +1233,7 @@ button[data-variant='unstyled'] *,
    ========================================================================== */
 .ascleon-bidi {
   text-align: start;
-  line-height: 1.85 !important;
+  line-height: 1.75;
   word-spacing: 0.02em;
   overflow-wrap: break-word;
 }
@@ -1241,13 +1241,13 @@ button[data-variant='unstyled'] *,
 [dir="auto"] {
   unicode-bidi: plaintext;
   text-align: start;
-  line-height: 1.85 !important;
   word-spacing: 0.02em;
   overflow-wrap: break-word;
 }
 
 /* Keep inline <bdi> runs naturally inline so mixed Arabic/English wraps without letter/word gaps */
 .ascleon-bidi bdi,
+[dir="rtl"] bdi,
 [dir="auto"] bdi {
   unicode-bidi: isolate;
   display: inline;
@@ -1257,6 +1257,8 @@ button[data-variant='unstyled'] *,
 /* Ensure inline code spans and pills inside Arabic context stay isolated */
 .ascleon-bidi code,
 .ascleon-bidi .ascleon-pill,
+[dir="rtl"] code,
+[dir="rtl"] .ascleon-pill,
 [dir="auto"] code,
 [dir="auto"] .ascleon-pill {
   unicode-bidi: isolate;

@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
-import { renderBidiNodes, resolveTextDirection } from "@/components/ui/BiDiText";
+import { containsArabic, renderBidiNodes, resolveTextDirection } from "@/components/ui/BiDiText";
 
 function extractBdiTexts(nodes: React.ReactNode): string[] {
   const result: string[] = [];
@@ -72,6 +72,15 @@ describe("BiDiText mixed Arabic + English isolation", () => {
     expect(
       resolveTextDirection("الـ Pathophysiology بتبدأ بـ initial endothelial dysfunction")
     ).toBe("rtl");
+    expect(
+      resolveTextDirection("ECG بيوضح ST elevation في leads V1-V4")
+    ).toBe("rtl");
     expect(resolveTextDirection("Acute Coronary Syndrome (ACS) overview")).toBe("ltr");
+  });
+
+  it("detects Arabic characters cleanly via containsArabic", () => {
+    expect(containsArabic("تشخيص الحالة مع troponin")).toBe(true);
+    expect(containsArabic("Acute Coronary Syndrome (ACS)")).toBe(false);
+    expect(containsArabic("")).toBe(false);
   });
 });
