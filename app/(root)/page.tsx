@@ -1,18 +1,25 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import Welcome from "@/components/welcome/Welcome";
 import { getActiveStudySource } from "@/lib/actions/study-progress.actions";
+import { getUserBooks } from "@/lib/actions/book.actions";
+import { getUserSessions, SessionHistoryItem } from "@/lib/actions/session.actions";
+import { IBook } from "@/types";
 
 const HomePage = async () => {
   const { userId } = await auth();
 
   let userFirstName: string | null = null;
   let activeStudy = null;
+  let books: IBook[] = [];
+  let sessions: SessionHistoryItem[] = [];
 
   if (userId) {
     try {
-      const [user, activeSourceRes] = await Promise.all([
+      const [user, activeSourceRes, booksRes, sessionsRes] = await Promise.all([
         currentUser(),
         getActiveStudySource(),
+        getUserBooks(),
+        getUserSessions(40),
       ]);
 
       userFirstName =
@@ -24,6 +31,12 @@ const HomePage = async () => {
       if (activeSourceRes.success && activeSourceRes.data) {
         activeStudy = activeSourceRes.data;
       }
+      if (booksRes.success && booksRes.data) {
+        books = booksRes.data as IBook[];
+      }
+      if (sessionsRes.success && sessionsRes.data) {
+        sessions = sessionsRes.data as SessionHistoryItem[];
+      }
     } catch (err) {
       console.error("Error retrieving user home page session:", err);
     }
@@ -34,6 +47,8 @@ const HomePage = async () => {
       <Welcome
         userFirstName={userFirstName}
         activeStudy={activeStudy}
+        books={books}
+        sessions={sessions}
       />
     </main>
   );

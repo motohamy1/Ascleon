@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUpRight,
@@ -30,6 +30,7 @@ import {
   StudyPlanStepType,
 } from "@/types/study-plan";
 import { cn } from "@/lib/utils";
+import { BiDiText, resolveTextDirection } from "@/components/ui/BiDiText";
 
 interface StudyPlanPanelProps {
   books: IBook[];
@@ -111,11 +112,20 @@ export default function StudyPlanPanel({
   // Conversational replan state
   const [chatInput, setChatInput] = useState("");
   const [isReplanning, setIsReplanning] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const activePlan = useMemo(
     () => plans.find((p) => p._id === selectedPlanId) ?? plans[0] ?? null,
     [plans, selectedPlanId]
   );
+
+  const chatHistoryLength = activePlan?.chatHistory.length ?? 0;
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [chatHistoryLength, activePlan?._id]);
 
   const upsertPlanInState = (updated: StudyPlanDTO) => {
     setPlans((prev) => {
@@ -398,7 +408,7 @@ export default function StudyPlanPanel({
           )}
         </div>
       ) : (
-        <div className="mt-5 grid gap-5 lg:grid-cols-12">
+        <div className="mt-5 grid gap-5 lg:grid-cols-12 lg:items-start">
           {/* Left / Main Column: Readiness + Sessions */}
           <div className="flex flex-col gap-4 lg:col-span-8">
             {/* Readiness + Metadata Strip */}
@@ -456,7 +466,7 @@ export default function StudyPlanPanel({
                           Day {section.dayNumber} · {section.scheduledDate}
                         </p>
                         <h3 className="text-sm sm:text-base font-black text-[color:var(--ink)]">
-                          {section.title}
+                          <BiDiText text={section.title} />
                         </h3>
                       </div>
                       <span className="rounded-full border border-[color:var(--ink)]/25 bg-[color:var(--cream)] px-2.5 py-0.5 font-mono text-[11px] font-bold text-[color:var(--ink)]">
@@ -511,12 +521,13 @@ export default function StudyPlanPanel({
                                 )}
                               </div>
                               <p
+                                dir={resolveTextDirection(step.title)}
                                 className={cn(
-                                  "mt-1 text-xs sm:text-[13px] font-bold text-[color:var(--ink)]",
+                                  "ascleon-bidi mt-1 text-xs sm:text-[13px] font-bold text-[color:var(--ink)] text-start",
                                   isCompleted && "line-through opacity-65"
                                 )}
                               >
-                                {step.title}
+                                <BiDiText text={step.title} />
                               </p>
                             </div>
 
@@ -584,69 +595,74 @@ export default function StudyPlanPanel({
           </div>
 
           {/* Right Column: Plan Adjustment Chat */}
-          <div className="flex flex-col justify-between rounded-[20px] border-2 border-[color:var(--ink)] bg-[color:var(--panel)] p-4 sm:p-5 lg:col-span-4">
-            <div>
-              <div className="flex items-center gap-2 border-b border-[color:var(--ink)]/15 pb-3">
-                <MessageSquare className="size-4 text-[color:var(--orange)]" />
-                <div>
-                  <p className="text-xs font-black uppercase tracking-wider text-[color:var(--ink)]">
-                    Adjust Plan in Chat
-                  </p>
-                  <p className="text-[11px] text-[color:var(--ink)]/70">
-                    e.g. &ldquo;Make my plan shorter&rdquo; or &ldquo;Add a final mock review&rdquo;
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-3 flex max-h-[360px] flex-col gap-2.5 overflow-y-auto pr-1">
-                {activePlan.chatHistory.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-[color:var(--ink)]/25 bg-white/60 p-3.5 text-xs text-[color:var(--ink)]/75">
-                    Need to shift topics or compress sessions before your exam? Ask here and completed steps stay intact.
-                  </div>
-                ) : (
-                  activePlan.chatHistory.map((msg, idx) => (
-                    <div
-                      key={idx}
-                      className={cn(
-                        "rounded-xl border p-3 text-xs leading-relaxed",
-                        msg.role === "user"
-                          ? "self-end border-[color:var(--ink)] bg-[color:var(--orange)] font-bold text-[color:var(--ink)]"
-                          : "self-start border-[color:var(--ink)]/30 bg-white text-[color:var(--ink)]"
-                      )}
-                    >
-                      <p>{msg.text}</p>
-                      {msg.diffSummary &&
-                        (msg.diffSummary.added.length > 0 ||
-                          msg.diffSummary.changed.length > 0 ||
-                          msg.diffSummary.removed.length > 0) && (
-                          <div className="mt-2 rounded-lg border border-[color:var(--ink)]/20 bg-[color:var(--cream)] p-2 text-[10.5px]">
-                            <p className="font-black uppercase tracking-wider text-[color:var(--ink)]">
-                              Plan Updated
-                            </p>
-                            {msg.diffSummary.added.map((a, i) => (
-                              <p key={`a-${i}`} className="text-emerald-800 font-semibold">
-                                + {a}
-                              </p>
-                            ))}
-                            {msg.diffSummary.changed.map((c, i) => (
-                              <p key={`c-${i}`} className="text-amber-800 font-semibold">
-                                ~ {c}
-                              </p>
-                            ))}
-                            {msg.diffSummary.removed.map((r, i) => (
-                              <p key={`r-${i}`} className="text-rose-700 font-semibold">
-                                - {r}
-                              </p>
-                            ))}
-                          </div>
-                        )}
-                    </div>
-                  ))
-                )}
+          <div className="flex h-[460px] flex-col rounded-[20px] border-2 border-[color:var(--ink)] bg-[color:var(--panel)] p-4 sm:p-5 lg:sticky lg:top-[104px] lg:col-span-4 lg:h-[calc(100vh-140px)] lg:max-h-[680px]">
+            <div className="flex shrink-0 items-center gap-2 border-b border-[color:var(--ink)]/15 pb-3">
+              <MessageSquare className="size-4 text-[color:var(--orange)]" />
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-[color:var(--ink)]">
+                  Adjust Plan in Chat
+                </p>
+                <p className="text-[11px] text-[color:var(--ink)]/70">
+                  e.g. &ldquo;Make my plan shorter&rdquo; or &ldquo;Add a final mock review&rdquo;
+                </p>
               </div>
             </div>
 
-            <form onSubmit={handleReplanSubmit} className="mt-3 flex items-center gap-2 pt-3 border-t border-[color:var(--ink)]/15">
+            <div
+              ref={chatScrollRef}
+              className="mt-3 flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-1"
+            >
+              {activePlan.chatHistory.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-[color:var(--ink)]/25 bg-white/60 p-3.5 text-xs text-[color:var(--ink)]/75">
+                  Need to shift topics or compress sessions before your exam? Ask here and completed steps stay intact.
+                </div>
+              ) : (
+                activePlan.chatHistory.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    dir={resolveTextDirection(msg.text)}
+                    className={cn(
+                      "ascleon-bidi rounded-xl border p-3 text-xs leading-relaxed text-start",
+                      msg.role === "user"
+                        ? "self-end border-[color:var(--ink)] bg-[color:var(--orange)] font-bold text-[color:var(--ink)]"
+                        : "self-start border-[color:var(--ink)]/30 bg-white text-[color:var(--ink)]"
+                    )}
+                  >
+                    <BiDiText as="p" text={msg.text} />
+                    {msg.diffSummary &&
+                      (msg.diffSummary.added.length > 0 ||
+                        msg.diffSummary.changed.length > 0 ||
+                        msg.diffSummary.removed.length > 0) && (
+                        <div className="mt-2 rounded-lg border border-[color:var(--ink)]/20 bg-[color:var(--cream)] p-2 text-[10.5px]">
+                          <p dir="ltr" className="font-black uppercase tracking-wider text-[color:var(--ink)] text-start">
+                            Plan Updated
+                          </p>
+                          {msg.diffSummary.added.map((a, i) => (
+                            <p key={`a-${i}`} dir={resolveTextDirection(a)} className="text-emerald-800 font-semibold flex items-start gap-1 text-start">
+                              <span className="shrink-0">+</span>
+                              <BiDiText as="span" className="flex-1" text={a} />
+                            </p>
+                          ))}
+                          {msg.diffSummary.changed.map((c, i) => (
+                            <p key={`c-${i}`} dir={resolveTextDirection(c)} className="text-amber-800 font-semibold flex items-start gap-1 text-start">
+                              <span className="shrink-0">~</span>
+                              <BiDiText as="span" className="flex-1" text={c} />
+                            </p>
+                          ))}
+                          {msg.diffSummary.removed.map((r, i) => (
+                            <p key={`r-${i}`} dir={resolveTextDirection(r)} className="text-rose-700 font-semibold flex items-start gap-1 text-start">
+                              <span className="shrink-0">-</span>
+                              <BiDiText as="span" className="flex-1" text={r} />
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <form onSubmit={handleReplanSubmit} className="mt-3 flex shrink-0 items-center gap-2 border-t border-[color:var(--ink)]/15 pt-3">
               <input
                 type="text"
                 value={chatInput}
@@ -829,7 +845,7 @@ export default function StudyPlanPanel({
                   {STEP_TYPE_META[activeStepModal.step.type].label} · pp. {activeStepModal.step.startPage}–{activeStepModal.step.endPage}
                 </p>
                 <h3 className="display mt-0.5 text-2xl leading-tight text-[color:var(--ink)]">
-                  {activeStepModal.step.title}
+                  <BiDiText text={activeStepModal.step.title} />
                 </h3>
               </div>
               <div className="flex items-center gap-2">
@@ -867,26 +883,33 @@ export default function StudyPlanPanel({
                     <div className="flex flex-col gap-4">
                       <div className="rounded-xl border border-[color:var(--ink)]/25 bg-white p-4">
                         <h4 className="meta-label text-[color:var(--orange)]">Key Takeaways</h4>
-                        <ul className="mt-2 list-disc space-y-1.5 pl-4 text-xs font-medium leading-relaxed">
+                        <ul className="mt-2 list-disc space-y-1.5 ps-4 text-xs font-medium leading-relaxed">
                           {content.keyTakeaways.map((t, i) => (
-                            <li key={i}>{t}</li>
+                            <li key={i} dir={resolveTextDirection(t)} className="ascleon-bidi text-start">
+                              <BiDiText text={t} />
+                            </li>
                           ))}
                         </ul>
                       </div>
                       <div className="rounded-xl border border-[color:var(--ink)]/25 bg-white p-4">
                         <h4 className="meta-label text-[#2e6f68]">High-Yield Notes</h4>
-                        <ul className="mt-2 list-disc space-y-1.5 pl-4 text-xs leading-relaxed">
+                        <ul className="mt-2 list-disc space-y-1.5 ps-4 text-xs leading-relaxed">
                           {content.highYieldNotes.map((n, i) => (
-                            <li key={i}>{n}</li>
+                            <li key={i} dir={resolveTextDirection(n)} className="ascleon-bidi text-start">
+                              <BiDiText text={n} />
+                            </li>
                           ))}
                         </ul>
                       </div>
                       {content.clinicalPearls.length > 0 && (
                         <div className="rounded-xl border border-[color:var(--ink)]/25 bg-[#f6d7a1] p-4">
                           <h4 className="meta-label text-[color:var(--ink)]">Exam &amp; Clinical Pearls</h4>
-                          <ul className="mt-2 space-y-1 text-xs font-semibold">
+                          <ul className="mt-2 space-y-1.5 text-xs font-semibold">
                             {content.clinicalPearls.map((p, i) => (
-                              <li key={i}>✦ {p}</li>
+                              <li key={i} dir={resolveTextDirection(p)} className="ascleon-bidi flex items-start gap-1.5 text-start">
+                                <span className="shrink-0">✦</span>
+                                <BiDiText as="span" className="flex-1" text={p} />
+                              </li>
                             ))}
                           </ul>
                         </div>
@@ -900,6 +923,7 @@ export default function StudyPlanPanel({
                   const safeIdx = Math.min(cardIndex, Math.max(0, cards.length - 1));
                   const card = cards[safeIdx];
                   if (!card) return null;
+                  const cardText = cardFlipped ? card.back : card.front;
                   return (
                     <div className="flex flex-col items-center gap-4">
                       <p className="meta-label text-[color:var(--ink)]/70">
@@ -913,9 +937,12 @@ export default function StudyPlanPanel({
                         <span className="meta-label mb-2 text-[color:var(--orange)]">
                           {cardFlipped ? "Answer" : "Prompt"}
                         </span>
-                        <p className="text-base font-bold leading-relaxed text-[color:var(--ink)]">
-                          {cardFlipped ? card.back : card.front}
-                        </p>
+                        <BiDiText
+                          as="p"
+                          dir={resolveTextDirection(cardText)}
+                          className="text-base font-bold leading-relaxed text-[color:var(--ink)] text-center"
+                          text={cardText}
+                        />
                       </button>
                       <div className="flex items-center gap-3">
                         <button
@@ -956,9 +983,13 @@ export default function StudyPlanPanel({
                             key={qIdx}
                             className="rounded-xl border-2 border-[color:var(--ink)]/25 bg-white p-4"
                           >
-                            <p className="text-xs font-black text-[color:var(--ink)]">
-                              Q{qIdx + 1}. {q.question}
-                            </p>
+                            <div
+                              dir={resolveTextDirection(q.question)}
+                              className="ascleon-bidi flex items-start gap-1.5 text-xs font-black text-[color:var(--ink)] text-start"
+                            >
+                              <bdi dir="ltr" className="shrink-0">Q{qIdx + 1}.</bdi>
+                              <BiDiText as="span" className="min-w-0 flex-1" text={q.question} />
+                            </div>
                             <div className="mt-2.5 flex flex-col gap-1.5">
                               {q.options.map((opt, oIdx) => {
                                 const isChosen = chosen === oIdx;
@@ -967,26 +998,28 @@ export default function StudyPlanPanel({
                                   <button
                                     key={oIdx}
                                     type="button"
+                                    dir={resolveTextDirection(opt)}
                                     onClick={() =>
                                       setQuizAnswers((prev) => ({ ...prev, [qIdx]: oIdx }))
                                     }
                                     className={cn(
-                                      "cursor-pointer rounded-lg border px-3 py-2 text-left text-xs font-medium transition-colors",
+                                      "ascleon-bidi cursor-pointer rounded-lg border px-3 py-2 text-start text-xs font-medium transition-colors",
                                       !answered && "border-[color:var(--ink)]/25 bg-[color:var(--panel)]/40 hover:border-[color:var(--ink)]",
                                       answered && isCorrect && "border-emerald-600 bg-emerald-50 font-bold text-emerald-900",
                                       answered && isChosen && !isCorrect && "border-rose-600 bg-rose-50 font-bold text-rose-900",
                                       answered && !isChosen && !isCorrect && "border-[color:var(--ink)]/15 opacity-65"
                                     )}
                                   >
-                                    {opt}
+                                    <BiDiText text={opt} />
                                   </button>
                                 );
                               })}
                             </div>
                             {answered && (
-                              <p className="mt-2.5 rounded-lg bg-[color:var(--cream)] p-2.5 text-[11px] leading-relaxed text-[color:var(--ink)]">
-                                <strong>Explanation:</strong> {q.explanation}
-                              </p>
+                              <div className="mt-2.5 rounded-lg bg-[color:var(--cream)] p-2.5 text-[11px] leading-relaxed text-[color:var(--ink)] flex flex-col gap-0.5">
+                                <bdi dir="ltr" className="font-black text-[10.5px]">Explanation:</bdi>
+                                <BiDiText as="p" text={q.explanation} />
+                              </div>
                             )}
                           </div>
                         );
@@ -999,17 +1032,21 @@ export default function StudyPlanPanel({
                   <div className="flex flex-col gap-4">
                     <div className="rounded-xl border border-[color:var(--ink)]/25 bg-white p-4">
                       <h4 className="meta-label text-[color:var(--orange)]">Focus Points</h4>
-                      <ul className="mt-2 list-disc space-y-1.5 pl-4 text-xs leading-relaxed">
+                      <ul className="mt-2 list-disc space-y-1.5 ps-4 text-xs leading-relaxed">
                         {content.focusPoints.map((pt, i) => (
-                          <li key={i}>{pt}</li>
+                          <li key={i} dir={resolveTextDirection(pt)} className="ascleon-bidi text-start">
+                            <BiDiText text={pt} />
+                          </li>
                         ))}
                       </ul>
                     </div>
                     <div className="rounded-xl border border-[color:var(--ink)]/25 bg-white p-4">
                       <h4 className="meta-label text-[#2e6f68]">Self-Check Questions</h4>
-                      <ul className="mt-2 list-disc space-y-1.5 pl-4 text-xs leading-relaxed">
+                      <ul className="mt-2 list-disc space-y-1.5 ps-4 text-xs leading-relaxed">
                         {content.guidingQuestions.map((gq, i) => (
-                          <li key={i}>{gq}</li>
+                          <li key={i} dir={resolveTextDirection(gq)} className="ascleon-bidi text-start">
+                            <BiDiText text={gq} />
+                          </li>
                         ))}
                       </ul>
                     </div>

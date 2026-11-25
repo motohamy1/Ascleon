@@ -10,6 +10,10 @@ import {
   getActiveStudySource,
   ActiveStudySourceResult,
 } from '@/lib/actions/study-progress.actions';
+import { getUserBooks } from '@/lib/actions/book.actions';
+import { getUserSessions, SessionHistoryItem } from '@/lib/actions/session.actions';
+import { IBook } from '@/types';
+import { ProgressModal, ProgressSummaryCard } from '@/components/progress/ProgressModal';
 
 const features = [
   {
@@ -67,13 +71,25 @@ const steps = [
 export interface WelcomeProps {
   userFirstName?: string | null;
   activeStudy?: ActiveStudySourceResult | null;
+  books?: IBook[];
+  sessions?: SessionHistoryItem[];
 }
 
-const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
+const Welcome = ({
+  userFirstName,
+  activeStudy,
+  books = [],
+  sessions = [],
+}: WelcomeProps) => {
   const { user: clientUser, isSignedIn } = useUser();
   const [clientActiveStudy, setClientActiveStudy] = useState<
     ActiveStudySourceResult | null | undefined
   >(undefined);
+  const [clientBooks, setClientBooks] = useState<IBook[] | undefined>(undefined);
+  const [clientSessions, setClientSessions] = useState<
+    SessionHistoryItem[] | undefined
+  >(undefined);
+  const [showProgressModal, setShowProgressModal] = useState(false);
   const fetchedOnSignInRef = useRef(false);
 
   useEffect(() => {
@@ -89,10 +105,17 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
     let cancelled = false;
     fetchedOnSignInRef.current = true;
 
-    getActiveStudySource()
-      .then((res) => {
-        if (!cancelled && res.success) {
-          setClientActiveStudy(res.data ?? null);
+    Promise.all([getActiveStudySource(), getUserBooks(), getUserSessions(40)])
+      .then(([activeRes, booksRes, sessionsRes]) => {
+        if (cancelled) return;
+        if (activeRes.success) {
+          setClientActiveStudy(activeRes.data ?? null);
+        }
+        if (booksRes.success && booksRes.data) {
+          setClientBooks(booksRes.data as IBook[]);
+        }
+        if (sessionsRes.success && sessionsRes.data) {
+          setClientSessions(sessionsRes.data as SessionHistoryItem[]);
         }
       })
       .catch((err) =>
@@ -110,6 +133,10 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
       : clientActiveStudy !== undefined
         ? clientActiveStudy
         : (activeStudy ?? null);
+  const currentBooks =
+    isSignedIn === false ? [] : (clientBooks ?? books);
+  const currentSessions =
+    isSignedIn === false ? [] : (clientSessions ?? sessions);
 
   const rawName =
     userFirstName ||
@@ -195,13 +222,14 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
                 <ArrowUpRight className="size-4.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
               </Link>
               <Show when="signed-in">
-                <Link
-                  href="/progress"
-                  className="group flex items-center gap-1.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)]/80 hover:text-[color:var(--ink)] hover:underline underline-offset-4"
+                <button
+                  type="button"
+                  onClick={() => setShowProgressModal(true)}
+                  className="group flex cursor-pointer items-center gap-1.5 text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--ink)]/80 hover:text-[color:var(--ink)] hover:underline underline-offset-4"
                 >
                   View progress
                   <ArrowUpRight className="size-4.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                </Link>
+                </button>
               </Show>
             </div>
           </div>
@@ -313,24 +341,33 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
             </Link>
           </Show>
 
-          <div className="flex min-h-[160px] sm:min-h-[185px] flex-col justify-between rounded-[24px] bg-[color:var(--panel)] p-5 sm:p-6 shadow-chip">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="meta-label text-[color:var(--ink)]/75">
-                  Format
-                </p>
-                <p className="display mt-1.5 text-[26px] text-[color:var(--ink)]">
-                  PDF → Mastery
-                </p>
+          <Show when="signed-out">
+            <div className="flex min-h-[160px] sm:min-h-[185px] flex-col justify-between rounded-[24px] bg-[color:var(--panel)] p-5 sm:p-6 shadow-chip">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="meta-label text-[color:var(--ink)]/75">
+                    Format
+                  </p>
+                  <p className="display mt-1.5 text-[26px] text-[color:var(--ink)]">
+                    PDF → Mastery
+                  </p>
+                </div>
+                <div className="barcode h-9 w-22 shrink-0 text-[color:var(--ink)]" />
               </div>
-              <div className="barcode h-9 w-22 shrink-0 text-[color:var(--ink)]" />
+              <div className="swatch-ramp mt-4 h-9 rounded-full border-2 border-[color:var(--ink)]" />
+              <div className="meta-label mt-2 flex justify-between text-[color:var(--ink)]/75 text-xs">
+                <span>EN · عربي · Mix</span>
+                <span>Voice · Visual · QBank</span>
+              </div>
             </div>
-            <div className="swatch-ramp mt-4 h-9 rounded-full border-2 border-[color:var(--ink)]" />
-            <div className="meta-label mt-2 flex justify-between text-[color:var(--ink)]/75 text-xs">
-              <span>EN · عربي · Mix</span>
-              <span>Voice · Visual · QBank</span>
-            </div>
-          </div>
+          </Show>
+          <Show when="signed-in">
+            <ProgressSummaryCard
+              books={currentBooks}
+              sessions={currentSessions}
+              onOpen={() => setShowProgressModal(true)}
+            />
+          </Show>
         </div>
       </section>
 
@@ -397,6 +434,14 @@ const Welcome = ({ userFirstName, activeStudy }: WelcomeProps) => {
           Ascleon® · with you through every lecture &amp; book
         </p>
       </div>
+
+      <ProgressModal
+        open={showProgressModal}
+        onClose={() => setShowProgressModal(false)}
+        books={currentBooks}
+        sessions={currentSessions}
+        firstName={displayName}
+      />
     </div>
   );
 };
