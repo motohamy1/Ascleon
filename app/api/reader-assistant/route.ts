@@ -252,7 +252,16 @@ export async function POST(request: Request) {
   let ragAlignmentStatus: RagAlignmentStatus = hasRealLiveText ? "live_only" : "verified";
 
   const normalizedBookRefs = Array.isArray(bookReferences)
-    ? bookReferences.map(String).filter(Boolean)
+    ? bookReferences
+        .map((ref) => {
+          if (typeof ref === "string") return ref.trim();
+          if (ref && typeof ref === "object") {
+            const obj = ref as Record<string, unknown>;
+            return String(obj.title || obj.source || obj.name || "").trim();
+          }
+          return "";
+        })
+        .filter((s) => Boolean(s) && s.toLowerCase() !== "[object object]")
     : [];
   const emptyEnriched: EnrichedStudyContext = {
     focalTopic: String(bookTopic || bookTitle || "General Study"),

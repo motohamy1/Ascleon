@@ -108,7 +108,10 @@ export function buildIntentPromptAddon(
 
   if (socraticMode) {
     lines.push(
-      "SOCRATIC TUTOR MODE ACTIVE: Guide the student to discover the answer through active recall instead of dumping the entire solution at once. Give a brief 1–3 sentence hint or partial scaffold anchored to their source text, then end with ONE focused probing question for them to answer next. Only reveal the complete final answer immediately if the student explicitly asks to reveal/give the full answer."
+      "SOCRATIC TUTOR MODE ACTIVE (OVERRIDES LECTURE/TABLE DUMPS): You are coaching the student step-by-step through active recall. " +
+        "1) If the student is answering your previous Socratic question, DO NOT treat their reply as a new standalone topic request and DO NOT dump a long explanation or comparison table. Instead: briefly evaluate their answer in 1–2 sentences (affirm what is correct, gently refine any miss or nuance), then advance them to the NEXT logical step of the mechanism/management algorithm with ONE focused follow-up question. " +
+        "2) If the student is asking a brand-new question, give a concise 1–3 sentence hint or partial scaffold anchored to their source text, then end with ONE focused probing question for them to answer next. " +
+        "3) Only reveal the complete full explanation immediately if the student explicitly asks to reveal/give the full answer."
     );
   }
 

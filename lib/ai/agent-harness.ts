@@ -59,15 +59,25 @@ Core Guidelines:
    - Always output chemical and electrolyte formulas in proper Unicode: CO₂, O₂, H₂O, HCO₃⁻, Ca²⁺, Mg²⁺, Na⁺, K⁺, Cl⁻, PaO₂, PaCO₂, SaO₂, FiO₂, B₁₂, T₃, T₄. Never output broken ASCII like CO2 or raw LaTeX like $CO_2$.
    - Output square roots cleanly as √(expression), fractions as (numerator / denominator), and comparisons as ±, ≥, ≤, ≈, ≠.
    - Format physiological cascades with clean arrows: e.g.,
-     LV Failure → ↑ LVEDP → ↑ LA Pressure → ↑ Pulmonary Venous Pressure → Pulmonary Edema.`;
+     LV Failure → ↑ LVEDP → ↑ LA Pressure → ↑ Pulmonary Venous Pressure → Pulmonary Edema.
+   - NEVER output raw HTML tags such as <br>, <br/>, or <p> inside Markdown or table cells; keep table cells concise using clean punctuation or semicolons instead.`;
 
-function filterCitationSources(refs: Array<{ source: string }>): string[] {
+function filterCitationSources(refs: Array<{ source: unknown }>): string[] {
   return refs
-    .map((r) => r.source)
+    .map((r) => {
+      const s = r?.source;
+      if (typeof s === "string") return s;
+      if (s && typeof s === "object") {
+        const obj = s as Record<string, unknown>;
+        return String(obj.title || obj.source || obj.name || "");
+      }
+      return "";
+    })
     .filter((s) => {
       const low = (s || "").trim().toLowerCase();
       return (
         Boolean(low) &&
+        low !== "[object object]" &&
         !low.startsWith("authoritative literature on") &&
         !low.startsWith("standard reference corpus") &&
         !low.startsWith("authoritative canon for")
@@ -153,6 +163,23 @@ function buildActiveViewportPrompt(
       ? `\nUser Specifically Selected/Highlighted:\n"${context.selectedText}"\n`
       : ""
   }\n\n${enriched.groundingSnippet}`;
+
+  const lastTurn =
+    Array.isArray(context.history) && context.history.length > 0
+      ? context.history[context.history.length - 1]
+      : null;
+  const isAnsweringSocraticPrompt =
+    Boolean(context.socraticMode) &&
+    lastTurn?.sender === "ai" &&
+    /[?؟]/.test(lastTurn.text || "");
+
+  if (isAnsweringSocraticPrompt) {
+    return (
+      `${pageIntro}\n\n` +
+      `[SOCRATIC COACHING TURN — STUDENT'S ANSWER TO YOUR PREVIOUS QUESTION]:\n${userQuery}\n\n` +
+      `Coach instruction: The student is responding to the question you just asked in your previous turn. Evaluate their response directly (confirm what is right, clarify any nuance in 1–2 concise sentences), DO NOT dump a full lecture or comparison table about the term they typed, and ask ONE focused next-step question to keep progressing through the topic.`
+    );
+  }
 
   return `${pageIntro}\n\nStudent Question / Query:\n${userQuery}`;
 }

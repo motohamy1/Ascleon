@@ -26,10 +26,26 @@ function getBlockDir(children: React.ReactNode, fallback: "rtl" | "ltr"): "rtl" 
   return plain ? resolveTextDirection(plain) : fallback;
 }
 
+const HTML_BR_RE = /<br\s*\/?>/gi;
+
+function renderStringWithBreaks(text: string, keyPrefix: string): React.ReactNode {
+  if (!HTML_BR_RE.test(text)) {
+    return renderBidiNodes(text, keyPrefix);
+  }
+  HTML_BR_RE.lastIndex = 0;
+  const segments = text.split(HTML_BR_RE);
+  return segments.map((seg, i) => (
+    <React.Fragment key={`${keyPrefix}-br-${i}`}>
+      {i > 0 && <br />}
+      {renderBidiNodes(seg, `${keyPrefix}-seg-${i}`)}
+    </React.Fragment>
+  ));
+}
+
 function wrapBidiChildren(children: React.ReactNode, prefix = "md"): React.ReactNode {
   return React.Children.map(children, (child, idx) => {
     if (typeof child === "string") {
-      return renderBidiNodes(child, `${prefix}-${idx}`);
+      return renderStringWithBreaks(child, `${prefix}-${idx}`);
     }
     if (
       React.isValidElement<{ children?: React.ReactNode }>(child) &&
