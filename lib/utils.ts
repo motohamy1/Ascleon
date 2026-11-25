@@ -122,6 +122,26 @@ export async function withRetry<T>(
   }
 }
 
+export async function getPDFPageCount(file: File): Promise<number> {
+  if (typeof window === "undefined") {
+    throw new Error("getPDFPageCount can only be called in a browser environment");
+  }
+
+  const pdfjsLib = await import("pdfjs-dist");
+  const workerVersion = pdfjsLib.version || "5.5.207";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${workerVersion}/build/pdf.worker.min.mjs`;
+
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({
+    data: arrayBuffer,
+    useSystemFonts: true,
+  });
+  const pdfDocument = await loadingTask.promise;
+  const numPages = pdfDocument.numPages;
+  await pdfDocument.destroy();
+  return numPages;
+}
+
 export async function parsePDFFile(file: File) {
   // Guard against server-side execution
   if (typeof window === "undefined" || typeof document === "undefined") {

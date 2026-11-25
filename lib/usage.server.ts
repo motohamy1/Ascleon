@@ -5,8 +5,9 @@ import UserUsage from "@/database/models/user-usage.model";
 import getCurrentBillingPeriodStart, {
   PLAN_LIMITS,
   PlanType,
+  UNLIMITED_PLAN_LIMITS,
 } from "@/lib/subscription-constants";
-import { getUserPlan, getUserPlanDetails } from "@/lib/subscription.server";
+import { getUserPlanDetails } from "@/lib/subscription.server";
 
 export interface UsageCheckResult {
   allowed: boolean;
@@ -47,12 +48,14 @@ async function ensureMonthlyUsageDoc(clerkId: string, billingPeriodStart: Date) 
 export async function getUserUsageSummary(clerkId: string) {
   const planDetails = await getUserPlanDetails();
   const plan = planDetails.plan;
-  const limits = PLAN_LIMITS[plan];
+  const isUnlimited = Boolean(planDetails.isUnlimited);
+  const limits = isUnlimited ? UNLIMITED_PLAN_LIMITS : PLAN_LIMITS[plan];
   const billingPeriodStart = getCurrentBillingPeriodStart();
   const doc = await ensureMonthlyUsageDoc(clerkId, billingPeriodStart);
 
   return {
     plan,
+    isUnlimited,
     planDetails,
     limits,
     billingPeriodStart,
@@ -69,20 +72,22 @@ export async function consumeCredits(
   amount: number,
 ): Promise<UsageCheckResult> {
   const cost = Math.max(0, Math.ceil(amount));
-  const plan = await getUserPlan();
-  const limits = PLAN_LIMITS[plan];
+  const planDetails = await getUserPlanDetails();
+  const plan = planDetails.plan;
+  const isUnlimited = Boolean(planDetails.isUnlimited);
+  const limits = isUnlimited ? UNLIMITED_PLAN_LIMITS : PLAN_LIMITS[plan];
   const limit = limits.maxCreditsPerMonth;
   const billingPeriodStart = getCurrentBillingPeriodStart();
 
   const existing = await ensureMonthlyUsageDoc(clerkId, billingPeriodStart);
 
-  if (cost === 0) {
+  if (isUnlimited || cost === 0) {
     return {
       allowed: true,
       plan,
       used: existing.creditsUsed,
       limit,
-      remaining: Math.max(0, limit - existing.creditsUsed),
+      remaining: isUnlimited ? limit : Math.max(0, limit - existing.creditsUsed),
     };
   }
 
@@ -126,12 +131,24 @@ export async function consumePages(
   pageCount: number,
 ): Promise<UsageCheckResult> {
   const pages = Math.max(1, Math.ceil(pageCount));
-  const plan = await getUserPlan();
-  const limits = PLAN_LIMITS[plan];
+  const planDetails = await getUserPlanDetails();
+  const plan = planDetails.plan;
+  const isUnlimited = Boolean(planDetails.isUnlimited);
+  const limits = isUnlimited ? UNLIMITED_PLAN_LIMITS : PLAN_LIMITS[plan];
   const limit = limits.maxPagesPerMonth;
   const billingPeriodStart = getCurrentBillingPeriodStart();
 
   const existing = await ensureMonthlyUsageDoc(clerkId, billingPeriodStart);
+
+  if (isUnlimited) {
+    return {
+      allowed: true,
+      plan,
+      used: existing.pagesUsed,
+      limit,
+      remaining: limit,
+    };
+  }
 
   if (pages > limit) {
     return {
@@ -189,10 +206,23 @@ export async function refundPages(clerkId: string, pageCount: number) {
 export async function checkVoiceBudget(
   clerkId: string,
 ): Promise<VoiceBudgetResult> {
-  const plan = await getUserPlan();
-  const limits = PLAN_LIMITS[plan];
+  const planDetails = await getUserPlanDetails();
+  const plan = planDetails.plan;
+  const isUnlimited = Boolean(planDetails.isUnlimited);
+  const limits = isUnlimited ? UNLIMITED_PLAN_LIMITS : PLAN_LIMITS[plan];
   const billingPeriodStart = getCurrentBillingPeriodStart();
   const doc = await ensureMonthlyUsageDoc(clerkId, billingPeriodStart);
+
+  if (isUnlimited) {
+    return {
+      allowed: true,
+      plan,
+      voiceMinutesUsed: Number(doc.voiceMinutesUsed.toFixed(2)),
+      voiceMinutesLimit: limits.maxVoiceMinutesPerMonth,
+      remainingMinutes: limits.maxVoiceMinutesPerMonth,
+      maxDurationPerSession: limits.maxDurationPerSession,
+    };
+  }
 
   const remainingMinutes = Math.max(
     0,

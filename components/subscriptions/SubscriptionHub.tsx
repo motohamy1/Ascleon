@@ -55,7 +55,7 @@ export interface SerializedPaymentRequest {
 
 export interface InitialSubscriptionState {
   plan: PlanType;
-  source: "clerk" | "egypt_manual" | "free";
+  source: "clerk" | "egypt_manual" | "owner" | "free";
   paymentMethod?: string | null;
   billingCycle?: string | null;
   currentPeriodEnd?: string | null;

@@ -36,6 +36,7 @@ import {
   saveCoverImageAction,
 } from "@/lib/actions/storage.actions";
 import { uploadPdfWithProgress } from "@/lib/storage/client-upload";
+import { validatePdfAgainstPlan } from "@/lib/storage/upload-preflight";
 import { useRouter } from "next/navigation";
 import { parsePDFFile, withRetry } from "@/lib/utils";
 import { cachePdfBuffer } from "@/lib/storage/pdf-local-cache";
@@ -94,6 +95,19 @@ const UploadForm = () => {
 
       const fileTitle = data.title.replace(/\s+/g, "-").toLowerCase();
       const pdfFile = data.pdfFile;
+
+      setStatusMessage("Checking file size & page limits for your plan...");
+      const preflight = await validatePdfAgainstPlan(pdfFile);
+      if (!preflight.allowed) {
+        toast.error(
+          preflight.error || "This PDF exceeds your current plan limits.",
+        );
+        if (preflight.isBillingError) {
+          router.push("/subscriptions?reason=limit");
+        }
+        setIsSubmitting(false);
+        return;
+      }
 
       setStatusMessage("Parsing PDF & extracting text chapters...");
       const parsedPDF = await parsePDFFile(pdfFile);

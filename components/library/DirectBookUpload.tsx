@@ -17,6 +17,7 @@ import {
 import { cn, parsePDFFile, withRetry } from "@/lib/utils";
 import { cachePdfBuffer } from "@/lib/storage/pdf-local-cache";
 import { uploadPdfWithProgress } from "@/lib/storage/client-upload";
+import { validatePdfAgainstPlan } from "@/lib/storage/upload-preflight";
 import {
   checkBookExists,
   createBook,
@@ -126,6 +127,22 @@ export default function DirectBookUpload({
               router.push(`/books/${existsCheck.book.slug}`);
             }, 800);
             return;
+          }
+        }
+
+        if (!cp.parsedPDF && !cp.createdBook) {
+          setProgress(12);
+          setStage("reading");
+          setStatusText("Checking file size & page limits for your plan...");
+
+          const preflight = await validatePdfAgainstPlan(file);
+          if (!preflight.allowed) {
+            if (preflight.pageCount) {
+              setPageCount(preflight.pageCount);
+            }
+            throw new Error(
+              preflight.error || "This PDF exceeds your current plan limits.",
+            );
           }
         }
 

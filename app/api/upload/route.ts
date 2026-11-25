@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { handleUpload, HandleUploadBody } from '@vercel/blob/client';
 import { auth } from "@clerk/nextjs/server";
-import { MAX_FILE_SIZE } from "@/lib/constants";
+import { getPlanLimits } from "@/lib/subscription.server";
 
 export async function POST(request: Request): Promise<NextResponse> {
     try {
@@ -16,10 +16,11 @@ export async function POST(request: Request): Promise<NextResponse> {
                 if (!userId) {
                     throw new Error('Unauthorized: User not authenticated');
                 }
+                const limits = await getPlanLimits();
                 return {
                     allowedContentTypes: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
                     addRandomSuffix: true,
-                    maximumSizeInBytes: MAX_FILE_SIZE,
+                    maximumSizeInBytes: limits.maxFileSizeMb * 1024 * 1024,
                     tokenPayload: JSON.stringify({ userId })
                 }
             },

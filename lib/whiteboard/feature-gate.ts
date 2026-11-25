@@ -40,11 +40,7 @@ export async function getWhiteboardAccess(): Promise<WhiteboardAccessResult> {
     }
 
     const admin = await isSubscriptionAdmin();
-    const allowAdminPreview =
-      process.env.WHITEBOARD_ADMIN_PREVIEW === "true" ||
-      process.env.NODE_ENV !== "production";
-
-    if (admin.isAdmin && allowAdminPreview) {
+    if (admin.isAdmin) {
       return { allowed: true, mode: "admin-preview" };
     }
   } catch {

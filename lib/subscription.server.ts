@@ -8,11 +8,18 @@ import {
   PLANS,
   PLAN_LIMITS,
   PlanType,
+  UNLIMITED_PLAN_LIMITS,
 } from "@/lib/subscription-constants";
+
+export const DEFAULT_OWNER_EMAILS = [
+  "meltohamy080@gmail.com",
+  "motohamy0000@gmail.com",
+];
 
 export interface UserPlanDetails {
   plan: PlanType;
-  source: "clerk" | "egypt_manual" | "free";
+  source: "clerk" | "egypt_manual" | "owner" | "free";
+  isUnlimited?: boolean;
   paymentMethod?: EgyptPaymentMethod | "clerk" | "manual" | null;
   billingCycle?: BillingCycle | null;
   currentPeriodEnd?: string | null;
@@ -53,10 +60,26 @@ export async function getUserPlanDetails(): Promise<UserPlanDetails> {
     return {
       plan: PLANS.FREE,
       source: "free",
+      isUnlimited: false,
       paymentMethod: null,
       billingCycle: null,
       currentPeriodEnd: null,
     };
+  }
+
+  try {
+    const admin = await isSubscriptionAdmin();
+    if (admin.isAdmin) {
+      return {
+        plan: PLANS.PRO,
+        source: "owner",
+        isUnlimited: true,
+        paymentMethod: "manual",
+        billingCycle: null,
+        currentPeriodEnd: null,
+      };
+    }
+  } catch {
   }
 
   let clerkPlan: PlanType = PLANS.FREE;
@@ -72,6 +95,7 @@ export async function getUserPlanDetails(): Promise<UserPlanDetails> {
     return {
       plan: PLANS.FREE,
       source: "free",
+      isUnlimited: false,
       paymentMethod: null,
       billingCycle: null,
       currentPeriodEnd: null,
@@ -82,6 +106,7 @@ export async function getUserPlanDetails(): Promise<UserPlanDetails> {
     return {
       plan: effectivePlan,
       source: "egypt_manual",
+      isUnlimited: false,
       paymentMethod: dbSub.paymentMethod,
       billingCycle: dbSub.billingCycle,
       currentPeriodEnd: dbSub.currentPeriodEnd,
@@ -91,6 +116,7 @@ export async function getUserPlanDetails(): Promise<UserPlanDetails> {
   return {
     plan: effectivePlan,
     source: "clerk",
+    isUnlimited: false,
     paymentMethod: "clerk",
     billingCycle: null,
     currentPeriodEnd: null,
@@ -103,8 +129,11 @@ export const getUserPlan = async (): Promise<PlanType> => {
 };
 
 export const getPlanLimits = async () => {
-  const plan = await getUserPlan();
-  return PLAN_LIMITS[plan];
+  const details = await getUserPlanDetails();
+  if (details.isUnlimited) {
+    return UNLIMITED_PLAN_LIMITS;
+  }
+  return PLAN_LIMITS[details.plan];
 };
 
 export async function isSubscriptionAdmin(): Promise<{
@@ -119,19 +148,30 @@ export async function isSubscriptionAdmin(): Promise<{
 
   const user = await currentUser();
   const emails =
-    user?.emailAddresses?.map((e) => e.emailAddress.toLowerCase()) ?? [];
+    user?.emailAddresses
+      ?.filter((e) => !e.verification || e.verification.status === "verified")
+      .map((e) => e.emailAddress.trim().toLowerCase()) ?? [];
   const primaryEmail =
-    user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? emails[0] ?? null;
+    user?.primaryEmailAddress?.emailAddress?.trim().toLowerCase() ??
+    emails[0] ??
+    null;
 
   const allowedIds = (process.env.ADMIN_USER_IDS || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const allowedEmails = (process.env.ADMIN_EMAILS || "")
+  const envEmails = [
+    process.env.ADMIN_EMAILS || "",
+    process.env.OWNER_EMAILS || "",
+    process.env.WHITEBOARD_ALLOWED_EMAILS || "",
+  ]
+    .join(",")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+
+  const allowedEmails = new Set([...DEFAULT_OWNER_EMAILS, ...envEmails]);
 
   const hasRole =
     (user?.publicMetadata as { role?: string } | undefined)?.role === "admin";
@@ -139,7 +179,7 @@ export async function isSubscriptionAdmin(): Promise<{
   const isAdmin =
     hasRole ||
     allowedIds.includes(userId) ||
-    emails.some((email) => allowedEmails.includes(email));
+    emails.some((email) => allowedEmails.has(email));
 
   return { isAdmin, userId, email: primaryEmail };
 }

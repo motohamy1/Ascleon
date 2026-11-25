@@ -10,7 +10,8 @@ export interface PlanLimits {
   maxPagesPerMonth: number;
   maxCreditsPerMonth: number;
   maxVoiceMinutesPerMonth: number;
-  maxDurationPerSession: number; // in minutes
+  maxDurationPerSession: number;
+  maxFileSizeMb: number;
   hasSessionHistory: boolean;
 }
 
@@ -20,6 +21,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     maxCreditsPerMonth: 40,
     maxVoiceMinutesPerMonth: 10,
     maxDurationPerSession: 5,
+    maxFileSizeMb: 15,
     hasSessionHistory: false,
   },
   [PLANS.STANDARD]: {
@@ -27,6 +29,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     maxCreditsPerMonth: 250,
     maxVoiceMinutesPerMonth: 30,
     maxDurationPerSession: 10,
+    maxFileSizeMb: 35,
     hasSessionHistory: true,
   },
   [PLANS.PRO]: {
@@ -34,8 +37,18 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     maxCreditsPerMonth: 1200,
     maxVoiceMinutesPerMonth: 150,
     maxDurationPerSession: 25,
+    maxFileSizeMb: 50,
     hasSessionHistory: true,
   },
+};
+
+export const UNLIMITED_PLAN_LIMITS: PlanLimits = {
+  maxPagesPerMonth: 999999,
+  maxCreditsPerMonth: 999999,
+  maxVoiceMinutesPerMonth: 999999,
+  maxDurationPerSession: 120,
+  maxFileSizeMb: 250,
+  hasSessionHistory: true,
 };
 
 export const AI_CREDIT_COSTS = {
