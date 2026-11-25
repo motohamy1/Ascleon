@@ -136,11 +136,11 @@ describe("getActiveStudySource consistency", () => {
     expect(res.data?.progressPercent).toBe(50);
   });
 
-  it("keeps Home, Library, Progress, and Active Space aligned on getActiveStudySource", () => {
+  it("keeps Home, Library, Study Hub, and Active Space aligned on getActiveStudySource", () => {
     const pages = [
       "app/(root)/page.tsx",
       "app/(root)/library/page.tsx",
-      "app/(root)/progress/page.tsx",
+      "app/(root)/study-hub/page.tsx",
       "app/(root)/space/active/page.tsx",
     ];
     for (const rel of pages) {

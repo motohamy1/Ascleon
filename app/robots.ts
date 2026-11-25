@@ -6,12 +6,12 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        disallow: ["/api/", "/subscriptions/admin", "/books/new", "/progress", "/space/"],
+        disallow: ["/api/", "/subscriptions/admin", "/books/new", "/progress", "/study-hub", "/space/"],
       },
       {
         userAgent: ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "PerplexityBot", "Google-Extended"],
         allow: "/",
-        disallow: ["/api/", "/subscriptions/admin", "/books/new", "/progress", "/space/"],
+        disallow: ["/api/", "/subscriptions/admin", "/books/new", "/progress", "/study-hub", "/space/"],
       },
     ],
     sitemap: "https://www.ascleon.app/sitemap.xml",

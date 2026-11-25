@@ -26,7 +26,7 @@ const navItems: NavItem[] = [
   { href: '/', label: 'Home', match: '/' },
   { href: '/space/active', label: 'Study Space', match: '/space/active', extraMatch: '/books' },
   { href: '/library', label: 'Library', match: '/library' },
-  { href: '/progress', label: 'Study Hub', match: '/progress' },
+  { href: '/study-hub', label: 'Study Hub', match: '/study-hub' },
   { href: '/space/revision', label: 'Revision', match: '/space/revision', disabled: true },
 ];
 
@@ -37,7 +37,7 @@ const isActiveRoute = (pathname: string, match: string, extraMatch?: string) =>
       (!!extraMatch && pathname.startsWith(extraMatch));
 
 // Tabs that require an account; guests get the sign-in modal instead
-const authRequired = new Set(['/space/active', '/library', '/progress']);
+const authRequired = new Set(['/space/active', '/library', '/study-hub']);
 
 const Navbar = () => {
   const pathname = usePathname();
