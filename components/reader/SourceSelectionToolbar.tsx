@@ -30,6 +30,7 @@ interface SourceSelectionToolbarProps {
   position: { x: number; y: number } | null;
   onMorphSelection: () => void;
   onWhiteboardSelection?: () => void;
+  whiteboardAllowed?: boolean;
   onAskAI: (promptPrefix?: string) => void;
   onVoiceViva: () => void;
   onQuizSelection: () => void;
@@ -42,6 +43,7 @@ export function SourceSelectionToolbar({
   position,
   onMorphSelection,
   onWhiteboardSelection,
+  whiteboardAllowed = false,
   onAskAI,
   onVoiceViva,
   onQuizSelection,
@@ -102,19 +104,28 @@ export function SourceSelectionToolbar({
           <span>Morph Passage</span>
         </button>
 
-        {/* 1b. Whiteboard Video on Selection (Locked — Soon) */}
         {onWhiteboardSelection && (
           <button
             type="button"
-            disabled
-            title="Whiteboard — Coming Soon"
-            className="flex cursor-not-allowed items-center gap-1 rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--study-text-muted)] opacity-75"
+            disabled={!whiteboardAllowed}
+            onClick={() => {
+              if (!whiteboardAllowed) return;
+              onWhiteboardSelection();
+            }}
+            title={whiteboardAllowed ? "Explain on Living Board" : "Whiteboard — Coming Soon"}
+            className={
+              whiteboardAllowed
+                ? "flex cursor-pointer items-center gap-1 rounded-xl border border-[var(--study-border-strong)] bg-[var(--study-surface-muted)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--study-text)] hover:bg-[var(--study-glass-hover)] transition-colors"
+                : "flex cursor-not-allowed items-center gap-1 rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--study-text-muted)] opacity-75"
+            }
           >
             <Tv className="size-3" />
-            <span>Whiteboard</span>
-            <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-glass)] px-1.5 py-0.5 text-[8.5px] font-black uppercase tracking-wider text-[var(--study-text-soft)]">
-              Soon
-            </span>
+            <span>Living Board</span>
+            {!whiteboardAllowed && (
+              <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-glass)] px-1.5 py-0.5 text-[8.5px] font-black uppercase tracking-wider text-[var(--study-text-soft)]">
+                Soon
+              </span>
+            )}
           </button>
         )}
 

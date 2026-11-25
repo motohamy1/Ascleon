@@ -364,7 +364,7 @@ export default function LivingReader({
 
   useEffect(() => {
     let active = true;
-    fetch("/api/whiteboard/access")
+    fetch("/api/whiteboard/access", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!active || !data || typeof data.allowed !== "boolean") return;
@@ -2162,6 +2162,7 @@ export default function LivingReader({
                     setActiveIntent("whiteboard");
                     setMobileActivePane("studio");
                   }}
+                  whiteboardAllowed={whiteboardAccess.allowed}
                   onAskAI={() => {
                     handleAskAISelection(selectedText);
                     setMobileActivePane("studio");
@@ -2269,6 +2270,7 @@ export default function LivingReader({
                     setActiveIntent("whiteboard");
                     setMobileActivePane("studio");
                   }}
+                  whiteboardAllowed={whiteboardAccess.allowed}
                   onAskAI={() => {
                     handleAskAISelection(selectedText);
                     setMobileActivePane("studio");
@@ -2346,15 +2348,32 @@ export default function LivingReader({
 
                                 <button
                                   type="button"
-                                  disabled
-                                  className="flex cursor-not-allowed items-center gap-1 rounded-full border border-current/15 bg-current/5 px-2 py-0.5 font-bold opacity-60"
-                                  title="Living Board — Coming Soon"
+                                  disabled={!whiteboardAccess.allowed}
+                                  onClick={() => {
+                                    if (!whiteboardAccess.allowed) return;
+                                    setSelectedText(para);
+                                    setWhiteboardSelectionSeq((n) => n + 1);
+                                    setActiveIntent("whiteboard");
+                                    setMobileActivePane("studio");
+                                  }}
+                                  className={
+                                    whiteboardAccess.allowed
+                                      ? "flex cursor-pointer items-center gap-1 rounded-full border border-current/20 bg-current/5 px-2 py-0.5 font-bold hover:bg-current/15"
+                                      : "flex cursor-not-allowed items-center gap-1 rounded-full border border-current/15 bg-current/5 px-2 py-0.5 font-bold opacity-60"
+                                  }
+                                  title={
+                                    whiteboardAccess.allowed
+                                      ? "Explain this block on Living Board"
+                                      : "Living Board — Coming Soon"
+                                  }
                                 >
                                   <Tv className="size-2.5" />
                                   <span>Living Board</span>
-                                  <span className="rounded-full bg-current/10 px-1 text-[8px] font-black uppercase">
-                                    Soon
-                                  </span>
+                                  {!whiteboardAccess.allowed && (
+                                    <span className="rounded-full bg-current/10 px-1 text-[8px] font-black uppercase">
+                                      Soon
+                                    </span>
+                                  )}
                                 </button>
 
                                 <button
@@ -2933,19 +2952,35 @@ export default function LivingReader({
 
                 <button
                   type="button"
-                  disabled
-                  title="Ascleon Living Board — Coming Soon"
-                  aria-label="Living Board (Coming Soon)"
+                  disabled={!whiteboardAccess.allowed}
+                  onClick={() => {
+                    if (!whiteboardAccess.allowed) return;
+                    setActiveIntent("whiteboard");
+                  }}
+                  title={
+                    whiteboardAccess.allowed
+                      ? "Ascleon Living Board"
+                      : "Ascleon Living Board — Coming Soon"
+                  }
+                  aria-label={
+                    whiteboardAccess.allowed
+                      ? "Living Board"
+                      : "Living Board (Coming Soon)"
+                  }
                   className={cn(
-                    GLASS_BUTTON_BASE,
-                    "flex items-center justify-center gap-1 rounded-full py-1.5 px-1.5 font-bold whitespace-nowrap opacity-60 cursor-not-allowed active:scale-100"
+                    activeIntent === "whiteboard" ? GLASS_BUTTON_ACTIVE : GLASS_BUTTON_BASE,
+                    "flex items-center justify-center gap-1 rounded-full py-1.5 px-1.5 font-bold whitespace-nowrap",
+                    !whiteboardAccess.allowed &&
+                      "opacity-60 cursor-not-allowed active:scale-100"
                   )}
                 >
                   <Tv className="size-3 shrink-0" />
                   <span className="hidden truncate sm:inline">Living Board</span>
-                  <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-1 py-0 text-[8px] font-black uppercase tracking-wider text-[var(--study-text-muted)]">
-                    Soon
-                  </span>
+                  {!whiteboardAccess.allowed && (
+                    <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-1 py-0 text-[8px] font-black uppercase tracking-wider text-[var(--study-text-muted)]">
+                      Soon
+                    </span>
+                  )}
                 </button>
 
                 <button
@@ -2987,6 +3022,7 @@ export default function LivingReader({
                 setWhiteboardSelectionSeq((n) => n + 1);
                 setActiveIntent("whiteboard");
               }}
+              whiteboardAllowed={whiteboardAccess.allowed}
               onAskAISelection={() => handleAskAISelection(selectedText)}
               onPinSelection={() => handlePinSelectionToVault(selectedText)}
               onClearSelection={handleClearSelection}

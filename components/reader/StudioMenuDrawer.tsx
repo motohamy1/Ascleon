@@ -42,6 +42,7 @@ interface StudioMenuDrawerProps {
   snippedDiagram: { url: string; pageNumber: number } | null;
   onMorphSelection: () => void;
   onWhiteboardSelection: () => void;
+  whiteboardAllowed?: boolean;
   onAskAISelection: () => void;
   onPinSelection: () => void;
   onClearSelection: () => void;
@@ -124,6 +125,7 @@ export function StudioMenuDrawer({
   snippedDiagram,
   onMorphSelection,
   onWhiteboardSelection,
+  whiteboardAllowed = false,
   onAskAISelection,
   onPinSelection,
   onClearSelection,
@@ -327,18 +329,26 @@ export function StudioMenuDrawer({
                     </button>
                     <button
                       type="button"
-                      disabled
-                      title="Living Board — Coming Soon"
+                      disabled={!whiteboardAllowed}
+                      onClick={() => {
+                        if (!whiteboardAllowed) return;
+                        onWhiteboardSelection();
+                        onClose();
+                      }}
+                      title={whiteboardAllowed ? "Explain selection on Living Board" : "Living Board — Coming Soon"}
                       className={cn(
                         GLASS_BUTTON_BASE,
-                        "flex items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] font-bold opacity-55 cursor-not-allowed active:scale-100"
+                        "flex items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] font-bold",
+                        !whiteboardAllowed && "opacity-55 cursor-not-allowed active:scale-100"
                       )}
                     >
-                      <Tv className="size-3 text-[var(--study-text-muted)]" />
+                      <Tv className={cn("size-3", whiteboardAllowed ? "text-[color:var(--orange)]" : "text-[var(--study-text-muted)]")} />
                       <span>Living Board</span>
-                      <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-glass)] px-1.5 py-0.5 text-[8px] font-black uppercase">
-                        Soon
-                      </span>
+                      {!whiteboardAllowed && (
+                        <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-glass)] px-1.5 py-0.5 text-[8px] font-black uppercase">
+                          Soon
+                        </span>
+                      )}
                     </button>
                     <button
                       type="button"
@@ -538,6 +548,7 @@ export function StudioMenuDrawer({
               {STUDIO_MODES.map((mode) => {
                 const Icon = mode.icon;
                 const isActive = activeIntent === mode.id;
+                const isLocked = Boolean(mode.soon && !(mode.id === "whiteboard" && whiteboardAllowed));
                 const activeClass =
                   mode.id === "voice" ? GLASS_BUTTON_VOICE_ACTIVE : GLASS_BUTTON_ACTIVE;
 
@@ -545,17 +556,17 @@ export function StudioMenuDrawer({
                   <button
                     key={mode.id}
                     type="button"
-                    disabled={mode.soon}
-                    title={mode.soon ? `${mode.label} — Coming Soon` : mode.subtitle}
+                    disabled={isLocked}
+                    title={isLocked ? `${mode.label} — Coming Soon` : mode.subtitle}
                     onClick={() => {
-                      if (mode.soon) return;
+                      if (isLocked) return;
                       onSelectIntent(mode.id);
                       onClose();
                     }}
                     className={cn(
                       isActive ? activeClass : GLASS_BUTTON_BASE,
                       "flex flex-col items-start gap-1 rounded-2xl p-2.5 text-left",
-                      mode.soon &&
+                      isLocked &&
                         "opacity-55 cursor-not-allowed active:scale-100"
                     )}
                   >
@@ -570,7 +581,7 @@ export function StudioMenuDrawer({
                             : "text-[color:var(--orange)]"
                         )}
                       />
-                      {mode.soon ? (
+                      {isLocked ? (
                         <span className="rounded-full border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-1.5 py-0.5 text-[8.5px] font-black uppercase tracking-wider text-[var(--study-text-soft)]">
                           Soon
                         </span>
