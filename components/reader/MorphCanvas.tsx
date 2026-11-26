@@ -325,7 +325,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
         <InteractiveJourneyStage
           journey={artifact.journey}
           onAskAI={onAskAI}
-          onNavigateToPage={(p) => onNavigateSegment?.(p - 1)}
+          onNavigateToPage={(p) => onNavigateSegment?.(p)}
         />
       )}
 
@@ -714,9 +714,7 @@ export const MorphCanvas: React.FC<MorphCanvasProps> = ({
                             onNavigateSegment &&
                             card.contextLink?.targetPageOrSegment !== undefined
                           ) {
-                            onNavigateSegment(
-                              card.contextLink.targetPageOrSegment - 1,
-                            );
+                            onNavigateSegment(card.contextLink.targetPageOrSegment);
                           }
                         }}
                         className="flex w-full items-center justify-between gap-2 text-start text-[#0f0e10] font-bold hover:underline transition-colors cursor-pointer"

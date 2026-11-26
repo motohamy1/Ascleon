@@ -1233,9 +1233,19 @@ button[data-variant='unstyled'] *,
    ========================================================================== */
 .ascleon-bidi {
   text-align: start;
-  line-height: 1.75;
+  line-height: 1.82;
   word-spacing: 0.02em;
   overflow-wrap: break-word;
+}
+
+[dir="rtl"].ascleon-bidi,
+.ascleon-bidi [dir="rtl"] {
+  line-height: 1.85;
+}
+
+.ascleon-bidi strong {
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 [dir="auto"] {

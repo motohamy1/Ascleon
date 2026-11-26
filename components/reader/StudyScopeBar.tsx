@@ -32,9 +32,25 @@ export default function StudyScopeBar({
   onScopeChange,
   onNavigateToPage,
 }: StudyScopeBarProps) {
-  const [rangeStart, setRangeStart] = useState<number>(currentScope.startPage || currentPage);
-  const [rangeEnd, setRangeEnd] = useState<number>(currentScope.endPage || Math.min(currentPage + 4, totalPages || 10));
+  const maxPage = Math.max(1, totalPages || 999);
+  const [rangeStartInput, setRangeStartInput] = useState<string>(
+    String(currentScope.startPage || currentPage)
+  );
+  const [rangeEndInput, setRangeEndInput] = useState<string>(
+    String(currentScope.endPage || Math.min(currentPage + 4, maxPage))
+  );
   const [isEditingRange, setIsEditingRange] = useState(false);
+
+  const openRangeEditor = () => {
+    const startVal = currentScope.type === "range" ? currentScope.startPage : currentPage;
+    const endVal =
+      currentScope.type === "range"
+        ? currentScope.endPage
+        : Math.min(currentPage + 4, maxPage);
+    setRangeStartInput(String(startVal));
+    setRangeEndInput(String(endVal));
+    setIsEditingRange(true);
+  };
 
   const handleSelectSinglePage = () => {
     setIsEditingRange(false);
@@ -46,8 +62,14 @@ export default function StudyScopeBar({
   };
 
   const handleApplyRange = () => {
-    const validStart = Math.max(1, Math.min(rangeStart, totalPages || 999));
-    const validEnd = Math.max(validStart, Math.min(rangeEnd, totalPages || 999));
+    const parsedStart = parseInt(rangeStartInput.trim(), 10);
+    const parsedEnd = parseInt(rangeEndInput.trim(), 10);
+    const safeA = Number.isFinite(parsedStart) ? Math.max(1, Math.min(parsedStart, maxPage)) : currentPage;
+    const safeB = Number.isFinite(parsedEnd) ? Math.max(1, Math.min(parsedEnd, maxPage)) : safeA;
+    const validStart = Math.min(safeA, safeB);
+    const validEnd = Math.max(safeA, safeB);
+    setRangeStartInput(String(validStart));
+    setRangeEndInput(String(validEnd));
     setIsEditingRange(false);
     onScopeChange({
       type: "range",
@@ -66,7 +88,10 @@ export default function StudyScopeBar({
       topicTitle: topic.title,
       topicId: topic.id,
     });
-    if (onNavigateToPage && topic.startPage !== currentPage) {
+    if (
+      onNavigateToPage &&
+      (currentPage < topic.startPage || currentPage > topic.endPage)
+    ) {
       onNavigateToPage(topic.startPage);
     }
   };
@@ -101,10 +126,10 @@ export default function StudyScopeBar({
         <button
           type="button"
           onClick={() => {
-            if (currentScope.type !== "range") {
-              setIsEditingRange(true);
+            if (!isEditingRange) {
+              openRangeEditor();
             } else {
-              setIsEditingRange(!isEditingRange);
+              setIsEditingRange(false);
             }
           }}
           className={cn(
@@ -117,7 +142,7 @@ export default function StudyScopeBar({
           <Hash className="size-2.5 sm:size-3 text-[#f6d7a1]" />
           <span>
             {currentScope.type === "range"
-              ? `Range: P.${currentScope.startPage}–${currentScope.endPage}`
+              ? `Range: P.${currentScope.startPage}–${currentScope.endPage} (Edit)`
               : (
                 <>
                   <span className="sm:hidden">Range</span>
@@ -132,21 +157,39 @@ export default function StudyScopeBar({
           <div className="flex items-center gap-1 bg-white border border-[#0f0e10] rounded-lg px-1.5 py-0.5 shadow-sm shrink-0">
             <span className="text-[9px] text-[#0f0e10]/70">P.</span>
             <input
-              type="number"
-              min={1}
-              max={totalPages || 999}
-              value={rangeStart}
-              onChange={(e) => setRangeStart(parseInt(e.target.value) || 1)}
-              className="w-8 sm:w-10 px-1 py-0.5 text-[10px] sm:text-[11px] border border-gray-300 rounded font-bold"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={rangeStartInput}
+              onChange={(e) => {
+                if (/^\d*$/.test(e.target.value)) setRangeStartInput(e.target.value);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleApplyRange();
+                }
+              }}
+              placeholder="1"
+              className="w-10 sm:w-12 px-1 py-0.5 text-[10px] sm:text-[11px] text-center border border-gray-300 rounded font-bold text-[#0f0e10]"
             />
             <span className="text-[9px] text-[#0f0e10]/70">to</span>
             <input
-              type="number"
-              min={rangeStart}
-              max={totalPages || 999}
-              value={rangeEnd}
-              onChange={(e) => setRangeEnd(parseInt(e.target.value) || rangeStart)}
-              className="w-8 sm:w-10 px-1 py-0.5 text-[10px] sm:text-[11px] border border-gray-300 rounded font-bold"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={rangeEndInput}
+              onChange={(e) => {
+                if (/^\d*$/.test(e.target.value)) setRangeEndInput(e.target.value);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleApplyRange();
+                }
+              }}
+              placeholder={String(maxPage)}
+              className="w-10 sm:w-12 px-1 py-0.5 text-[10px] sm:text-[11px] text-center border border-gray-300 rounded font-bold text-[#0f0e10]"
             />
             <button
               type="button"

@@ -191,6 +191,18 @@ export async function consumePages(
   };
 }
 
+export async function refundCredits(clerkId: string, amount: number) {
+  const credits = Math.max(0, Math.ceil(amount));
+  if (credits <= 0) return;
+
+  const billingPeriodStart = getCurrentBillingPeriodStart();
+  await ensureMonthlyUsageDoc(clerkId, billingPeriodStart);
+  await UserUsage.findOneAndUpdate(
+    { clerkId, billingPeriodStart, creditsUsed: { $gte: credits } },
+    { $inc: { creditsUsed: -credits } },
+  );
+}
+
 export async function refundPages(clerkId: string, pageCount: number) {
   const pages = Math.max(0, Math.ceil(pageCount));
   if (pages <= 0) return;

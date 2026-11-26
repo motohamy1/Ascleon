@@ -306,15 +306,16 @@ Page Index:
 ${JSON.stringify(pageIndexSummaries, null, 2).slice(0, 42000)}
 
 Requirements:
-1. Divide the whole document into sequential, non-overlapping multi-page topics covering pages 1 to ${totalPages}.
-2. For each topic:
+1. Divide the document into focused, cohesive single-lecture or single-subtopic sections covering pages 1 to ${totalPages}.
+2. Keep each topic range focused (typically 2 to 12 pages per topic; NEVER bundle 20+ pages into one giant bucket). Aim for up to 24 cohesive topics.
+3. For each topic:
    - "id": lowercase slug e.g. "intro-to-concurrency"
-   - "title": Specific canonical academic or clinical title (NEVER use generic titles like "General" or "Overview")
+   - "title": Specific canonical academic or clinical title anchored to the real section headings (NEVER use generic titles like "General" or "Overview")
    - "startPage": 1-based integer (<= endPage)
    - "endPage": 1-based integer (>= startPage)
    - "keyConcepts": 2-4 primary concepts/theorems/entities
    - "subtopics": 1-3 specific sections or nuances
-3. Specify "recommendedStartingTopicId".
+4. Specify "recommendedStartingTopicId".
 
 Return ONLY JSON:
 {
@@ -353,24 +354,51 @@ Return ONLY JSON:
           topicMapResult?.recommendedStartingTopicId || sanitizedTopics[0].id,
       };
     } else {
-      const chunkSize = Math.max(1, Math.ceil(segments.length / 5));
-      const fallbackTopics = [];
-      for (let i = 0; i < segments.length; i += chunkSize) {
-        const startP = segments[i].pageNumber || i + 1;
-        const endP =
-          segments[Math.min(i + chunkSize - 1, segments.length - 1)].pageNumber || startP;
-        const meta = deterministicBySegId.get(String(segments[i]._id));
-        const inferredHeading = meta?.headings?.[0];
+      const MAX_FALLBACK_SPAN = 8;
+      const fallbackTopics: Array<{
+        id: string;
+        title: string;
+        startPage: number;
+        endPage: number;
+        keyConcepts: string[];
+        subtopics: string[];
+      }> = [];
+      let i = 0;
+      while (i < segments.length) {
+        const startSeg = segments[i];
+        const startP = startSeg.pageNumber || i + 1;
+        const meta = deterministicBySegId.get(String(startSeg._id));
+        const inferredHeading = meta?.headings?.[0] || startSeg.headings?.[0];
+
+        let endIdx = i;
+        while (endIdx + 1 < segments.length && endIdx - i + 1 < MAX_FALLBACK_SPAN) {
+          const nextSeg = segments[endIdx + 1];
+          const nextMeta = deterministicBySegId.get(String(nextSeg._id));
+          const nextHeading = nextMeta?.headings?.[0] || nextSeg.headings?.[0];
+          if (
+            nextHeading &&
+            inferredHeading &&
+            nextHeading.toLowerCase() !== inferredHeading.toLowerCase() &&
+            endIdx > i
+          ) {
+            break;
+          }
+          endIdx++;
+        }
+
+        const endP = segments[endIdx].pageNumber || startP;
+        const topicNum = fallbackTopics.length + 1;
         fallbackTopics.push({
-          id: `topic-${Math.floor(i / chunkSize) + 1}`,
+          id: `topic-${topicNum}`,
           title: inferredHeading
-            ? `${inferredHeading} (Pages ${startP}–${endP})`
-            : `Section ${Math.floor(i / chunkSize) + 1} (Pages ${startP}–${endP})`,
+            ? `${inferredHeading} (Pages ${Math.min(startP, endP)}–${Math.max(startP, endP)})`
+            : `Section ${topicNum} (Pages ${Math.min(startP, endP)}–${Math.max(startP, endP)})`,
           startPage: Math.min(startP, endP),
           endPage: Math.max(startP, endP),
           keyConcepts: meta?.keyTerms?.slice(0, 4) || [book.title, subField],
           subtopics: [],
         });
+        i = endIdx + 1;
       }
       topicMapResult = {
         totalDetectedTopics: fallbackTopics.length,

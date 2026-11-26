@@ -7,6 +7,8 @@ import Book from "@/database/models/book.model";
 import StudyPlan from "@/database/models/study-plan.model";
 import { replanStudyPlanWithChat } from "@/lib/study-plan/generator";
 import { computeReadinessScore, serializeStudyPlan } from "@/lib/study-plan/utils";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
+import { sanitizePlainText } from "@/lib/security/sanitize";
 
 const PlanChatSchema = z.object({
   message: z.string().trim().min(1).max(600),
@@ -27,11 +29,18 @@ export async function POST(
       return NextResponse.json({ error: "Invalid study plan ID" }, { status: 400 });
     }
 
-    const raw = await req.json();
+    const raw = await req.json().catch(() => null);
     const parsed = PlanChatSchema.safeParse(raw);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Message is required", details: parsed.error.flatten() },
+        { error: "Message is required" },
+        { status: 400 }
+      );
+    }
+    const cleanMessage = sanitizePlainText(parsed.data.message, 600);
+    if (!cleanMessage) {
+      return NextResponse.json(
+        { error: "Message is required" },
         { status: 400 }
       );
     }
@@ -56,7 +65,7 @@ export async function POST(
       totalPages,
       language: doc.language || "en",
       currentSections: current.sections,
-      userMessage: parsed.data.message,
+      userMessage: cleanMessage,
     });
 
     doc.sections = replanned.sections;
@@ -66,7 +75,7 @@ export async function POST(
     doc.chatHistory.push(
       {
         role: "user",
-        text: parsed.data.message,
+        text: cleanMessage,
         diffSummary: null,
         createdAt: now.toISOString(),
       },
@@ -89,10 +98,8 @@ export async function POST(
       plan: serializeStudyPlan(doc),
     });
   } catch (error) {
-    console.error("[POST /api/study-plans/[id]/chat] error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update study plan" },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("POST /api/study-plans/[id]/chat", error, {
+      fallbackMessage: "Failed to update study plan.",
+    });
   }
 }

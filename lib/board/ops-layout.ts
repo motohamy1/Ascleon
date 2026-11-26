@@ -295,19 +295,23 @@ export function layoutBoardOps(params: {
     nodeId: string | undefined,
     boxX: number,
     boxY: number,
-    boxW: number
+    boxW: number,
+    placeOnLeft = false
   ) => {
     if (!nodeId) return;
     const src = nodePageMap.get(nodeId);
     if (!src) return;
     const badgeW = 48;
     const badgeH = 20;
+    const badgeX = placeOnLeft
+      ? Math.max(BOARD.m, boxX + 8)
+      : Math.min(BOARD.w - BOARD.m - badgeW, boxX + boxW - badgeW - 8);
     primitives.push({
       k: "badge",
       id: nextId("badge"),
       seq,
       nodeId,
-      x: Math.min(BOARD.w - BOARD.m - badgeW, boxX + boxW - badgeW - 8),
+      x: badgeX,
       y: boxY + 6,
       w: badgeW,
       h: badgeH,
@@ -325,15 +329,17 @@ export function layoutBoardOps(params: {
       seq++;
       const h = Math.round(54 * yScale);
       const badgeW = 54;
-      pushFill(innerX, cursorY + 4, badgeW, 34, 10, "#FF4C00", op.nodeId, 0.22);
+      const isRtlTitle = rtl || ARABIC_RE.test(op.text);
+      const badgeBoxX = isRtlTitle ? innerX + innerW - badgeW : innerX;
+      pushFill(badgeBoxX, cursorY + 4, badgeW, 34, 10, "#FF4C00", op.nodeId, 0.22);
       pushStroke(
-        sketchRoundedRect(innerX, cursorY + 4, badgeW, 34, 10, nextId("tbadge")),
+        sketchRoundedRect(badgeBoxX, cursorY + 4, badgeW, 34, 10, nextId("tbadge")),
         "#18181B",
         2.4,
         op.nodeId
       );
       pushText({
-        x: innerX,
+        x: badgeBoxX,
         y: cursorY + 4,
         w: badgeW,
         h: 34,
@@ -346,25 +352,29 @@ export function layoutBoardOps(params: {
         nodeId: op.nodeId,
       });
 
-      const subtitleW = op.subtitle ? 225 : 0;
+      const subtitleW = op.subtitle ? 215 : 0;
       const titleColor = toneInkColor(op.tone);
+      const titleX = isRtlTitle
+        ? innerX + (op.subtitle ? subtitleW + 12 : 0)
+        : innerX + badgeW + 14;
+      const titleW = innerW - badgeW - 14 - (op.subtitle ? subtitleW + 14 : 0);
       pushText({
-        x: innerX + badgeW + 14,
+        x: titleX,
         y: cursorY,
-        w: innerW - badgeW - (op.subtitle ? subtitleW + 24 : 24),
+        w: Math.max(120, titleW),
         h: 38,
         text: op.text,
         fontSize: Math.round(28 * Math.max(0.85, yScale)),
         weight: 700,
         color: titleColor,
-        align: rtl ? "right" : "left",
+        align: isRtlTitle ? "right" : "left",
         fontKind: "hand",
         nodeId: op.nodeId,
       });
 
       if (op.subtitle) {
         pushText({
-          x: innerX + innerW - subtitleW,
+          x: isRtlTitle ? innerX : innerX + innerW - subtitleW,
           y: cursorY + 8,
           w: subtitleW,
           h: 24,
@@ -372,7 +382,7 @@ export function layoutBoardOps(params: {
           fontSize: 12,
           weight: 700,
           color: "#475569",
-          align: "right",
+          align: isRtlTitle ? "left" : "right",
           fontKind: "mono",
           nodeId: op.nodeId,
         });
@@ -392,7 +402,8 @@ export function layoutBoardOps(params: {
 
     if (op.t === "write") {
       seq++;
-      const h = Math.round(46 * yScale);
+      const isRtlWrite = rtl || ARABIC_RE.test(op.text);
+      const h = Math.round((isRtlWrite ? 52 : 46) * yScale);
       const ink = toneNeutralInk(op.tone);
       const washHex = op.wash ? BOARD_FILL_HEX[op.wash] : BOARD_FILL_HEX.sand;
       if (op.emphasis === "box" || op.wash) {
@@ -407,23 +418,27 @@ export function layoutBoardOps(params: {
         );
       }
       pushText({
-        x: innerX + 16,
+        x: isRtlWrite ? innerX + 68 : innerX + 16,
         y: cursorY + 4,
         w: innerW - 84,
         h: h - 8,
         text: op.text,
-        fontSize: Math.round(21 * Math.max(0.84, yScale)),
+        fontSize: Math.round(20 * Math.max(0.84, yScale)),
         weight: 700,
         color: ink,
+        align: isRtlWrite ? "right" : "left",
         fontKind: "hand",
         nodeId: op.nodeId,
       });
       if (op.emphasis === "underline") {
+        const ulLen = Math.min(innerW - 80, Math.max(220, op.text.length * 11));
+        const ulX1 = isRtlWrite ? innerX + innerW - 16 - ulLen : innerX + 16;
+        const ulX2 = isRtlWrite ? innerX + innerW - 16 : innerX + ulLen;
         pushStroke(
           sketchLine(
-            innerX + 16,
+            ulX1,
             cursorY + h - 6,
-            innerX + Math.min(innerW - 80, Math.max(220, op.text.length * 11)),
+            ulX2,
             cursorY + h - 6,
             nextId("wul")
           ),
@@ -433,7 +448,7 @@ export function layoutBoardOps(params: {
           0.75
         );
       }
-      pushNodeBadge(op.nodeId, innerX, cursorY, innerW);
+      pushNodeBadge(op.nodeId, innerX, cursorY, innerW, isRtlWrite);
       if (op.nodeId) nodeRects.set(op.nodeId, { x: innerX, y: cursorY, w: innerW, h });
       cursorY += h + Math.round(BOARD.gap * yScale);
       continue;
@@ -441,7 +456,8 @@ export function layoutBoardOps(params: {
 
     if (op.t === "term") {
       seq++;
-      const h = Math.round(80 * yScale);
+      const isRtlTerm = rtl || ARABIC_RE.test(op.term) || ARABIC_RE.test(op.definition);
+      const h = Math.round((isRtlTerm ? 92 : 82) * yScale);
       const ink = toneNeutralInk(op.tone);
       const wash = BOARD_FILL_HEX[op.wash || "sky"];
       pushFill(innerX, cursorY, innerW, h, 14, wash, op.nodeId, 0.72);
@@ -452,30 +468,32 @@ export function layoutBoardOps(params: {
         op.nodeId
       );
       pushText({
-        x: innerX + 18,
-        y: cursorY + 8,
+        x: isRtlTerm ? innerX + 70 : innerX + 18,
+        y: cursorY + 7,
         w: innerW - 92,
-        h: 30,
+        h: 32,
         text: op.term,
-        fontSize: 22,
+        fontSize: 21,
         weight: 700,
         color: ink,
+        align: isRtlTerm ? "right" : "left",
         fontKind: "hand",
         nodeId: op.nodeId,
       });
       pushText({
         x: innerX + 18,
-        y: cursorY + 38,
+        y: cursorY + (isRtlTerm ? 43 : 40),
         w: innerW - 36,
-        h: Math.max(26, h - 44),
+        h: Math.max(30, h - (isRtlTerm ? 48 : 44)),
         text: op.definition,
-        fontSize: 17,
+        fontSize: 16,
         weight: 600,
         color: "#334155",
+        align: isRtlTerm ? "right" : "left",
         fontKind: "body",
         nodeId: op.nodeId,
       });
-      pushNodeBadge(op.nodeId, innerX, cursorY, innerW);
+      pushNodeBadge(op.nodeId, innerX, cursorY, innerW, isRtlTerm);
       if (op.nodeId) nodeRects.set(op.nodeId, { x: innerX, y: cursorY, w: innerW, h });
       cursorY += h + Math.round(BOARD.gap * yScale);
       continue;
@@ -483,8 +501,12 @@ export function layoutBoardOps(params: {
 
     if (op.t === "bullets") {
       seq++;
-      const rowH = Math.round(30 * yScale);
-      const headH = op.heading ? 32 : 8;
+      const isRtlBullets =
+        rtl ||
+        (op.heading ? ARABIC_RE.test(op.heading) : false) ||
+        op.items.some((it) => ARABIC_RE.test(it));
+      const rowH = Math.round((isRtlBullets ? 34 : 30) * yScale);
+      const headH = op.heading ? 34 : 8;
       const h = Math.min(maxContentY - cursorY, headH + op.items.length * rowH + 14);
       const ink = toneNeutralInk(op.tone);
       const wash = BOARD_FILL_HEX[op.wash || "mint"];
@@ -502,33 +524,36 @@ export function layoutBoardOps(params: {
           x: innerX + 18,
           y: curRowY,
           w: innerW - 36,
-          h: 26,
+          h: 28,
           text: op.heading,
           fontSize: 20,
           weight: 700,
           color: ink,
+          align: isRtlBullets ? "right" : "left",
           fontKind: "hand",
           nodeId: op.nodeId,
         });
-        curRowY += 28;
+        curRowY += 30;
       }
       op.items.slice(0, 5).forEach((item, idx) => {
         if (idx > 0) seq++;
+        const dotX = isRtlBullets ? innerX + innerW - 24 : innerX + 26;
         pushStroke(
-          sketchEllipse(innerX + 26, curRowY + 13, 4.5, 4.5, nextId("bdot")),
+          sketchEllipse(dotX, curRowY + 14, 4.5, 4.5, nextId("bdot")),
           ink,
           2.6,
           op.nodeId
         );
         pushText({
-          x: innerX + 40,
+          x: isRtlBullets ? innerX + 16 : innerX + 40,
           y: curRowY,
-          w: innerW - 60,
+          w: innerW - 56,
           h: rowH - 2,
           text: item,
-          fontSize: 18,
+          fontSize: 17,
           weight: 600,
           color: "#1E293B",
+          align: isRtlBullets ? "right" : "left",
           fontKind: "hand",
           nodeId: op.nodeId,
         });
@@ -547,10 +572,11 @@ export function layoutBoardOps(params: {
       if (!useVertical) {
         const arrowGap = 36;
         const boxW = Math.floor((innerW - arrowGap * Math.max(0, n - 1)) / n);
-        const boxH = Math.round(Math.min(188, Math.max(120, (maxContentY - cursorY) * 0.56)) * yScale);
+        const boxH = Math.round(Math.min(194, Math.max(128, (maxContentY - cursorY) * 0.56)) * yScale);
 
         steps.forEach((st, idx) => {
           seq++;
+          const isRtlStep = rtl || ARABIC_RE.test(st.label) || (st.sub ? ARABIC_RE.test(st.sub) : false);
           const bx = innerX + idx * (boxW + arrowGap);
           const by = cursorY;
           const ink = toneNeutralInk(st.tone);
@@ -569,15 +595,16 @@ export function layoutBoardOps(params: {
             st.nodeId
           );
 
-          // Step index circle
+          // Step index circle mirrored cleanly on RTL steps so badge stays on opposite corner
+          const numCenterX = isRtlStep ? bx + boxW - 24 : bx + 24;
           pushStroke(
-            sketchEllipse(bx + 24, by + 24, 13, 13, nextId(`fnum_${idx}`)),
+            sketchEllipse(numCenterX, by + 24, 13, 13, nextId(`fnum_${idx}`)),
             ink,
             2.2,
             st.nodeId
           );
           pushText({
-            x: bx + 11,
+            x: numCenterX - 13,
             y: by + 13,
             w: 26,
             h: 22,
@@ -594,11 +621,12 @@ export function layoutBoardOps(params: {
             x: bx + 14,
             y: by + 44,
             w: boxW - 28,
-            h: st.sub ? 54 : boxH - 64,
+            h: st.sub ? Math.max(54, boxH - 96) : boxH - 64,
             text: st.label,
-            fontSize: n >= 4 ? 17 : 20,
+            fontSize: n >= 4 ? 16 : 19,
             weight: 700,
             color: "#0F172A",
+            align: isRtlStep ? "right" : "left",
             fontKind: "hand",
             nodeId: st.nodeId,
           });
@@ -606,19 +634,20 @@ export function layoutBoardOps(params: {
           if (st.sub) {
             pushText({
               x: bx + 14,
-              y: by + boxH - 42,
+              y: by + boxH - 46,
               w: boxW - 28,
-              h: 28,
+              h: 34,
               text: st.sub,
-              fontSize: 14,
+              fontSize: 13,
               weight: 600,
               color: "#475569",
+              align: isRtlStep ? "right" : "left",
               fontKind: "body",
               nodeId: st.nodeId,
             });
           }
 
-          pushNodeBadge(st.nodeId, bx, by, boxW);
+          pushNodeBadge(st.nodeId, bx, by, boxW, isRtlStep);
           if (st.nodeId) nodeRects.set(st.nodeId, { x: bx, y: by, w: boxW, h: boxH });
 
           if (idx < n - 1) {
@@ -648,6 +677,8 @@ export function layoutBoardOps(params: {
         steps.forEach((st, idx) => {
           seq++;
           const pos = positions[idx];
+          const isRtlStep =
+            rtl || ARABIC_RE.test(st.label) || (st.sub ? ARABIC_RE.test(st.sub) : false);
           const ink = toneNeutralInk(st.tone);
           const wash =
             st.tone === "pathology"
@@ -665,14 +696,15 @@ export function layoutBoardOps(params: {
           );
 
           pushText({
-            x: pos.x + 16,
+            x: isRtlStep ? pos.x + 62 : pos.x + 16,
             y: pos.y + 12,
-            w: boxW - 76,
+            w: boxW - 78,
             h: 44,
             text: `${idx + 1}. ${st.label}`,
-            fontSize: 20,
+            fontSize: 19,
             weight: 700,
             color: ink,
+            align: isRtlStep ? "right" : "left",
             fontKind: "hand",
             nodeId: st.nodeId,
           });
@@ -683,14 +715,15 @@ export function layoutBoardOps(params: {
               w: boxW - 32,
               h: Math.max(24, boxH - 68),
               text: st.sub,
-              fontSize: 15,
+              fontSize: 14,
               weight: 600,
               color: "#334155",
+              align: isRtlStep ? "right" : "left",
               fontKind: "body",
               nodeId: st.nodeId,
             });
           }
-          pushNodeBadge(st.nodeId, pos.x, pos.y, boxW);
+          pushNodeBadge(st.nodeId, pos.x, pos.y, boxW, isRtlStep);
           if (st.nodeId) nodeRects.set(st.nodeId, { x: pos.x, y: pos.y, w: boxW, h: boxH });
 
           if (idx === 0) {
@@ -1280,12 +1313,13 @@ export function layoutBoardOps(params: {
         2.2,
         op.nodeId
       );
+      const figRtl = rtl || ARABIC_RE.test(op.caption);
       primitives.push({
         k: "badge",
         id: nextId("figpage"),
         seq,
         nodeId: op.nodeId,
-        x: innerX + innerW - 88,
+        x: figRtl ? innerX + 14 : innerX + innerW - 88,
         y: cursorY + 10,
         w: 74,
         h: 22,
@@ -1294,7 +1328,7 @@ export function layoutBoardOps(params: {
         quote: op.caption,
       });
       pushText({
-        x: innerX + 16,
+        x: figRtl ? innerX + 96 : innerX + 16,
         y: cursorY + 10,
         w: innerW - 118,
         h: 42,
@@ -1302,6 +1336,7 @@ export function layoutBoardOps(params: {
         fontSize: 16,
         weight: 700,
         color: "#1E3A8A",
+        align: figRtl ? "right" : "left",
         fontKind: "hand",
         nodeId: op.nodeId,
       });

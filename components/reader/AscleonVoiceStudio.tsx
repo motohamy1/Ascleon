@@ -51,6 +51,7 @@ export function AscleonVoiceStudio({
     stopHoldToTalk,
     connect,
     disconnect,
+    reconnectSession,
     resetSession,
     prefetchToken,
     bindVisualizerElement,
@@ -479,7 +480,18 @@ export function AscleonVoiceStudio({
             {isMuted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
           </button>
 
-          {/* 2. Noisy Place (Hold-to-Talk) */}
+          {/* 2. Reconnect / Recover Session if stalled */}
+          <button
+            type="button"
+            onClick={() => reconnectSession()}
+            className="flex size-12 cursor-pointer items-center justify-center rounded-full border-2 border-[var(--study-pill-border)] bg-[var(--study-surface)] text-[var(--study-text)] transition-all duration-150 hover:bg-[var(--study-glass-hover)]"
+            title={language === "ar" ? "تحديث الاتصال واستكمال الصوت" : "Refresh voice connection"}
+            aria-label="Refresh voice connection"
+          >
+            <RefreshCw className="size-5" />
+          </button>
+
+          {/* 3. Noisy Place (Hold-to-Talk) */}
           <button
             type="button"
             onClick={() => setNoisyPlace(!noisyPlace)}

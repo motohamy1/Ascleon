@@ -1,7 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { GoogleGenAI, Modality } from "@google/genai";
 import { auth } from "@clerk/nextjs/server";
 import { checkVoiceBudget } from "@/lib/usage.server";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
+import { sanitizePlainText, sanitizeRichText } from "@/lib/security/sanitize";
+
+const VoiceSessionSchema = z.object({
+  bookTitle: z.string().max(240).optional().default("Study Material"),
+  pageNumber: z.number().int().min(1).max(10000).optional().default(1),
+  pageText: z.string().max(30000).optional().default(""),
+  selectedText: z.string().max(15000).optional().default(""),
+  userSpeech: z.string().trim().min(1, "No user speech provided").max(4000),
+  language: z.enum(["en", "ar", "mixed"]).optional().default("en"),
+  history: z
+    .array(
+      z.object({
+        role: z.string().max(30),
+        content: z.string().max(4000),
+      })
+    )
+    .max(20)
+    .optional()
+    .default([]),
+  authoritativeReferences: z.array(z.unknown()).max(20).optional().default([]),
+});
 
 export async function GET(req: NextRequest) {
   try {
@@ -19,7 +42,10 @@ export async function GET(req: NextRequest) {
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ error: "Missing GEMINI_API_KEY" }, { status: 500 });
+      return buildSafeErrorResponse(
+        "GET /api/voice/session",
+        new Error("Missing GEMINI_API_KEY")
+      );
     }
 
     const ai = new GoogleGenAI({ apiKey });
@@ -54,10 +80,9 @@ export async function GET(req: NextRequest) {
       });
     }
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create voice session" },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("GET /api/voice/session", error, {
+      fallbackMessage: "Failed to create voice session.",
+    });
   }
 }
 
@@ -75,17 +100,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json();
-    const {
-      bookTitle = "Study Material",
-      pageNumber = 1,
-      pageText = "",
-      selectedText = "",
-      userSpeech = "",
-      language = "en",
-      history = [],
-      authoritativeReferences = [],
-    } = body;
+    const rawBody = await req.json().catch(() => null);
+    const parsedBody = VoiceSessionSchema.safeParse(rawBody);
+    if (!parsedBody.success) {
+      return NextResponse.json(
+        { error: parsedBody.error.issues[0]?.message || "Invalid voice session payload" },
+        { status: 400 }
+      );
+    }
+
+    const { pageNumber, history, authoritativeReferences } = parsedBody.data;
+    const bookTitle = sanitizePlainText(parsedBody.data.bookTitle, 240) || "Study Material";
+    const pageText = sanitizeRichText(parsedBody.data.pageText, 25000);
+    const selectedText = sanitizeRichText(parsedBody.data.selectedText, 12000);
+    const userSpeech = sanitizeRichText(parsedBody.data.userSpeech, 4000);
 
     if (!userSpeech) {
       return NextResponse.json({ error: "No user speech provided" }, { status: 400 });
@@ -93,9 +121,9 @@ export async function POST(req: NextRequest) {
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json(
-        { responseText: `Grounded in Page ${pageNumber}: The fundamental principle is that initial conditions dictate the system behavior.` },
-        { status: 200 }
+      return buildSafeErrorResponse(
+        "POST /api/voice/session",
+        new Error("Missing GEMINI_API_KEY")
       );
     }
 
@@ -168,10 +196,8 @@ Spoken Dialogue Rules:
       model: "gemini-3.8-flash",
     });
   } catch (error) {
-    console.error("Voice session error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Voice generation failed" },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("POST /api/voice/session", error, {
+      fallbackMessage: "Voice mentor is temporarily unavailable.",
+    });
   }
 }

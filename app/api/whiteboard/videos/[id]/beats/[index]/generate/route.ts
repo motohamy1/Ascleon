@@ -16,7 +16,8 @@ import { DEFAULT_WHITEBOARD_VOICE, isValidWhiteboardVoice } from "@/lib/whiteboa
 import { StudyLanguage } from "@/lib/language";
 import { VoiceTrack, WhiteboardBeat } from "@/types/whiteboard-video";
 import { calculateDynamicCreditCost } from "@/lib/subscription-constants";
-import { buildBillingErrorResponse, consumeCredits } from "@/lib/usage.server";
+import { buildBillingErrorResponse, consumeCredits, refundCredits } from "@/lib/usage.server";
+import { buildSafeErrorResponse, logServerError } from "@/lib/security/error-handler";
 
 export const maxDuration = 60;
 
@@ -52,6 +53,9 @@ export async function POST(
   } catch {
     // Optional JSON body
   }
+
+  let chargedUserId: string | null = null;
+  let chargedCredits = 0;
 
   try {
     const { userId } = await auth();
@@ -118,6 +122,8 @@ export async function POST(
     if (!creditCheck.allowed) {
       return buildBillingErrorResponse(creditCheck, dynamicCost.total);
     }
+    chargedUserId = userId;
+    chargedCredits = dynamicCost.total;
 
     // Fetch Beat 0 style anchor image if rendering beat > 0
     let styleAnchorBase64: string | undefined;
@@ -167,14 +173,11 @@ export async function POST(
           atomicSet[`beats.${beatIndex}.styleAnchorUrl`] = sketchResult.value.anchorUpload.url;
         }
       } else {
-        const errMsg =
-          sketchResult.status === "rejected"
-            ? sketchResult.reason instanceof Error
-              ? sketchResult.reason.message
-              : "Sketch failed"
-            : "Sketch failed";
+        if (sketchResult.status === "rejected") {
+          logServerError("whiteboard:beat_sketch", sketchResult.reason, { id, beatIndex });
+        }
         atomicSet[`beats.${beatIndex}.vectorStatus`] = "failed";
-        atomicSet[`beats.${beatIndex}.vectorError`] = errMsg;
+        atomicSet[`beats.${beatIndex}.vectorError`] = "Visual sketch generation temporarily unavailable";
       }
     }
 
@@ -189,15 +192,12 @@ export async function POST(
           audioDurationMs: audioResult.value.audioDurationMs,
         };
       } else {
-        const errMsg =
-          audioResult.status === "rejected"
-            ? audioResult.reason instanceof Error
-              ? audioResult.reason.message
-              : "Audio synthesis failed"
-            : "Audio synthesis failed";
+        if (audioResult.status === "rejected") {
+          logServerError("whiteboard:beat_audio", audioResult.reason, { id, beatIndex });
+        }
         atomicSet[`voiceTracks.${voiceId}.beats.${beatIndex}`] = {
           status: "failed",
-          error: errMsg,
+          error: "Audio synthesis temporarily unavailable",
         };
       }
     }
@@ -246,10 +246,16 @@ export async function POST(
       video: serializeWhiteboardVideo(finalized || (updated as unknown as Record<string, unknown>)),
     });
   } catch (error) {
-    console.error(`[POST /api/whiteboard/videos/${id}/beats/${beatIndex}/generate] error:`, error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to generate whiteboard beat" },
-      { status: 500 }
+    if (chargedUserId && chargedCredits > 0) {
+      await refundCredits(chargedUserId, chargedCredits).catch(() => {});
+    }
+    return buildSafeErrorResponse(
+      `POST /api/whiteboard/videos/${id}/beats/${beatIndex}/generate`,
+      error,
+      {
+        fallbackMessage: "Failed to generate whiteboard beat.",
+        creditsRefunded: chargedCredits > 0,
+      }
     );
   }
 }

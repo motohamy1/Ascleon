@@ -171,10 +171,13 @@ export function StudioMenuDrawer({
   onOpenStartNew,
 }: StudioMenuDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
+  const maxPage = Math.max(1, totalPages || 999);
   const [isEditingRange, setIsEditingRange] = useState(false);
-  const [rangeStart, setRangeStart] = useState<number>(studyScope.startPage || currentPage);
-  const [rangeEnd, setRangeEnd] = useState<number>(
-    studyScope.endPage || Math.min(currentPage + 4, totalPages || 10)
+  const [rangeStartInput, setRangeStartInput] = useState<string>(
+    String(studyScope.startPage || currentPage)
+  );
+  const [rangeEndInput, setRangeEndInput] = useState<string>(
+    String(studyScope.endPage || Math.min(currentPage + 4, maxPage))
   );
 
   // Close when clicking/tapping anywhere outside the drawer (including the left PDF pane) or pressing Escape
@@ -204,8 +207,18 @@ export function StudioMenuDrawer({
   }, [isOpen, onClose, toggleButtonRef]);
 
   const handleApplyRange = () => {
-    const validStart = Math.max(1, Math.min(rangeStart || 1, totalPages || 999));
-    const validEnd = Math.max(validStart, Math.min(rangeEnd || validStart, totalPages || 999));
+    const parsedStart = parseInt(rangeStartInput.trim(), 10);
+    const parsedEnd = parseInt(rangeEndInput.trim(), 10);
+    const safeA = Number.isFinite(parsedStart)
+      ? Math.max(1, Math.min(parsedStart, maxPage))
+      : currentPage;
+    const safeB = Number.isFinite(parsedEnd)
+      ? Math.max(1, Math.min(parsedEnd, maxPage))
+      : safeA;
+    const validStart = Math.min(safeA, safeB);
+    const validEnd = Math.max(safeA, safeB);
+    setRangeStartInput(String(validStart));
+    setRangeEndInput(String(validEnd));
     setIsEditingRange(false);
     onScopeChange({
       type: "range",
@@ -632,10 +645,13 @@ export function StudioMenuDrawer({
                 type="button"
                 onClick={() => {
                   if (!isEditingRange) {
-                    setRangeStart(studyScope.startPage || currentPage);
-                    setRangeEnd(
-                      studyScope.endPage || Math.min(currentPage + 4, totalPages || 10)
-                    );
+                    const startVal = studyScope.type === "range" ? studyScope.startPage : currentPage;
+                    const endVal =
+                      studyScope.type === "range"
+                        ? studyScope.endPage
+                        : Math.min(currentPage + 4, maxPage);
+                    setRangeStartInput(String(startVal));
+                    setRangeEndInput(String(endVal));
                   }
                   setIsEditingRange((prev) => !prev);
                 }}
@@ -647,7 +663,7 @@ export function StudioMenuDrawer({
                 <Hash className="size-3" />
                 <span>
                   {studyScope.type === "range"
-                    ? `P.${studyScope.startPage}–${studyScope.endPage}`
+                    ? `P.${studyScope.startPage}–${studyScope.endPage} (Edit)`
                     : "Page Range"}
                 </span>
               </button>
@@ -657,20 +673,38 @@ export function StudioMenuDrawer({
               <div className="flex items-center gap-1.5 rounded-xl border border-[var(--study-border)] bg-[var(--study-surface-solid)] p-2">
                 <span className="text-[10px] text-[var(--study-text-muted)]">P.</span>
                 <input
-                  type="number"
-                  min={1}
-                  max={totalPages || 999}
-                  value={rangeStart}
-                  onChange={(e) => setRangeStart(parseInt(e.target.value, 10) || 1)}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={rangeStartInput}
+                  onChange={(e) => {
+                    if (/^\d*$/.test(e.target.value)) setRangeStartInput(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleApplyRange();
+                    }
+                  }}
+                  placeholder="1"
                   className="w-12 rounded-lg border border-[var(--study-border-strong)] bg-[var(--study-surface-muted)] px-1.5 py-1 text-center font-mono text-[11px] font-bold text-[var(--study-text)] outline-none focus:border-[color:var(--orange)]"
                 />
                 <span className="text-[10px] text-[var(--study-text-muted)]">to</span>
                 <input
-                  type="number"
-                  min={rangeStart}
-                  max={totalPages || 999}
-                  value={rangeEnd}
-                  onChange={(e) => setRangeEnd(parseInt(e.target.value, 10) || rangeStart)}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={rangeEndInput}
+                  onChange={(e) => {
+                    if (/^\d*$/.test(e.target.value)) setRangeEndInput(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleApplyRange();
+                    }
+                  }}
+                  placeholder={String(maxPage)}
                   className="w-12 rounded-lg border border-[var(--study-border-strong)] bg-[var(--study-surface-muted)] px-1.5 py-1 text-center font-mono text-[11px] font-bold text-[var(--study-text)] outline-none focus:border-[color:var(--orange)]"
                 />
                 <button
@@ -701,7 +735,7 @@ export function StudioMenuDrawer({
                       topicTitle: selected.title,
                       topicId: selected.id,
                     });
-                    if (selected.startPage !== currentPage) {
+                    if (currentPage < selected.startPage || currentPage > selected.endPage) {
                       onNavigateToPage(selected.startPage);
                     }
                   }

@@ -88,6 +88,8 @@ import {
   resetUserStudyProgress,
 } from "@/lib/actions/study-progress.actions";
 import { toast } from "sonner";
+import { parseApiError, type ParsedServiceError } from "@/lib/api-error-client";
+import { ServiceStatusBanner } from "@/components/ui/ServiceStatusBanner";
 
 interface LivingReaderProps {
   book: IBook;
@@ -405,11 +407,13 @@ export default function LivingReader({
   const [isMorphLoading, setIsMorphLoading] = useState(false);
   const [morphTopicInput, setMorphTopicInput] = useState<string>("");
   const [morphActiveTopic, setMorphActiveTopic] = useState<string | null>(null);
+  const [morphServiceError, setMorphServiceError] = useState<ParsedServiceError | null>(null);
 
   // Dynamic QBank State
   const [dynamicQBankList, setDynamicQBankList] = useState<QBankVignette[]>([]);
   const [qbankCache, setQBankCache] = useState<Record<string, QBankVignette[]>>({});
   const [isQBankLoading, setIsQBankLoading] = useState(false);
+  const [qbankServiceError, setQbankServiceError] = useState<ParsedServiceError | null>(null);
   const [activeQBankIdx, setActiveQBankIdx] = useState(0);
   const [quizAnswer, setQuizAnswer] = useState<number | null>(null);
   const [quizSubmitted, setQuizSubmitted] = useState(false);
@@ -418,6 +422,7 @@ export default function LivingReader({
   const [dynamicSummary, setDynamicSummary] = useState<any>(null);
   const [summaryCache, setSummaryCache] = useState<Record<string, any>>({});
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
+  const [summaryServiceError, setSummaryServiceError] = useState<ParsedServiceError | null>(null);
 
   // Source Selection & Background Sync
   const [selectedText, setSelectedText] = useState<string>("");
@@ -596,9 +601,12 @@ export default function LivingReader({
   );
 
   // --------------------------------------------------------------------------
-  // SESSION RESTORATION (On Mount)
+  // SESSION RESTORATION (Once per Book Mount)
   // --------------------------------------------------------------------------
+  const restoredBookIdRef = useRef<string | null>(null);
   useEffect(() => {
+    if (restoredBookIdRef.current === book._id) return;
+    restoredBookIdRef.current = book._id;
     try {
       let saved: UserStudyProgressData | null = initialProgress || null;
       const localStr =
@@ -1035,6 +1043,7 @@ export default function LivingReader({
       return;
     }
 
+    setMorphServiceError(null);
     setIsMorphLoading(true);
     if (topicToMorph !== undefined) setMorphActiveTopic(topicToMorph);
 
@@ -1098,18 +1107,19 @@ export default function LivingReader({
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        if (res.status === 402 || errorData?.isBillingError) {
-          toast.error(errorData.error || "Monthly AI credit limit reached.", {
+        const parsedErr = parseApiError(res, errorData);
+        setMorphServiceError(parsedErr);
+        if (parsedErr.kind === "credits") {
+          toast.error(parsedErr.message, {
             action: {
               label: "Upgrade Plan",
               onClick: () => window.location.assign("/subscriptions?reason=limit"),
             },
           });
-          return;
+        } else {
+          toast.error(parsedErr.message);
         }
-        throw new Error(
-          errorData.error || `Morph API returned status ${res.status}`
-        );
+        return;
       }
 
       const data = await res.json();
@@ -1123,10 +1133,20 @@ export default function LivingReader({
       }
     } catch (err) {
       if (timedOut) {
+        setMorphServiceError({
+          kind: "overloaded",
+          title: "AI Model Temporarily Busy",
+          message: "Morph generation took longer than expected. Please try again.",
+          retryAfterSeconds: 20,
+        });
         toast.error("Morph generation timed out on slow network. Please retry.");
       } else if (err instanceof Error && err.name !== "AbortError") {
-        console.error("Failed to generate Morph artifact:", err);
-        toast.error(err.message);
+        setMorphServiceError({
+          kind: "generic",
+          title: "Morph Interrupted",
+          message: "Could not build the Morph view right now. Please try again.",
+        });
+        toast.error("Could not generate Morph view right now. Please try again.");
       }
     } finally {
       clearTimeout(timeoutId);
@@ -1153,6 +1173,7 @@ export default function LivingReader({
       return;
     }
 
+    setQbankServiceError(null);
     setIsQBankLoading(true);
     setQuizSubmitted(false);
     setQuizAnswer(null);
@@ -1188,15 +1209,17 @@ export default function LivingReader({
       });
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        if (res.status === 402 || errorData?.isBillingError) {
-          toast.error(errorData.error || "Monthly AI credit limit reached.", {
+        const parsedErr = parseApiError(res, errorData);
+        setQbankServiceError(parsedErr);
+        if (parsedErr.kind === "credits") {
+          toast.error(parsedErr.message, {
             action: {
               label: "Upgrade Plan",
               onClick: () => window.location.assign("/subscriptions?reason=limit"),
             },
           });
         } else {
-          toast.error(errorData.error || `QBank generation failed (${res.status}). Please retry.`);
+          toast.error(parsedErr.message);
         }
         return;
       }
@@ -1206,13 +1229,28 @@ export default function LivingReader({
         setQBankCache((prev) => ({ ...prev, [cacheKey]: data.questions }));
         setActiveQBankIdx(0);
       } else {
+        setQbankServiceError({
+          kind: "generic",
+          title: "No Questions Returned",
+          message: "No QBank questions were returned. Please try again.",
+        });
         toast.error("No QBank questions returned. Please try again.");
       }
     } catch (e) {
       if (timedOut) {
+        setQbankServiceError({
+          kind: "overloaded",
+          title: "AI Model Temporarily Busy",
+          message: "QBank generation timed out on a busy network. Please try again.",
+          retryAfterSeconds: 20,
+        });
         toast.error("QBank generation timed out on slow network. Please retry.");
       } else if (!(e instanceof Error && e.name === "AbortError")) {
-        console.warn("Dynamic QBank load warning:", e);
+        setQbankServiceError({
+          kind: "generic",
+          title: "Connection Interrupted",
+          message: "Network error generating QBank. Please try again.",
+        });
         toast.error("Network error generating QBank. Please retry.");
       }
     } finally {
@@ -1236,6 +1274,7 @@ export default function LivingReader({
       return;
     }
 
+    setSummaryServiceError(null);
     setIsSummaryLoading(true);
     summaryAbortRef.current?.abort();
     const controller = new AbortController();
@@ -1266,15 +1305,17 @@ export default function LivingReader({
       });
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        if (res.status === 402 || errorData?.isBillingError) {
-          toast.error(errorData.error || "Monthly AI credit limit reached.", {
+        const parsedErr = parseApiError(res, errorData);
+        setSummaryServiceError(parsedErr);
+        if (parsedErr.kind === "credits") {
+          toast.error(parsedErr.message, {
             action: {
               label: "Upgrade Plan",
               onClick: () => window.location.assign("/subscriptions?reason=limit"),
             },
           });
         } else {
-          toast.error(errorData.error || `Summary failed (${res.status}). Please retry.`);
+          toast.error(parsedErr.message);
         }
         return;
       }
@@ -1285,9 +1326,19 @@ export default function LivingReader({
       }
     } catch (e) {
       if (timedOut) {
+        setSummaryServiceError({
+          kind: "overloaded",
+          title: "AI Model Temporarily Busy",
+          message: "Summary generation timed out. Please try again.",
+          retryAfterSeconds: 20,
+        });
         toast.error("Summary timed out on slow network. Please retry.");
       } else if (!(e instanceof Error && e.name === "AbortError")) {
-        console.warn("Dynamic Summary load warning:", e);
+        setSummaryServiceError({
+          kind: "generic",
+          title: "Connection Interrupted",
+          message: "Network error loading summary. Please try again.",
+        });
         toast.error("Network error loading summary. Please retry.");
       }
     } finally {
@@ -3254,10 +3305,18 @@ export default function LivingReader({
                     </div>
                   </div>
 
+                  {morphServiceError && (
+                    <ServiceStatusBanner
+                      error={morphServiceError}
+                      onRetry={() => handleRunMorph(undefined, undefined, true)}
+                      onDismiss={() => setMorphServiceError(null)}
+                    />
+                  )}
+
                   {activeMorphArtifact ? (
                     <MorphCanvas
                       artifact={activeMorphArtifact}
-                      onNavigateSegment={(idx) => setCurrentIdx(idx)}
+                      onNavigateSegment={(pageOrIdx) => goToSourcePage(pageOrIdx)}
                       onResetToBoot={() => handleResetMorph(book.fileURL ? activePdfPage : currentIdx)}
                       isLoading={isMorphLoading}
                       onAskAI={(prompt) => {
@@ -3467,7 +3526,7 @@ export default function LivingReader({
                           </div>
                         )}
                         {m.sender === "ai" ? (
-                          <RichStudyMessage content={m.text} />
+                          <RichStudyMessage content={m.text} onNavigateToPage={goToSourcePage} />
                         ) : (
                           <BiDiText as="p" className="ascleon-bidi whitespace-pre-line font-bold text-[color:var(--ink)]">
                             {m.text}
@@ -3744,6 +3803,14 @@ export default function LivingReader({
                     </button>
                   </div>
 
+                  {summaryServiceError && (
+                    <ServiceStatusBanner
+                      error={summaryServiceError}
+                      onRetry={() => loadDynamicSummary(true)}
+                      onDismiss={() => setSummaryServiceError(null)}
+                    />
+                  )}
+
                   {/* Executive Summary */}
                   <div className="rounded-[18px] border-2 border-[var(--study-panel-border)] bg-[#f6d7a1] p-4 text-xs leading-relaxed text-[color:var(--ink)] shadow-[var(--study-shadow)]">
                     <div className="flex items-center justify-between mb-2">
@@ -3852,6 +3919,14 @@ export default function LivingReader({
                       </span>
                     </button>
                   </div>
+
+                  {qbankServiceError && (
+                    <ServiceStatusBanner
+                      error={qbankServiceError}
+                      onRetry={() => loadDynamicQBank(undefined, true)}
+                      onDismiss={() => setQbankServiceError(null)}
+                    />
+                  )}
 
                   {dynamicQBankList.length > 0 ? (
                     <>

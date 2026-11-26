@@ -10,6 +10,8 @@ import { consumeCredits, consumePages, refundPages } from "@/lib/usage.server";
 import { calculateDynamicCreditCost } from "@/lib/subscription-constants";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
+import { logServerError } from "@/lib/security/error-handler";
+import { sanitizePlainText } from "@/lib/security/sanitize";
 
 export const getAllBooks = async (search?: string) => {
   try {
@@ -18,11 +20,14 @@ export const getAllBooks = async (search?: string) => {
     let query = {};
 
     if (search) {
-      const escapedSearch = escapeRegex(search);
-      const regex = new RegExp(escapedSearch, "i");
-      query = {
-        $or: [{ title: { $regex: regex } }, { author: { $regex: regex } }],
-      };
+      const cleanSearch = sanitizePlainText(search, 120);
+      if (cleanSearch) {
+        const escapedSearch = escapeRegex(cleanSearch);
+        const regex = new RegExp(escapedSearch, "i");
+        query = {
+          $or: [{ title: { $regex: regex } }, { author: { $regex: regex } }],
+        };
+      }
     }
 
     const books = await Book.find(query)
@@ -35,10 +40,10 @@ export const getAllBooks = async (search?: string) => {
       data: serializeData(books),
     };
   } catch (e) {
-    console.error("Error connecting to database", e);
+    logServerError("book.actions:getAllBooks", e);
     return {
       success: false,
-      error: e instanceof Error ? e.message : "Failed to fetch books",
+      error: "Failed to fetch books",
     };
   }
 };
@@ -62,12 +67,15 @@ export const getUserBooks = async (search?: string) => {
     };
 
     if (search) {
-      const escapedSearch = escapeRegex(search);
-      const regex = new RegExp(escapedSearch, "i");
-      query = {
-        ...query,
-        $or: [{ title: { $regex: regex } }, { author: { $regex: regex } }],
-      };
+      const cleanSearch = sanitizePlainText(search, 120);
+      if (cleanSearch) {
+        const escapedSearch = escapeRegex(cleanSearch);
+        const regex = new RegExp(escapedSearch, "i");
+        query = {
+          ...query,
+          $or: [{ title: { $regex: regex } }, { author: { $regex: regex } }],
+        };
+      }
     }
 
     const books = await Book.find(query)
@@ -80,10 +88,10 @@ export const getUserBooks = async (search?: string) => {
       data: serializeData(books),
     };
   } catch (e) {
-    console.error("Error fetching user books", e);
+    logServerError("book.actions:getUserBooks", e);
     return {
       success: false,
-      error: e instanceof Error ? e.message : "Failed to fetch books",
+      error: "Failed to fetch books",
     };
   }
 };
@@ -92,7 +100,8 @@ export const checkBookExists = async (title: string) => {
   try {
     await connectToDatabase();
 
-    const slug = generateSlug(title);
+    const cleanTitle = sanitizePlainText(title, 200);
+    const slug = generateSlug(cleanTitle);
 
     const existingBook = await Book.findOne({ slug }).lean();
 
@@ -107,10 +116,10 @@ export const checkBookExists = async (title: string) => {
       exists: false,
     };
   } catch (e) {
-    console.error("Error checking book exists", e);
+    logServerError("book.actions:checkBookExists", e);
     return {
       exists: false,
-      error: e instanceof Error ? e.message : "Failed to check book",
+      error: "Failed to check book",
     };
   }
 };
@@ -180,11 +189,11 @@ export const createBook = async (data: CreateBook) => {
       data: serializeData(book),
     };
   } catch (e) {
-    console.error("Error creating a book", e);
+    logServerError("book.actions:createBook", e);
 
     return {
       success: false,
-      error: e instanceof Error ? e.message : "Failed to create book",
+      error: "Failed to create book",
     };
   }
 };
@@ -193,7 +202,8 @@ export const getBookBySlug = async (slug: string) => {
   try {
     await connectToDatabase();
 
-    const book = await Book.findOne({ slug }).lean();
+    const cleanSlug = sanitizePlainText(slug, 200);
+    const book = await Book.findOne({ slug: cleanSlug }).lean();
 
     if (!book) {
       return { success: false, error: "Book not found" };
@@ -204,10 +214,10 @@ export const getBookBySlug = async (slug: string) => {
       data: serializeData(book),
     };
   } catch (e) {
-    console.error("Error fetching book by slug", e);
+    logServerError("book.actions:getBookBySlug", e);
     return {
       success: false,
-      error: e instanceof Error ? e.message : "Failed to fetch book",
+      error: "Failed to fetch book",
     };
   }
 };
@@ -221,11 +231,20 @@ export const saveBookSegments = async (
   try {
     await connectToDatabase();
 
+    const { userId } = await auth();
+    if (!userId || userId !== clerkId) {
+      return { success: false, error: "Unauthorized" };
+    }
+
     if (!mongoose.Types.ObjectId.isValid(bookId)) {
       return { success: false, error: "Invalid bookId provided" };
     }
 
     const bookObjectId = new mongoose.Types.ObjectId(bookId);
+    const ownedBook = await Book.findById(bookObjectId).select("clerkId").lean<{ clerkId?: string }>();
+    if (!ownedBook || (ownedBook.clerkId && ownedBook.clerkId !== userId)) {
+      return { success: false, error: "Forbidden" };
+    }
 
     // If starting fresh (not an append chunk), clear any previous/stale segments for this book
     if (!options?.isAppend) {
@@ -272,11 +291,11 @@ export const saveBookSegments = async (
       },
     };
   } catch (e) {
-    console.error("Error saving book segments", e);
+    logServerError("book.actions:saveBookSegments", e);
 
     return {
       success: false,
-      error: e instanceof Error ? e.message : "Failed to save segments",
+      error: "Failed to save segments",
     };
   }
 };
@@ -294,7 +313,11 @@ export const searchBookSegments = async (
       return { success: true, data: [] };
     }
 
-    console.log(`Searching for: "${query}" in book ${bookId}`);
+    const cleanQuery = sanitizePlainText(query, 160);
+    if (!cleanQuery) {
+      return { success: true, data: [] };
+    }
+    const safeLimit = Math.min(20, Math.max(1, Math.floor(limit) || 5));
 
     const bookObjectId = new mongoose.Types.ObjectId(bookId);
 
@@ -303,11 +326,11 @@ export const searchBookSegments = async (
     try {
       segments = await BookSegment.find({
         bookId: bookObjectId,
-        $text: { $search: query },
+        $text: { $search: cleanQuery },
       })
         .select("_id bookId content segmentIndex pageNumber wordCount")
         .sort({ score: { $meta: "textScore" } })
-        .limit(limit)
+        .limit(safeLimit)
         .lean();
     } catch {
       // Text index may not exist — fall through to regex fallback
@@ -316,30 +339,30 @@ export const searchBookSegments = async (
 
     // Fallback: regex search matching ANY keyword
     if (segments.length === 0) {
-      const keywords = query.split(/\s+/).filter((k) => k.length > 2);
-      const pattern = keywords.map(escapeRegex).join("|");
+      const keywords = cleanQuery.split(/\s+/).filter((k) => k.length > 2).slice(0, 8);
+      if (keywords.length > 0) {
+        const pattern = keywords.map(escapeRegex).join("|");
 
-      segments = await BookSegment.find({
-        bookId: bookObjectId,
-        content: { $regex: pattern, $options: "i" },
-      })
-        .select("_id bookId content segmentIndex pageNumber wordCount")
-        .sort({ segmentIndex: 1 })
-        .limit(limit)
-        .lean();
+        segments = await BookSegment.find({
+          bookId: bookObjectId,
+          content: { $regex: pattern, $options: "i" },
+        })
+          .select("_id bookId content segmentIndex pageNumber wordCount")
+          .sort({ segmentIndex: 1 })
+          .limit(safeLimit)
+          .lean();
+      }
     }
-
-    console.log(`Search complete. Found ${segments.length} results`);
 
     return {
       success: true,
       data: serializeData(segments),
     };
   } catch (error) {
-    console.error("Error searching segments:", error);
+    logServerError("book.actions:searchBookSegments", error);
     return {
       success: false,
-      error: (error as Error).message,
+      error: "Failed to search book segments",
       data: [],
     };
   }
@@ -366,11 +389,10 @@ export const getInitialBookSegments = async (bookId: string, limit: number = 3) 
       data: serializeData(segments) as IBookSegmentData[],
     };
   } catch (error) {
-    console.error("Error fetching initial book segments:", error);
+    logServerError("book.actions:getInitialBookSegments", error);
     return {
       success: false,
-      error:
-        error instanceof Error ? error.message : "Failed to fetch initial segments",
+      error: "Failed to fetch initial segments",
       data: [] as IBookSegmentData[],
     };
   }
@@ -410,11 +432,10 @@ export const getBookSegments = async (bookId: string) => {
       data: serializeData(segments) as IBookSegmentData[],
     };
   } catch (error) {
-    console.error("Error fetching book segments:", error);
+    logServerError("book.actions:getBookSegments", error);
     return {
       success: false,
-      error:
-        error instanceof Error ? error.message : "Failed to fetch segments",
+      error: "Failed to fetch segments",
       data: [] as IBookSegmentData[],
     };
   }
@@ -445,10 +466,10 @@ export const getBookSegmentsByRange = async (
       data: serializeData(segments) as IBookSegmentData[],
     };
   } catch (error) {
-    console.error("Error fetching book segments by range:", error);
+    logServerError("book.actions:getBookSegmentsByRange", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Failed to fetch segments by range",
+      error: "Failed to fetch segments by range",
       data: [] as IBookSegmentData[],
     };
   }
@@ -459,6 +480,11 @@ export const toggleBookFavorite = async (bookId: string) => {
   try {
     await connectToDatabase();
 
+    const { userId } = await auth();
+    if (!userId) {
+      return { success: false, error: "Unauthorized" };
+    }
+
     if (!mongoose.Types.ObjectId.isValid(bookId)) {
       return { success: true, isFavorite: true };
     }
@@ -466,6 +492,9 @@ export const toggleBookFavorite = async (bookId: string) => {
     const book = await Book.findById(bookId);
     if (!book) {
       return { success: false, error: "Book not found" };
+    }
+    if (book.clerkId && book.clerkId !== userId) {
+      return { success: false, error: "Forbidden" };
     }
 
     const newFav = !book.isFavorite;
@@ -475,11 +504,10 @@ export const toggleBookFavorite = async (bookId: string) => {
     revalidatePath("/");
     return { success: true, isFavorite: newFav };
   } catch (error) {
-    console.error("Error toggling book favorite:", error);
+    logServerError("book.actions:toggleBookFavorite", error);
     return {
       success: false,
-      error:
-        error instanceof Error ? error.message : "Failed to toggle favorite",
+      error: "Failed to toggle favorite",
     };
   }
 };
@@ -492,8 +520,21 @@ export const updateBookReadingStatus = async (
   try {
     await connectToDatabase();
 
+    const { userId } = await auth();
+    if (!userId) {
+      return { success: false, error: "Unauthorized" };
+    }
+
     if (!mongoose.Types.ObjectId.isValid(bookId)) {
       return { success: true, status };
+    }
+
+    const book = await Book.findById(bookId).select("clerkId");
+    if (!book) {
+      return { success: false, error: "Book not found" };
+    }
+    if (book.clerkId && book.clerkId !== userId) {
+      return { success: false, error: "Forbidden" };
     }
 
     await Book.findByIdAndUpdate(bookId, { readingStatus: status });
@@ -501,11 +542,10 @@ export const updateBookReadingStatus = async (
     revalidatePath("/");
     return { success: true, status };
   } catch (error) {
-    console.error("Error updating reading status:", error);
+    logServerError("book.actions:updateBookReadingStatus", error);
     return {
       success: false,
-      error:
-        error instanceof Error ? error.message : "Failed to update status",
+      error: "Failed to update status",
     };
   }
 };
@@ -543,10 +583,10 @@ export const deleteBook = async (bookId: string) => {
 
     return { success: true };
   } catch (error) {
-    console.error("Error deleting book:", error);
+    logServerError("book.actions:deleteBook", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Failed to delete book",
+      error: "Failed to delete book",
     };
   }
 };
@@ -586,10 +626,12 @@ export const updateBookShelfPlacement = async (
       updates.sourceCategory = payload.sourceCategory;
     }
     if (payload.topic !== undefined) {
-      updates.topic = payload.topic;
+      updates.topic = sanitizePlainText(payload.topic, 120);
     }
     if (payload.customSection !== undefined) {
-      updates.customSection = payload.customSection ? payload.customSection.trim() : null;
+      updates.customSection = payload.customSection
+        ? sanitizePlainText(payload.customSection, 120)
+        : null;
     }
 
     const updated = await Book.findByIdAndUpdate(bookId, updates, { returnDocument: "after" }).lean();
@@ -602,10 +644,10 @@ export const updateBookShelfPlacement = async (
       data: serializeData(updated),
     };
   } catch (error) {
-    console.error("Error updating book shelf placement:", error);
+    logServerError("book.actions:updateBookShelfPlacement", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Failed to update shelf placement",
+      error: "Failed to update shelf placement",
     };
   }
 };

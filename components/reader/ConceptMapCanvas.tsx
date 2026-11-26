@@ -74,55 +74,68 @@ export function ConceptMapCanvas({
       MindMapNode & { xPos: number; yPos: number; width: number; height: number }
     > = [];
 
-    // 1. Root Node (Left column)
-    const root = rootNodes[0] || nodes[0];
-    const totalPillars = Math.max(level1Nodes.length, 1);
-    const totalHeight = totalPillars * 96;
-    const rootY = Math.max(60, totalHeight / 2 - 20);
+    const estimateNodeHeight = (node: MindMapNode, baseH: number, width: number) => {
+      const labelLen = (node.label || "").length;
+      const hasArabic = /[\u0600-\u06FF]/.test(node.label || "");
+      const charsPerLine = Math.max(14, Math.floor((width - 24) / (hasArabic ? 9.5 : 8)));
+      const lines = Math.min(4, Math.max(1, Math.ceil(labelLen / charsPerLine)));
+      const subH = node.sublabel ? 18 : 0;
+      return Math.max(baseH, 34 + lines * 20 + subH);
+    };
 
-    const rootOverride = nodePositions[root.id];
-    result.push({
-      ...root,
-      xPos: rootOverride?.x ?? (root.x ?? 30),
-      yPos: rootOverride?.y ?? (root.y ?? rootY),
-      width: 180,
-      height: 64,
-    });
-
-    // 2. Level 1 Pillars (Middle column)
+    // 2. Level 1 Pillars (Middle column) with collision-free cumulative vertical packing
     const pillarYMap = new Map<string, number>();
-    level1Nodes.forEach((pNode, pIdx) => {
-      const defaultY = 25 + pIdx * 94;
+    let pillarCursorY = 24;
+    level1Nodes.forEach((pNode) => {
+      const nodeW = 195;
+      const estH = estimateNodeHeight(pNode, 74, nodeW);
+      const defaultY = pillarCursorY;
+      pillarCursorY += estH + 22;
       pillarYMap.set(pNode.id, defaultY);
 
       const override = nodePositions[pNode.id];
       result.push({
         ...pNode,
-        xPos: override?.x ?? (pNode.x ?? 260),
-        yPos: override?.y ?? (pNode.y ?? defaultY),
-        width: 185,
-        height: 68,
+        xPos: override?.x ?? 275,
+        yPos: override?.y ?? defaultY,
+        width: nodeW,
+        height: estH,
       });
     });
 
-    // 3. Level 2 Leaves (Right column)
-    const pillarLeafCounts = new Map<string, number>();
+    // 3. Level 2 Leaves (Right column) with cumulative collision guard
+    let leafCursorY = 20;
     level2Nodes.forEach((lNode) => {
+      const nodeW = 220;
+      const estH = estimateNodeHeight(lNode, 66, nodeW);
       const parentId = lNode.parent || level1Nodes[0]?.id;
-      const count = pillarLeafCounts.get(parentId) || 0;
-      pillarLeafCounts.set(parentId, count + 1);
-
-      const parentY = pillarYMap.get(parentId) ?? 25 + count * 80;
-      const defaultLeafY = parentY + count * 60 - 10;
+      const parentY = pillarYMap.get(parentId) ?? leafCursorY;
+      const defaultLeafY = Math.max(leafCursorY, parentY);
+      leafCursorY = defaultLeafY + estH + 20;
 
       const override = nodePositions[lNode.id];
       result.push({
         ...lNode,
-        xPos: override?.x ?? (lNode.x ?? 490),
-        yPos: override?.y ?? (lNode.y ?? Math.max(15, defaultLeafY)),
-        width: 210,
-        height: 58,
+        xPos: override?.x ?? 530,
+        yPos: override?.y ?? defaultLeafY,
+        width: nodeW,
+        height: estH,
       });
+    });
+
+    // 1. Root Node (Left column centered vertically across packed pillars)
+    const root = rootNodes[0] || nodes[0];
+    const totalHeight = Math.max(220, pillarCursorY);
+    const rootEstH = estimateNodeHeight(root, 72, 185);
+    const rootY = Math.max(40, totalHeight / 2 - rootEstH / 2);
+
+    const rootOverride = nodePositions[root.id];
+    result.unshift({
+      ...root,
+      xPos: rootOverride?.x ?? 24,
+      yPos: rootOverride?.y ?? rootY,
+      width: 185,
+      height: rootEstH,
     });
 
     return result;
@@ -416,7 +429,7 @@ export function ConceptMapCanvas({
 
               <div
                 dir={resolveTextDirection(node.label)}
-                className="font-bold text-xs leading-relaxed line-clamp-2 text-start"
+                className="font-bold text-xs leading-relaxed break-words line-clamp-3 text-start"
               >
                 <BiDiText text={node.label} />
               </div>

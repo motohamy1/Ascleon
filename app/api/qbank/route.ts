@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import {
@@ -8,6 +9,8 @@ import {
   orderModelsByHealth,
   PRIMARY_GEMINI_MODEL,
 } from "@/lib/ai/model-cooldown";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
+import { sanitizePlainText, sanitizeRichText } from "@/lib/security/sanitize";
 
 export const maxDuration = 60;
 import { retrieveFromBookRAG } from "@/lib/ai/rag/book-rag-retriever";
@@ -19,8 +22,30 @@ import {
 import {
   buildBillingErrorResponse,
   consumeCredits,
+  refundCredits,
   requireAuthAndCredits,
 } from "@/lib/usage.server";
+
+const QBankRequestSchema = z.object({
+  bookId: z.string().max(120).optional(),
+  bookTitle: z.string().max(240).optional().default("Medical Study Material"),
+  pageNumber: z.number().int().min(1).max(10000).optional().default(1),
+  pageText: z.string().max(50000).optional().default(""),
+  selectedText: z.string().max(20000).optional().default(""),
+  snippedDiagram: z.string().max(10_000_000).nullable().optional().default(null),
+  language: z.enum(["en", "ar", "mixed"]).optional().default("en"),
+  studyScope: z
+    .object({
+      type: z.enum(["page", "range", "topic"]).default("page"),
+      startPage: z.number().int().min(1).max(10000).default(1),
+      endPage: z.number().int().min(1).max(10000).default(1),
+      topicTitle: z.string().max(200).optional(),
+      topicId: z.string().max(100).optional(),
+    })
+    .optional(),
+  excludeTopics: z.array(z.string().max(120)).max(30).optional().default([]),
+  forceRefresh: z.boolean().optional().default(false),
+});
 
 function shuffleQuestionOptions(q: any) {
   if (!q || !Array.isArray(q.options) || q.options.length < 2) return q;
@@ -247,23 +272,34 @@ function buildCleanFallback(text: string, pageNumber: number, language: string) 
 
 
 export async function POST(req: NextRequest) {
+  let chargedUserId: string | null = null;
+  let chargedCredits = 0;
+
   try {
     const authCheck = await requireAuthAndCredits(0);
     if (!authCheck.ok) return authCheck.response;
 
-    const body = await req.json();
+    const rawBody = await req.json().catch(() => null);
+    const parsedBody = QBankRequestSchema.safeParse(rawBody);
+    if (!parsedBody.success) {
+      return NextResponse.json(
+        { error: "Invalid QBank request parameters." },
+        { status: 400 }
+      );
+    }
+
     const {
       bookId,
-      bookTitle = "Medical Study Material",
-      pageNumber = 1,
-      pageText = "",
-      selectedText = "",
-      snippedDiagram = null,
-      language = "en",
+      pageNumber,
+      snippedDiagram,
+      language,
       studyScope,
-      excludeTopics = [],
-      forceRefresh = false,
-    } = body;
+      forceRefresh,
+    } = parsedBody.data;
+    const bookTitle = sanitizePlainText(parsedBody.data.bookTitle, 240) || "Medical Study Material";
+    const pageText = sanitizeRichText(parsedBody.data.pageText, 25000);
+    const selectedText = sanitizeRichText(parsedBody.data.selectedText, 12000);
+    const excludeTopics = parsedBody.data.excludeTopics.map((t) => sanitizePlainText(t, 120)).filter(Boolean);
 
     const rawLiveText = (selectedText || pageText || "").trim();
     const hasRealLiveText = Boolean(rawLiveText) && !isPlaceholderPageText(rawLiveText);
@@ -319,6 +355,8 @@ export async function POST(req: NextRequest) {
     if (!creditCheck.allowed) {
       return buildBillingErrorResponse(creditCheck, dynamicCost.total);
     }
+    chargedUserId = authCheck.userId;
+    chargedCredits = dynamicCost.total;
 
     // 2. Sanitize extracted text: Strip OCR noise, page numbers, running headers, and raw file names
     const sanitizedText = sanitizeStudyText(focalText, bookTitle);
@@ -408,9 +446,13 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
     const geminiKey = process.env.GEMINI_API_KEY;
     const groqKey = process.env.GROQ_API_KEY;
     const openRouterKey = process.env.OPENROUTER_API_KEY;
+    let lastProviderError: unknown = null;
 
     if (geminiKey && geminiKey !== "your_gemini_api_key_here") {
-      const ai = new GoogleGenAI({ apiKey: geminiKey });
+      const ai = new GoogleGenAI({
+        apiKey: geminiKey,
+        httpOptions: { retryOptions: { attempts: 1 } },
+      });
       const userParts: any[] = [{ text: prompt }];
 
       if (snippedDiagram && typeof snippedDiagram === "string" && snippedDiagram.startsWith("data:image")) {
@@ -468,6 +510,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
           }
           throw new Error(`Invalid Gemini ${candidateModel} QBank JSON`);
         } catch (err) {
+          lastProviderError = err;
           markModelCooldownFromError(`gemini:${candidateModel}`, err);
           console.warn(`[QBank API] Gemini ${candidateModel} failed:`, err);
         } finally {
@@ -511,8 +554,11 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
               creditBreakdown: dynamicCost.summary,
             });
           }
+        } else {
+          lastProviderError = new Error(`Groq HTTP ${res.status}`);
         }
       } catch (groqErr) {
+        lastProviderError = groqErr;
         console.warn("[QBank API] Emergency Groq fallback failed:", groqErr);
       }
     }
@@ -554,30 +600,37 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                 creditBreakdown: dynamicCost.summary,
               });
             }
+          } else {
+            lastProviderError = new Error(`OpenRouter ${orModel} HTTP ${res.status}`);
           }
         } catch (orErr) {
+          lastProviderError = orErr;
           console.warn(`[QBank API] OpenRouter ${orModel} warning:`, orErr);
         }
       }
     }
 
-    // 6. Resilient Standalone Clean Fallback
-    // Guarantees clean, immersive clinical questions even during complete offline network outages
-    const cleanFallback = buildCleanFallback(sanitizedText, pageNumber, language);
-    return NextResponse.json({
-      success: true,
-      questions: cleanFallback.map(shuffleQuestionOptions),
-      citedPages,
-      source: "clean-offline-fallback",
-      creditsCharged: dynamicCost.total,
-      creditsRemaining: creditCheck.remaining,
-      creditBreakdown: dynamicCost.summary,
-    });
-  } catch (error) {
-    console.error("QBank API fatal error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to generate QBank" },
-      { status: 500 }
+    // 6. All AI providers failed or are overloaded — refund credits & return safe overload response
+    if (chargedUserId && chargedCredits > 0) {
+      await refundCredits(chargedUserId, chargedCredits).catch(() => {});
+      chargedCredits = 0;
+    }
+
+    return buildSafeErrorResponse(
+      "POST /api/qbank:providers_exhausted",
+      lastProviderError || new Error("All AI QBank providers unavailable"),
+      {
+        creditsRefunded: true,
+        meta: { bookId, pageNumber },
+      }
     );
+  } catch (error) {
+    if (chargedUserId && chargedCredits > 0) {
+      await refundCredits(chargedUserId, chargedCredits).catch(() => {});
+    }
+    return buildSafeErrorResponse("POST /api/qbank", error, {
+      fallbackMessage: "Unable to generate QBank questions right now. Please try again.",
+      creditsRefunded: chargedCredits > 0,
+    });
   }
 }

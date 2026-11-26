@@ -190,6 +190,7 @@ function MeasuredTextNode({
   if (progress <= 0.01) return null;
 
   const isRtl = Boolean(prim.rtl) || resolveTextDirection(prim.text) === "rtl";
+  const allowMultiLine = prim.h >= 34 && prim.fontSize <= 22 && prim.align !== "center";
   const revealPct = Math.round((1 - progress) * 100);
   const justify =
     prim.align === "center"
@@ -199,8 +200,13 @@ function MeasuredTextNode({
       : "flex-start";
 
   const clipPath = isRtl
-    ? `inset(0 0 0 ${revealPct}%)`
-    : `inset(0 ${revealPct}% 0 0)`;
+    ? `inset(-12% 0 -18% ${revealPct}%)`
+    : `inset(-12% ${revealPct}% -18% 0)`;
+
+  const shouldWrap = allowMultiLine && scaleX < 0.88;
+  const effectiveFontSize = shouldWrap
+    ? Math.max(11, Math.round(prim.fontSize * 0.88))
+    : prim.fontSize;
 
   return (
     <div
@@ -219,10 +225,11 @@ function MeasuredTextNode({
         color: isActiveNode ? "#0F172A" : prim.color,
         fontFamily: getFontStack(prim.fontKind, isRtl),
         fontWeight: prim.weight,
-        fontSize: `clamp(10px, ${(prim.fontSize / BOARD.w) * 100}cqw, ${prim.fontSize * 1.25}px)`,
-        lineHeight: isRtl ? 1.28 : 1.12,
-        whiteSpace: "nowrap",
+        fontSize: `clamp(10px, ${(effectiveFontSize / BOARD.w) * 100}cqw, ${effectiveFontSize * 1.2}px)`,
+        lineHeight: isRtl ? 1.38 : 1.22,
+        whiteSpace: shouldWrap ? "normal" : "nowrap",
         overflow: "hidden",
+        overflowWrap: shouldWrap ? "break-word" : undefined,
         clipPath,
         pointerEvents: "none",
       }}
@@ -230,17 +237,29 @@ function MeasuredTextNode({
       <span
         ref={spanRef}
         dir={isRtl ? "rtl" : "ltr"}
-        style={{
-          display: "inline-block",
-          unicodeBidi: "isolate",
-          transform: scaleX < 0.99 ? `scaleX(${scaleX.toFixed(3)})` : undefined,
-          transformOrigin:
-            prim.align === "center"
-              ? "center center"
-              : prim.align === "right" || isRtl
-              ? "right center"
-              : "left center",
-        }}
+        style={
+          shouldWrap
+            ? {
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                width: "100%",
+                textAlign: prim.align,
+                unicodeBidi: "plaintext",
+              }
+            : {
+                display: "inline-block",
+                unicodeBidi: "isolate",
+                transform: scaleX < 0.99 ? `scaleX(${scaleX.toFixed(3)})` : undefined,
+                transformOrigin:
+                  prim.align === "center"
+                    ? "center center"
+                    : prim.align === "right" || isRtl
+                    ? "right center"
+                    : "left center",
+              }
+        }
       >
         {renderBidiNodes(prim.text, prim.id)}
       </span>

@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { connectToDatabase } from "@/database/mongoose";
 import LessonBoard from "@/database/models/lesson-board.model";
 import { serializeLessonBoard } from "@/lib/board/mapper";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
 
 export async function GET(
   _req: NextRequest,
@@ -35,15 +36,8 @@ export async function GET(
       lesson: serializeLessonBoard(doc),
     });
   } catch (error) {
-    console.error("[GET /api/whiteboard/lessons/[id]] error:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to load whiteboard lesson",
-      },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("GET /api/whiteboard/lessons/[id]", error, {
+      fallbackMessage: "Failed to load whiteboard lesson.",
+    });
   }
 }

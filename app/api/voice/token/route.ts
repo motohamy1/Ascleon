@@ -9,9 +9,24 @@ import {
   Type,
 } from "@google/genai";
 import { auth } from "@clerk/nextjs/server";
+import { z } from "zod";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import { DEFAULT_LIVE_VOICE } from "@/lib/voice-config";
 import { checkVoiceBudget } from "@/lib/usage.server";
+import { buildSafeErrorResponse, logServerError } from "@/lib/security/error-handler";
+import { sanitizePlainText, sanitizeRichText } from "@/lib/security/sanitize";
+
+const VoiceTokenRequestSchema = z.object({
+  bookTitle: z.string().max(240).optional().default("Medical Study Document"),
+  pageNumber: z.number().int().min(1).max(10000).optional().default(1),
+  pageText: z.string().max(30000).optional().default(""),
+  selectedText: z.string().max(15000).optional().default(""),
+  authoritativeReferences: z.array(z.unknown()).max(20).optional().default([]),
+  language: z.enum(["en", "ar", "mixed"]).optional().default("en"),
+  voiceName: z.string().max(80).optional().default(DEFAULT_LIVE_VOICE),
+  noisyPlace: z.boolean().optional().default(false),
+  resumptionHandle: z.string().max(500).nullable().optional().default(null),
+});
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,30 +52,41 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json().catch(() => ({}));
-    const {
-      bookTitle = "Medical Study Document",
-      pageNumber = 1,
-      pageText = "",
-      selectedText = "",
-      authoritativeReferences = [],
-      language = "en",
-      voiceName = DEFAULT_LIVE_VOICE,
-      noisyPlace = false,
-      resumptionHandle = null,
-    } = body;
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    const rawBody = await req.json().catch(() => ({}));
+    const parsedBody = VoiceTokenRequestSchema.safeParse(rawBody);
+    if (!parsedBody.success) {
       return NextResponse.json(
-        { error: "Missing GEMINI_API_KEY on server environment" },
-        { status: 500 }
+        { error: "Invalid voice session request parameters." },
+        { status: 400 }
       );
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    const {
+      pageNumber,
+      authoritativeReferences,
+      language,
+      voiceName,
+      noisyPlace,
+      resumptionHandle,
+    } = parsedBody.data;
+    const bookTitle = sanitizePlainText(parsedBody.data.bookTitle, 240) || "Medical Study Document";
+    const pageText = sanitizeRichText(parsedBody.data.pageText, 25000);
+    const selectedText = sanitizeRichText(parsedBody.data.selectedText, 12000);
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return buildSafeErrorResponse(
+        "POST /api/voice/token",
+        new Error("Missing GEMINI_API_KEY on server environment")
+      );
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: { apiVersion: "v1alpha" },
+    });
     const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-    const newSessionExpireTime = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const newSessionExpireTime = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
     const referencesContext =
       Array.isArray(authoritativeReferences) && authoritativeReferences.length > 0
@@ -102,7 +128,8 @@ PEDAGOGICAL & ORAL INTERACTION DIRECTIVES:
 3. Spoken Delivery:
    - Speak with natural, warm, human inflection like a world-class scholar or mentor sitting next to the student.
    - NO markdown formatting (no asterisks, hashtags, or emojis) — your output streams directly as real-time audio!
-4. Visual Grounding & Page Highlights:
+4. Visual Grounding & Page Continuity:
+   - Whenever the student says "كمل" ("continue"), asks about "this page" / "الصفحة دي", or moves to a new section, call 'get_current_study_page' so you stay grounded in their exact live page without stopping early.
    - When introducing a pivotal mechanism, structure, or formula, invoke 'show_concept_on_page' in the background to highlight concepts or open Morph view on the screen while you speak.`;
 
     const automaticActivityDetection = noisyPlace
@@ -139,6 +166,15 @@ PEDAGOGICAL & ORAL INTERACTION DIRECTIVES:
         {
           functionDeclarations: [
             {
+              name: "get_current_study_page",
+              description:
+                "Reads the student's current active page number, book title, and live extracted text. Call this whenever the student says continue / كمل or asks about the current page.",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {},
+              },
+            },
+            {
               name: "show_concept_on_page",
               description:
                 "Displays a visual concept card or highlights a concept on the student's study reader in the background without interrupting speech.",
@@ -146,19 +182,12 @@ PEDAGOGICAL & ORAL INTERACTION DIRECTIVES:
               parameters: {
                 type: Type.OBJECT,
                 properties: {
-                  conceptName: {
-                    type: Type.STRING,
-                    description: "Name of the clinical concept or structure to highlight",
-                  },
+                  conceptName: { type: Type.STRING },
                   action: {
                     type: Type.STRING,
                     enum: ["highlight_concept", "open_morph"],
-                    description: "Whether to highlight the concept or open Morph view",
                   },
-                  explanation: {
-                    type: Type.STRING,
-                    description: "One short sentence explaining why this is highlighted",
-                  },
+                  explanation: { type: Type.STRING },
                 },
                 required: ["conceptName", "action"],
               },
@@ -173,7 +202,7 @@ PEDAGOGICAL & ORAL INTERACTION DIRECTIVES:
     try {
       const token = await ai.authTokens.create({
         config: {
-          uses: 1,
+          uses: 6,
           expireTime,
           newSessionExpireTime,
           liveConnectConstraints: {
@@ -193,20 +222,16 @@ PEDAGOGICAL & ORAL INTERACTION DIRECTIVES:
         systemInstruction: systemInstructionText,
       });
     } catch (tokenErr: unknown) {
-      const msg = tokenErr instanceof Error ? tokenErr.message : String(tokenErr);
-      console.error("[voice/token] Ephemeral token creation failed:", msg);
-      return NextResponse.json(
-        {
-          error: "Could not initialize secure live voice session token. Please try again.",
-        },
-        { status: 502 }
-      );
+      return buildSafeErrorResponse("POST /api/voice/token:authTokens.create", tokenErr, {
+        status: 502,
+        fallbackMessage:
+          "Could not initialize secure live voice session token. Please try again.",
+      });
     }
   } catch (error: unknown) {
-    console.error("[voice/token] Unexpected error:", error);
-    return NextResponse.json(
-      { error: "Failed to initialize live voice session." },
-      { status: 500 }
-    );
+    logServerError("POST /api/voice/token", error);
+    return buildSafeErrorResponse("POST /api/voice/token", error, {
+      fallbackMessage: "Failed to initialize live voice session.",
+    });
   }
 }

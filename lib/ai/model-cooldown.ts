@@ -1,15 +1,17 @@
 /**
  * Shared Gemini model selection & per-model cooldown registry.
  * Primary: gemini-4-hydrogen (highest Gemini 4 reasoning enabled on API key).
- * Fallbacks: full-intelligence Flash models (gemini-3.6-flash, gemini-3.8-flash, gemini-3.5-flash) — no -lite models.
- * Prevents cascading 30s-300s hangs when a model hits 429/503/timeout.
+ * Fallbacks cascade cleanly across Gemini 4 & 3.x Flash models so transient
+ * 503/overloaded/429 spikes never stall requests for 30s-300s.
  */
 
 export const PRIMARY_GEMINI_MODEL = "gemini-4-hydrogen";
 export const FALLBACK_GEMINI_MODELS = [
-  "gemini-3.6-flash",
+  "gemini-4-argon",
   "gemini-3.8-flash",
+  "gemini-3.6-flash",
   "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
 ] as const;
 
 export const GEMINI_MODEL_CHAIN = [
@@ -18,10 +20,12 @@ export const GEMINI_MODEL_CHAIN = [
 ] as const;
 
 export const FAST_GEMINI_MODEL_CHAIN = [
-  "gemini-3.6-flash",
   "gemini-3.8-flash",
-  "gemini-3.5-flash",
+  "gemini-3.6-flash",
+  "gemini-4-argon",
   "gemini-4-hydrogen",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
 ] as const;
 
 const TRANSIENT_COOLDOWN_MS = 180_000; // 3 min
@@ -60,9 +64,15 @@ export function markModelCooldownFromError(key: string, err: unknown): void {
     markModelCooldown(key, DAILY_QUOTA_COOLDOWN_MS);
   } else if (
     msg.includes("429") ||
+    msg.includes("502") ||
     msg.includes("503") ||
     msg.includes("500") ||
     msg.includes("504") ||
+    msg.includes("overloaded") ||
+    msg.includes("resource_exhausted") ||
+    msg.includes("rate limit") ||
+    msg.includes("rate_limit") ||
+    msg.includes("too many requests") ||
     msg.includes("timeout") ||
     msg.includes("timed out") ||
     msg.includes("aborted") ||

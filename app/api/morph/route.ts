@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import crypto from "crypto";
+import { z } from "zod";
 import { connectToDatabase } from "@/database/mongoose";
 import MorphArtifact from "@/database/models/morph-artifact.model";
 import { MorphArtifactData } from "@/types/morph";
 import { auth } from "@clerk/nextjs/server";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
+import { sanitizePlainText, sanitizeRichText } from "@/lib/security/sanitize";
 import {
   clearModelCooldown,
   GEMINI_MODEL_CHAIN,
@@ -14,6 +17,35 @@ import {
   orderModelsByHealth,
   PRIMARY_GEMINI_MODEL,
 } from "@/lib/ai/model-cooldown";
+
+const MorphRequestSchema = z.object({
+  bookId: z.string().max(120).optional(),
+  id: z.string().max(120).optional(),
+  bookTitle: z.string().max(240).optional().default("Study Document"),
+  segmentIndex: z.number().int().min(0).max(10000).optional(),
+  currentSegmentIndex: z.number().int().min(0).max(10000).optional(),
+  pageNumber: z.number().int().min(1).max(10000).optional(),
+  currentPageNumber: z.number().int().min(1).max(10000).optional(),
+  focalText: z.string().max(50000).optional(),
+  currentSegmentContent: z.string().max(50000).optional(),
+  content: z.string().max(50000).optional(),
+  selectedText: z.string().max(20000).optional().default(""),
+  precedingSegments: z.array(z.string().max(10000)).max(5).optional().default([]),
+  subsequentSegments: z.array(z.string().max(10000)).max(5).optional().default([]),
+  forceRefresh: z.boolean().optional().default(false),
+  snippedDiagram: z.string().max(10_000_000).nullable().optional().default(null),
+  language: z.enum(["en", "ar", "mixed"]).optional().default("en"),
+  studyScope: z
+    .object({
+      type: z.enum(["page", "range", "topic"]).default("page"),
+      startPage: z.number().int().min(1).max(10000).default(1),
+      endPage: z.number().int().min(1).max(10000).default(1),
+      topicTitle: z.string().max(200).optional(),
+      topicId: z.string().max(100).optional(),
+    })
+    .optional(),
+  customTopic: z.string().max(240).optional(),
+});
 
 export const maxDuration = 60;
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
@@ -162,17 +194,24 @@ export async function POST(req: NextRequest) {
     const authCheck = await requireAuthAndCredits(0);
     if (!authCheck.ok) return authCheck.response;
 
-    const body = await req.json();
+    const rawBody = await req.json().catch(() => null);
+    const parsedBody = MorphRequestSchema.safeParse(rawBody);
+    if (!parsedBody.success) {
+      return NextResponse.json(
+        { error: "Invalid Morph request parameters." },
+        { status: 400 }
+      );
+    }
+
+    const body = parsedBody.data;
+    const bookTitle = sanitizePlainText(body.bookTitle, 240) || "Study Document";
+    const selectedText = sanitizeRichText(body.selectedText, 12000);
+    const customTopic = body.customTopic ? sanitizePlainText(body.customTopic, 200) : undefined;
     const {
-      bookTitle = "Study Document",
-      selectedText = "",
-      precedingSegments = [],
-      subsequentSegments = [],
-      forceRefresh = false,
-      snippedDiagram = null,
-      language = "en",
+      forceRefresh,
+      snippedDiagram,
+      language,
       studyScope,
-      customTopic,
     } = body;
 
     const bookId = body.bookId || body.id || "default-book";
@@ -183,12 +222,14 @@ export async function POST(req: NextRequest) {
         ? body.currentSegmentIndex
         : 0;
 
-    let focalText =
+    let focalText = sanitizeRichText(
       body.focalText ||
-      body.currentSegmentContent ||
-      body.content ||
-      selectedText ||
-      "";
+        body.currentSegmentContent ||
+        body.content ||
+        selectedText ||
+        "",
+      25000
+    );
 
     const pageNumber =
       body.pageNumber ||
@@ -276,14 +317,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Live AI Synthesis via Premium Gemini Model Chain (NO generic local stub fallback)
+    // 2. Live AI Synthesis across Resilient Multi-Provider Chain (Gemini -> Groq -> OpenRouter -> OpenAI -> Grounded Fallback)
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey === "your_gemini_api_key_here") {
-      return NextResponse.json(
-        { error: "GEMINI_API_KEY is not configured for Morph synthesis." },
-        { status: 503 },
-      );
-    }
+    const groqKey = process.env.GROQ_API_KEY;
+    const openRouterKey = process.env.OPENROUTER_API_KEY;
+    const openAiKey = process.env.OPENAI_API_KEY;
 
     const dynamicCost = calculateDynamicCreditCost({
       feature: "morph",
@@ -292,17 +330,27 @@ export async function POST(req: NextRequest) {
       hasVisionInput: Boolean(snippedDiagram),
       forceRefresh: Boolean(forceRefresh),
     });
-    const creditCheck = await consumeCredits(authCheck.userId, dynamicCost.total);
-    if (!creditCheck.allowed) {
-      return buildBillingErrorResponse(creditCheck, dynamicCost.total);
-    }
+    const budgetCheck = await requireAuthAndCredits(dynamicCost.total);
+    if (!budgetCheck.ok) return budgetCheck.response;
 
+    let creditsCharged = 0;
+    let creditsRemaining: number | undefined;
+    let usedCloudModel = false;
     let artifactData: MorphArtifactData | null = null;
-    let lastGeminiError: string = "Gemini Morph synthesis failed";
+    let lastGeminiError: string = "AI Morph synthesis unavailable";
+
+    const hasValidMorphContent = (candidateParsed: any): boolean =>
+      Boolean(
+        candidateParsed &&
+          ((Array.isArray(candidateParsed.cards) && candidateParsed.cards.length > 0) ||
+            (Array.isArray(candidateParsed.journey?.stages) &&
+              candidateParsed.journey.stages.length > 0) ||
+            (Array.isArray(candidateParsed.conceptMap?.pillars) &&
+              candidateParsed.conceptMap.pillars.length > 0))
+      );
 
     {
       try {
-        const ai = new GoogleGenAI({ apiKey });
         const prompt = customTopic
           ? `You are Ascleon's elite Multi-Modal Morph Engine.
 Transform the comprehensive topic "${customTopic}" from "${bookTitle}" into an end-to-end interactive conceptual learning micro-site featuring structured roadmap cards, an interactive concept mind map, and a living multi-stage journey.
@@ -433,14 +481,16 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
         let parsed: any = null;
         let usedModel = "";
-        const morphModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
-        for (let idx = 0; idx < morphModels.length; idx++) {
-          const candidateModel = morphModels[idx];
-          const isLastModel = idx === morphModels.length - 1;
-          const maxAttempts = isLastModel ? 2 : 1;
 
-          for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            const timeoutMs = idx === 0 ? 16_000 : 11_000;
+        if (apiKey && apiKey !== "your_gemini_api_key_here") {
+          const ai = new GoogleGenAI({
+            apiKey,
+            httpOptions: { retryOptions: { attempts: 1 } },
+          });
+          const morphModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
+          for (let idx = 0; idx < morphModels.length; idx++) {
+            const candidateModel = morphModels[idx];
+            const timeoutMs = idx === 0 ? 18_000 : 12_000;
             const supportsThinking = !candidateModel.includes("lite");
             const thinkingBudget = candidateModel === PRIMARY_GEMINI_MODEL ? 128 : 0;
             const abortCtrl = new AbortController();
@@ -451,7 +501,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                 contents: [{ role: "user", parts: userParts }],
                 config: {
                   responseMimeType: "application/json",
-                  temperature: attempt === 0 ? 0.2 : 0.1,
+                  temperature: 0.2,
                   maxOutputTokens: 8192,
                   abortSignal: abortCtrl.signal,
                   ...(supportsThinking ? { thinkingConfig: { thinkingBudget } } : {}),
@@ -467,37 +517,111 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
               const response: any = await Promise.race([generatePromise, timeoutPromise]);
               const responseText = response?.text?.trim() || "";
               const candidateParsed = parseMorphJson(responseText);
-              const hasContent =
-                candidateParsed &&
-                ((Array.isArray(candidateParsed.cards) && candidateParsed.cards.length > 0) ||
-                  (Array.isArray(candidateParsed.journey?.stages) &&
-                    candidateParsed.journey.stages.length > 0) ||
-                  (Array.isArray(candidateParsed.conceptMap?.pillars) &&
-                    candidateParsed.conceptMap.pillars.length > 0));
 
-              if (!hasContent) {
+              if (!hasValidMorphContent(candidateParsed)) {
                 console.warn(
-                  `[Morph] ${candidateModel} attempt ${attempt + 1} invalid JSON (len=${responseText.length}):`,
+                  `[Morph] ${candidateModel} invalid JSON (len=${responseText.length}):`,
                   responseText.slice(0, 180)
                 );
                 throw new Error(`Morph ${candidateModel} returned invalid or incomplete JSON`);
               }
 
               parsed = candidateParsed;
-              usedModel = candidateModel;
+              usedModel = `gemini:${candidateModel}`;
+              usedCloudModel = true;
               clearModelCooldown(`gemini:${candidateModel}`);
               break;
             } catch (modelErr: any) {
               lastGeminiError = modelErr?.message || String(modelErr);
-              if (attempt === maxAttempts - 1) {
-                markModelCooldownFromError(`gemini:${candidateModel}`, modelErr);
-              }
+              markModelCooldownFromError(`gemini:${candidateModel}`, modelErr);
               console.warn(`[Morph] ${candidateModel} failed:`, lastGeminiError);
             } finally {
               clearTimeout(timer);
             }
           }
-          if (parsed) break;
+        }
+
+        // Fallback cascade across Groq, OpenRouter, and OpenAI whenever Gemini models are overloaded/503/429
+        const fallbackProviders: Array<{
+          label: string;
+          endpoint: string;
+          key?: string;
+          model: string;
+          jsonMode: boolean;
+        }> = [
+          {
+            label: "groq:openai/gpt-oss-120b",
+            endpoint: "https://api.groq.com/openai/v1/chat/completions",
+            key: groqKey !== "your_groq_api_key_here" ? groqKey : undefined,
+            model: "openai/gpt-oss-120b",
+            jsonMode: true,
+          },
+          {
+            label: "openrouter:google/gemini-2.5-flash",
+            endpoint: "https://openrouter.ai/api/v1/chat/completions",
+            key: openRouterKey !== "your_openrouter_api_key_here" ? openRouterKey : undefined,
+            model: "google/gemini-2.5-flash",
+            jsonMode: false,
+          },
+          {
+            label: "openrouter:meta-llama/llama-3.3-70b-instruct",
+            endpoint: "https://openrouter.ai/api/v1/chat/completions",
+            key: openRouterKey !== "your_openrouter_api_key_here" ? openRouterKey : undefined,
+            model: "meta-llama/llama-3.3-70b-instruct",
+            jsonMode: false,
+          },
+          {
+            label: "openai:gpt-4o-mini",
+            endpoint: "https://api.openai.com/v1/chat/completions",
+            key: openAiKey !== "your_openai_api_key_here" ? openAiKey : undefined,
+            model: "gpt-4o-mini",
+            jsonMode: true,
+          },
+        ];
+
+        if (!parsed) {
+          for (const provider of fallbackProviders) {
+            if (!provider.key) continue;
+            try {
+              const res = await fetch(provider.endpoint, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${provider.key}`,
+                },
+                signal: AbortSignal.timeout(16_000),
+                body: JSON.stringify({
+                  model: provider.model,
+                  messages: [
+                    {
+                      role: "system",
+                      content:
+                        "You are Ascleon's Multi-Modal Morph Engine. Output ONLY a single valid JSON object matching the requested schema.",
+                    },
+                    { role: "user", content: prompt },
+                  ],
+                  temperature: 0.2,
+                  ...(provider.jsonMode ? { response_format: { type: "json_object" } } : {}),
+                }),
+              });
+              if (!res.ok) {
+                lastGeminiError = `${provider.label} HTTP ${res.status}`;
+                continue;
+              }
+              const data = await res.json();
+              const content = data?.choices?.[0]?.message?.content || "";
+              const candidateParsed = parseMorphJson(content);
+              if (hasValidMorphContent(candidateParsed)) {
+                parsed = candidateParsed;
+                usedModel = provider.label;
+                usedCloudModel = true;
+                break;
+              }
+            } catch (providerErr: any) {
+              lastGeminiError = providerErr?.message || String(providerErr);
+              console.warn(`[Morph] Fallback ${provider.label} failed:`, lastGeminiError);
+            }
+          }
         }
 
         if (parsed) {
@@ -699,16 +823,24 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
     }
 
     if (!artifactData) {
-      return NextResponse.json(
+      return buildSafeErrorResponse(
+        "POST /api/morph:providers_exhausted",
+        new Error(lastGeminiError),
         {
-          error: `Morph synthesis failed (${lastGeminiError}). Please click Re-morph to retry.`,
-        },
-        { status: 503 },
+          meta: { bookId, pageNumber },
+        }
       );
+    } else if (usedCloudModel) {
+      const creditCheck = await consumeCredits(authCheck.userId, dynamicCost.total);
+      if (!creditCheck.allowed) {
+        return buildBillingErrorResponse(creditCheck, dynamicCost.total);
+      }
+      creditsCharged = dynamicCost.total;
+      creditsRemaining = creditCheck.remaining;
     }
 
-    // 4. Save to MongoDB with true content hash
-    if (isMongoId) {
+    // 4. Save to MongoDB only when cloud-synthesized (never pollute DB cache with emergency fallback)
+    if (isMongoId && usedCloudModel) {
       try {
         await connectToDatabase();
         await MorphArtifact.findOneAndUpdate(
@@ -732,20 +864,14 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
       artifact: artifactData,
       data: artifactData,
       cached: false,
-      creditsCharged: dynamicCost.total,
-      creditsRemaining: creditCheck.remaining,
+      fallback: !usedCloudModel,
+      creditsCharged,
+      ...(typeof creditsRemaining === "number" ? { creditsRemaining } : {}),
       creditBreakdown: dynamicCost.summary,
     });
   } catch (error) {
-    console.error("Error in /api/morph:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to synthesize morph",
-      },
-      { status: 500 },
-    );
+    return buildSafeErrorResponse("POST /api/morph", error, {
+      fallbackMessage: "Unable to synthesize Morph view right now. Please try again.",
+    });
   }
 }

@@ -5,6 +5,7 @@ import { connectToDatabase } from "@/database/mongoose";
 import WhiteboardVideo from "@/database/models/whiteboard-video.model";
 import { buildEmptyVoiceTrack, serializeWhiteboardVideo } from "@/lib/whiteboard/video-mapper";
 import { isValidWhiteboardVoice } from "@/lib/whiteboard/voices";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
 
 export async function POST(
   req: NextRequest,
@@ -52,10 +53,8 @@ export async function POST(
       video: serializeWhiteboardVideo(updated || doc),
     });
   } catch (error) {
-    console.error("[POST /api/whiteboard/videos/[id]/voice] error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to switch narrator voice" },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("POST /api/whiteboard/videos/[id]/voice", error, {
+      fallbackMessage: "Failed to switch narrator voice.",
+    });
   }
 }

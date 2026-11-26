@@ -137,6 +137,16 @@ export function useLiveVoice({
   const sawOutputTranscriptionRef = useRef(false);
   const isPlayerPlayingRef = useRef(false);
   const turnFinishedOnServerRef = useRef(false);
+  const drainWatchdogRef = useRef<number | null>(null);
+  const latestPageTextRef = useRef<string>(selectedText || pageText || "");
+  const latestPageNumRef = useRef<number>(pageNumber);
+  const latestBookTitleRef = useRef<string>(bookTitle);
+  const prevLanguageRef = useRef<StudyLanguage>(language);
+  const prevVoiceNameRef = useRef<string>(voiceName);
+
+  latestPageTextRef.current = (selectedText || pageText || "").trim();
+  latestPageNumRef.current = pageNumber;
+  latestBookTitleRef.current = bookTitle;
 
   // Visual level refs updated by worklets, read by rAF loop (zero React re-renders per frame)
   const inputLevelRef = useRef(0);
@@ -446,6 +456,10 @@ export function useLiveVoice({
             syncMetrics();
           }
           if (!event.data.playing && turnFinishedOnServerRef.current && statusRef.current === "speaking") {
+            if (drainWatchdogRef.current !== null) {
+              window.clearTimeout(drainWatchdogRef.current);
+              drainWatchdogRef.current = null;
+            }
             turnFinishedOnServerRef.current = false;
             updateStatus("listening");
           }
@@ -513,10 +527,31 @@ export function useLiveVoice({
             ensureOutputPipeline(),
           ]);
 
-          // Single-use token consumed once we open the socket
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(
+              new CustomEvent("ascleon:audio-exclusive", {
+                detail: { source: "live-voice" },
+              })
+            );
+          }
+
+          // Clear cached token once consumed for WebSocket open; keep cachedTokenRef clear on reconnects
           cachedTokenRef.current = null;
           mediaStreamRef.current = stream;
           lastReportedPageRef.current = pageNumber;
+
+          stream.getAudioTracks().forEach((track) => {
+            track.onended = () => {
+              if (
+                !manualDisconnectRef.current &&
+                wsRef.current?.readyState === WebSocket.OPEN &&
+                !connectingPromiseRef.current
+              ) {
+                reconnectAttemptsRef.current = 0;
+                connectInternal(true);
+              }
+            };
+          });
 
           const inputCtx = createAudioContext(16000);
           inputAudioCtxRef.current = inputCtx;
@@ -549,7 +584,7 @@ export function useLiveVoice({
 
           startVisualizerLoop();
 
-          const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${tokenInfo.token}`;
+          const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${tokenInfo.token}`;
           const ws = new WebSocket(wsUrl);
           wsRef.current = ws;
 
@@ -608,9 +643,18 @@ export function useLiveVoice({
                     {
                       functionDeclarations: [
                         {
+                          name: "get_current_study_page",
+                          description:
+                            "Reads the student's current active page number, book title, and live extracted text. Call this whenever the student says continue / كمل or asks about the current page.",
+                          parameters: {
+                            type: "OBJECT",
+                            properties: {},
+                          },
+                        },
+                        {
                           name: "show_concept_on_page",
                           description:
-                            "Displays a visual concept card or triggers Morph view on the reader screen while speaking, so the student can follow along visually.",
+                            "Displays a visual concept card or highlights a concept on the student's study reader in the background without interrupting speech.",
                           behavior: "NON_BLOCKING",
                           parameters: {
                             type: "OBJECT",
@@ -743,6 +787,18 @@ export function useLiveVoice({
                     if (!isPlayerPlayingRef.current) {
                       turnFinishedOnServerRef.current = false;
                       updateStatus("listening");
+                    } else {
+                      if (drainWatchdogRef.current !== null) {
+                        window.clearTimeout(drainWatchdogRef.current);
+                      }
+                      drainWatchdogRef.current = window.setTimeout(() => {
+                        drainWatchdogRef.current = null;
+                        if (turnFinishedOnServerRef.current && statusRef.current === "speaking") {
+                          isPlayerPlayingRef.current = false;
+                          turnFinishedOnServerRef.current = false;
+                          updateStatus("listening");
+                        }
+                      }, 4000);
                     }
                   }
                 }
@@ -754,7 +810,19 @@ export function useLiveVoice({
                     response: { output: Record<string, string> };
                   }> = [];
                   for (const call of data.toolCall.functionCalls) {
-                    if (call.name === "show_concept_on_page") {
+                    if (call.name === "get_current_study_page") {
+                      responses.push({
+                        id: call.id,
+                        name: call.name,
+                        response: {
+                          output: {
+                            bookTitle: latestBookTitleRef.current,
+                            pageNumber: String(latestPageNumRef.current),
+                            pageText: latestPageTextRef.current.slice(0, 3500),
+                          },
+                        },
+                      });
+                    } else if (call.name === "show_concept_on_page") {
                       const trigger: VisualTriggerEvent = {
                         conceptName: call.args?.conceptName || "Concept",
                         action: call.args?.action || "highlight_concept",
@@ -801,12 +869,19 @@ export function useLiveVoice({
                 closeEvent.code === 1000 ||
                 closeEvent.code === 1005;
 
-              const retryDelays = [500, 1500, 3000];
+              const retryDelays = [400, 1200, 2500];
+              const hadResumptionHandle = Boolean(resumptionHandleRef.current);
+              const isRecoverableConstraintClose =
+                closeEvent.code !== 1008 || hadResumptionHandle;
               if (
                 !isNormalClose &&
-                closeEvent.code !== 1008 &&
+                isRecoverableConstraintClose &&
                 reconnectAttemptsRef.current < retryDelays.length
               ) {
+                if (closeEvent.code === 1008 || closeEvent.code === 1007) {
+                  resumptionHandleRef.current = null;
+                  cachedTokenRef.current = null;
+                }
                 const attemptIdx = reconnectAttemptsRef.current;
                 reconnectAttemptsRef.current += 1;
                 metricsRef.current.reconnectCount += 1;
@@ -933,58 +1008,51 @@ export function useLiveVoice({
   }, []);
 
   const updatePageContext = useCallback((newPageText: string, newPageNumber: number) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !isSetupCompleteRef.current) {
-      return;
-    }
-    if (lastReportedPageRef.current === newPageNumber) return;
+    latestPageTextRef.current = (newPageText || "").trim();
+    latestPageNumRef.current = newPageNumber;
     lastReportedPageRef.current = newPageNumber;
-
-    wsRef.current.send(
-      JSON.stringify({
-        clientContent: {
-          turns: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: `[SYSTEM CONTEXT UPDATE: The student moved to Page ${newPageNumber}. Active text:\n"""${newPageText.slice(
-                    0,
-                    1500
-                  )}"""\nAdapt smoothly to this section when relevant.]`,
-                },
-              ],
-            },
-          ],
-          turnComplete: false,
-        },
-      })
-    );
   }, []);
 
   useEffect(() => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !isSetupCompleteRef.current) {
-      return;
-    }
-    const langInstruction =
-      language === "ar"
-        ? "Switch your spoken response language immediately to authentic Egyptian Colloquial Arabic (العامية المصرية)."
-        : language === "mixed"
-        ? "Switch your spoken response language immediately to clinical Mixed Egyptian Arabic + English medical terminology."
-        : "Switch your spoken response language immediately to clear academic English.";
+    const langChanged = prevLanguageRef.current !== language;
+    const voiceChanged = prevVoiceNameRef.current !== voiceName;
+    prevLanguageRef.current = language;
+    prevVoiceNameRef.current = voiceName;
+    if (!langChanged && !voiceChanged) return;
 
-    try {
-      wsRef.current.send(
-        JSON.stringify({
-          clientContent: {
-            turns: [{ role: "user", parts: [{ text: `[SYSTEM DIRECTIVE: ${langInstruction}]` }] }],
-            turnComplete: false,
-          },
-        })
-      );
-    } catch {}
-  }, [language]);
+    cachedTokenRef.current = null;
+    if (
+      wsRef.current?.readyState === WebSocket.OPEN &&
+      statusRef.current !== "idle" &&
+      statusRef.current !== "connecting"
+    ) {
+      connectInternal(true);
+    }
+  }, [language, voiceName, connectInternal]);
+
+  const reconnectSession = useCallback(() => {
+    reconnectAttemptsRef.current = 0;
+    cachedTokenRef.current = null;
+    return connectInternal(true);
+  }, [connectInternal]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleExclusive = (e: Event) => {
+      const detail = (e as CustomEvent<{ source?: string }>).detail;
+      if (detail?.source === "living-board" && statusRef.current !== "idle") {
+        setIsMuted(true);
+      }
+    };
+    window.addEventListener("ascleon:audio-exclusive", handleExclusive);
+    return () => window.removeEventListener("ascleon:audio-exclusive", handleExclusive);
+  }, []);
 
   const resetSession = useCallback(() => {
+    if (drainWatchdogRef.current !== null) {
+      window.clearTimeout(drainWatchdogRef.current);
+      drainWatchdogRef.current = null;
+    }
     disconnect();
     resumptionHandleRef.current = null;
     cachedTokenRef.current = null;
@@ -1047,6 +1115,7 @@ export function useLiveVoice({
     stopHoldToTalk,
     connect,
     disconnect,
+    reconnectSession,
     resetSession,
     prefetchToken,
     bindVisualizerElement,

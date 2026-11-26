@@ -5,6 +5,7 @@ import { z } from "zod";
 import { connectToDatabase } from "@/database/mongoose";
 import StudyPlan from "@/database/models/study-plan.model";
 import { computeReadinessScore, serializeStudyPlan } from "@/lib/study-plan/utils";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
 
 const StepProgressSchema = z.object({
   status: z.enum(["completed", "pending", "ready"]),
@@ -25,11 +26,11 @@ export async function PATCH(
       return NextResponse.json({ error: "Invalid study plan ID" }, { status: 400 });
     }
 
-    const raw = await req.json();
+    const raw = await req.json().catch(() => null);
     const parsed = StepProgressSchema.safeParse(raw);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Invalid progress status", details: parsed.error.flatten() },
+        { error: "Invalid progress status" },
         { status: 400 }
       );
     }
@@ -79,10 +80,10 @@ export async function PATCH(
       plan: serializeStudyPlan(doc),
     });
   } catch (error) {
-    console.error("[PATCH /api/study-plans/[id]/steps/[stepId]/progress] error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update step progress" },
-      { status: 500 }
+    return buildSafeErrorResponse(
+      "PATCH /api/study-plans/[id]/steps/[stepId]/progress",
+      error,
+      { fallbackMessage: "Failed to update step progress." }
     );
   }
 }

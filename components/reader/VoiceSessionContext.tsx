@@ -24,6 +24,7 @@ interface VoiceSessionContextValue {
   stopHoldToTalk: () => void;
   connect: () => Promise<boolean>;
   disconnect: () => void;
+  reconnectSession: () => Promise<boolean>;
   resetSession: () => void;
   prefetchToken: () => void;
   bindVisualizerElement: (el: HTMLElement | null) => void;
@@ -158,6 +159,7 @@ export function VoiceSessionProvider({
         stopHoldToTalk: voice.stopHoldToTalk,
         connect: voice.connect,
         disconnect: voice.disconnect,
+        reconnectSession: voice.reconnectSession,
         resetSession: voice.resetSession,
         prefetchToken: voice.prefetchToken,
         bindVisualizerElement: voice.bindVisualizerElement,

@@ -2,8 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { uploadToR2 } from "@/lib/storage";
 import { put } from "@vercel/blob";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
+import { validateUploadMagicBytes } from "@/lib/security/sanitize";
+import {
+  ACCEPTED_IMAGE_TYPES,
+  ACCEPTED_PDF_TYPES,
+  MAX_FILE_SIZE,
+  MAX_IMAGE_SIZE,
+} from "@/lib/constants";
 
 export const maxDuration = 60;
+
+const ALLOWED_UPLOAD_MIME_TYPES = new Set([
+  ...ACCEPTED_PDF_TYPES,
+  ...ACCEPTED_IMAGE_TYPES,
+]);
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,14 +32,38 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
+    const contentType = file.type || "application/pdf";
+    if (!ALLOWED_UPLOAD_MIME_TYPES.has(contentType)) {
+      return NextResponse.json(
+        { error: "Unsupported file type. Only PDF, JPEG, PNG, and WebP files are allowed." },
+        { status: 400 }
+      );
+    }
+
+    const maxBytes = contentType === "application/pdf" ? MAX_FILE_SIZE : MAX_IMAGE_SIZE;
+    if (file.size <= 0 || file.size > maxBytes) {
+      return NextResponse.json(
+        { error: "File size is invalid or exceeds the allowed limit." },
+        { status: 400 }
+      );
+    }
+
     const cleanFilename = file.name
       .replace(/[^\w.-]/g, "_")
       .replace(/\s+/g, "_")
-      .toLowerCase();
+      .replace(/^\.+/, "")
+      .toLowerCase()
+      .slice(0, 120) || "upload.bin";
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    const contentType = file.type || "application/pdf";
+
+    if (!validateUploadMagicBytes(buffer, contentType)) {
+      return NextResponse.json(
+        { error: "File contents do not match the declared file type." },
+        { status: 400 }
+      );
+    }
 
     // 1. Try Cloudflare R2 (Primary Storage - 100% Free, Zero Egress)
     try {
@@ -67,7 +104,7 @@ export async function POST(req: NextRequest) {
       // Route private blobs through local secure streaming proxy so reader gets 200 OK
       finalUrl = `/api/storage/file?url=${encodeURIComponent(blob.url)}`;
       finalKey = blob.pathname;
-    } catch (privErr) {
+    } catch {
       // If store happens to be public, try public fallback
       const blob = await put(`books/${cleanFilename}`, buffer, {
         access: "public",
@@ -87,13 +124,8 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("Storage upload API error:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Internal storage upload failed",
-      },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("POST /api/storage/upload", error, {
+      fallbackMessage: "Unable to upload file right now. Please try again.",
+    });
   }
 }

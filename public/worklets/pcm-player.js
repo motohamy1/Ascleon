@@ -43,8 +43,20 @@ class PcmPlayerProcessor extends AudioWorkletProcessor {
 
       if (data.command === "drain") {
         this.isDraining = true;
-        if (this.bufferedSamples > 0 && this.isBuffering) {
-          this.isBuffering = false;
+        this.isBuffering = false;
+        if (this.bufferedSamples === 0) {
+          this.isDraining = false;
+          this.isBuffering = true;
+          this.prebufferSamples = this.basePrebufferSamples;
+          if (this.isPlaying) {
+            this.isPlaying = false;
+            this.port.postMessage({
+              type: "playback_state",
+              playing: false,
+              rms: 0,
+              underruns: this.underrunCount,
+            });
+          }
         }
         return;
       }

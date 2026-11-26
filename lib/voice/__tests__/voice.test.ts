@@ -104,10 +104,16 @@ describe("POST /api/voice/token", () => {
     const callArg = mockCreateAuthToken.mock.calls[0][0] as {
       config: { liveConnectConstraints: { config: Record<string, unknown> } };
     };
-    const liveCfg = callArg.config.liveConnectConstraints.config;
+    const liveCfg = callArg.config.liveConnectConstraints.config as Record<string, unknown>;
     expect(liveCfg.realtimeInputConfig).toEqual({
       automaticActivityDetection: { disabled: true },
     });
+    const decls = (
+      (liveCfg.tools as Array<{ functionDeclarations?: Array<{ name: string }> }>)?.[0]
+        ?.functionDeclarations || []
+    ).map((d) => d.name);
+    expect(decls).toContain("get_current_study_page");
+    expect((callArg.config as Record<string, unknown>).uses).toBe(6);
   });
 });
 
@@ -185,5 +191,36 @@ describe("AudioWorklet DSP processors", () => {
     proc.process([], [[out3]]);
     expect(out3[100]).toBe(0);
     expect(states.some((s) => s.type === "playback_state" && s.playing === false)).toBe(true);
+  });
+
+  it("pcm-player settles playback_state to playing:false when drain arrives after an empty-queue underrun", () => {
+    const Player = loadWorkletClass("public/worklets/pcm-player.js");
+    const proc = new Player();
+    const states: Array<{ type: string; playing?: boolean; underruns?: number }> = [];
+    proc.port.postMessage = (d) =>
+      states.push(d as { type: string; playing?: boolean; underruns?: number });
+
+    // 2560 samples exceeds 2400 prebuffer and leaves 0 samples after 20 blocks
+    const chunk = new Int16Array(2560).fill(9000);
+    proc.port.onmessage?.({ data: { type: "audio", buffer: chunk.buffer } });
+
+    const out = new Float32Array(128);
+    for (let i = 0; i < 21; i++) {
+      proc.process([], [[out]]);
+    }
+
+    expect(states.some((s) => s.type === "playback_state" && s.playing === true)).toBe(true);
+
+    // Server turn completes while queue is empty and processor re-entered buffering mode on underrun
+    const prevStoppedCount = states.filter(
+      (s) => s.type === "playback_state" && s.playing === false
+    ).length;
+    proc.port.onmessage?.({ data: { command: "drain" } });
+    proc.process([], [[out]]);
+
+    const nextStoppedCount = states.filter(
+      (s) => s.type === "playback_state" && s.playing === false
+    ).length;
+    expect(nextStoppedCount).toBeGreaterThan(prevStoppedCount);
   });
 });

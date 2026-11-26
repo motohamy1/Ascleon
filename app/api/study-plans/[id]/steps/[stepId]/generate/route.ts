@@ -6,6 +6,7 @@ import { connectToDatabase } from "@/database/mongoose";
 import StudyPlan from "@/database/models/study-plan.model";
 import { generateStudyPlanStep } from "@/lib/study-plan/generator";
 import { computeReadinessScore, serializeStudyPlan } from "@/lib/study-plan/utils";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
 
 const GenerateStepSchema = z.object({
   force: z.boolean().optional().default(false),
@@ -90,10 +91,10 @@ export async function POST(
       plan: serializeStudyPlan(doc),
     });
   } catch (error) {
-    console.error("[POST /api/study-plans/[id]/steps/[stepId]/generate] error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to generate step content" },
-      { status: 500 }
+    return buildSafeErrorResponse(
+      "POST /api/study-plans/[id]/steps/[stepId]/generate",
+      error,
+      { fallbackMessage: "Failed to generate study step." }
     );
   }
 }

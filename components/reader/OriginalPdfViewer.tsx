@@ -686,6 +686,12 @@ const OriginalPdfViewer = forwardRef<OriginalPdfViewerHandle, OriginalPdfViewerP
       const ro = new ResizeObserver((entries) => {
         const entry = entries[0];
         if (!entry) return;
+        isInternalScrollRef.current = true;
+        if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+        scrollTimeoutRef.current = setTimeout(() => {
+          isInternalScrollRef.current = false;
+        }, 320);
+
         if (resizeTimer) clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
           const nextW = Math.max(0, entry.contentRect.width);
@@ -709,26 +715,25 @@ const OriginalPdfViewer = forwardRef<OriginalPdfViewerHandle, OriginalPdfViewerP
       };
     }, [loading, error]);
 
-    // 1b. Keep docPageSize synced to active page's intrinsic dimensions (> 8px threshold prevents jitter)
+    // 1b. Stabilize document baseline page dimensions once per loaded document
+    const docSizeInitializedForRef = useRef<unknown>(null);
     useEffect(() => {
-      if (!pdfDoc || !activeVisiblePage) return;
+      if (!pdfDoc) return;
+      if (docSizeInitializedForRef.current === pdfDoc) return;
+      docSizeInitializedForRef.current = pdfDoc;
       let cancelled = false;
       pdfDoc
-        .getPage(activeVisiblePage)
+        .getPage(1)
         .then((page: any) => {
           if (cancelled) return;
           const vp = page.getViewport({ scale: 1.0 });
-          setDocPageSize((prev) =>
-            Math.abs(prev.width - vp.width) > 8 || Math.abs(prev.height - vp.height) > 8
-              ? { width: vp.width, height: vp.height }
-              : prev
-          );
+          setDocPageSize({ width: vp.width, height: vp.height });
         })
         .catch(() => {});
       return () => {
         cancelled = true;
       };
-    }, [pdfDoc, activeVisiblePage]);
+    }, [pdfDoc]);
 
     // 2. Initialize and Load Document
     useEffect(() => {
@@ -1058,6 +1063,29 @@ const OriginalPdfViewer = forwardRef<OriginalPdfViewerHandle, OriginalPdfViewerP
       },
       [scrollOrientation]
     );
+
+    // Re-anchor scroll position to activeVisiblePage whenever computedScale shifts (zoom or split-pane resize)
+    const prevScaleAnchorRef = useRef<number>(computedScale);
+    useLayoutEffect(() => {
+      if (!pdfDoc || totalPages <= 0) {
+        prevScaleAnchorRef.current = computedScale;
+        return;
+      }
+      if (Math.abs(computedScale - prevScaleAnchorRef.current) > 0.001) {
+        prevScaleAnchorRef.current = computedScale;
+        if (scrollRafRef.current !== null) {
+          cancelAnimationFrame(scrollRafRef.current);
+          scrollRafRef.current = null;
+        }
+        if (pageNotifyTimerRef.current) {
+          clearTimeout(pageNotifyTimerRef.current);
+          pageNotifyTimerRef.current = null;
+        }
+        const targetPage = activeVisiblePageRef.current || 1;
+        isInternalScrollRef.current = true;
+        scrollToPageElement(targetPage, "auto");
+      }
+    }, [computedScale, pdfDoc, totalPages, scrollToPageElement]);
 
     const handleJumpToPage = useCallback(
       (newPage: number) => {

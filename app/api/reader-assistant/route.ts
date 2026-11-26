@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import * as agentHarness from "@/lib/ai/agent-harness";
 import { runStudyAgent } from "@/lib/ai/agent-harness";
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
@@ -9,8 +10,15 @@ import {
 import {
   buildBillingErrorResponse,
   consumeCredits,
+  refundCredits,
   requireAuthAndCredits,
 } from "@/lib/usage.server";
+import {
+  buildSafeErrorResponse,
+  classifyAiError,
+  logServerError,
+} from "@/lib/security/error-handler";
+import { sanitizePlainText, sanitizeRichText } from "@/lib/security/sanitize";
 import {
   isGenericTopicTitle,
   resolveActivePageTopic,
@@ -55,36 +63,65 @@ interface ReaderAssistantRequestBody {
   stream?: boolean;
 }
 
+const ReaderAssistantRequestSchema = z.object({
+  bookId: z.string().max(120).optional(),
+  bookTitle: z.string().max(240).optional(),
+  bookTopic: z.string().max(160).optional(),
+  bookReferences: z.array(z.unknown()).max(20).optional().default([]),
+  query: z.string().trim().min(1, "Query is required").max(4000),
+  currentSegmentIndex: z.number().int().min(0).max(10000).optional().default(0),
+  currentPageNumber: z.number().int().min(1).max(10000).optional(),
+  currentSegmentContent: z.string().max(50000).optional().default(""),
+  selectedText: z.string().max(20000).optional().default(""),
+  selectedImage: z.string().max(10_000_000).optional().default(""),
+  language: z.enum(["en", "ar", "mixed"]).optional().default("en"),
+  socraticMode: z.boolean().optional().default(false),
+  history: z.array(z.any()).max(40).optional().default([]),
+  studyScope: z.any().optional(),
+  topicMap: z.any().optional(),
+  stream: z.boolean().optional().default(false),
+});
+
 export async function POST(request: Request) {
   const authCheck = await requireAuthAndCredits(0);
   if (!authCheck.ok) return authCheck.response;
 
-  let body: ReaderAssistantRequestBody = {};
+  let rawBody: unknown = null;
   try {
-    body = (await request.json()) as ReaderAssistantRequestBody;
+    rawBody = await request.json();
   } catch {
-    body = {};
+    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 });
   }
+
+  const parsedBody = ReaderAssistantRequestSchema.safeParse(rawBody);
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      { error: parsedBody.error.issues[0]?.message || "Query is required" },
+      { status: 400 }
+    );
+  }
+
+  const body = parsedBody.data as ReaderAssistantRequestBody;
 
   const {
     bookId,
-    bookTitle,
-    bookTopic,
     bookReferences = [],
-    query,
     currentSegmentIndex = 0,
     currentPageNumber,
-    currentSegmentContent = "",
-    selectedText = "",
     selectedImage = "",
     language = "en",
     socraticMode = false,
     history = [],
     studyScope,
     topicMap,
-  } = body || {};
+  } = body;
+  const bookTitle = body.bookTitle ? sanitizePlainText(body.bookTitle, 240) : undefined;
+  const bookTopic = body.bookTopic ? sanitizePlainText(body.bookTopic, 160) : undefined;
+  const query = sanitizeRichText(body.query, 4000);
+  const currentSegmentContent = sanitizeRichText(body.currentSegmentContent, 30000);
+  const selectedText = sanitizeRichText(body.selectedText, 12000);
 
-  if (!query || typeof query !== "string" || !query.trim()) {
+  if (!query || !query.trim()) {
     return NextResponse.json(
       { error: "Query is required" },
       { status: 400 }
@@ -569,8 +606,23 @@ export async function POST(request: Request) {
             },
           });
         } catch (error) {
-          console.error("Reader assistant streaming error, falling back gracefully:", error);
-          sendEvent({ type: "done", payload: buildFallbackPayload() });
+          await refundCredits(authCheck.userId, dynamicCost.total).catch(() => {});
+          const classification = classifyAiError(error);
+          const errorId = logServerError("POST /api/reader-assistant:stream", error, {
+            bookId,
+            activePageNum,
+          });
+          sendEvent({
+            type: "error",
+            error: classification.isModelOverloaded
+              ? "Our AI model is currently experiencing high demand. No credits were charged — please try again in a moment."
+              : "Something went wrong while answering your question. No credits were charged.",
+            code: classification.isModelOverloaded ? "MODEL_OVERLOADED" : "INTERNAL_ERROR",
+            isModelOverloaded: classification.isModelOverloaded,
+            retryAfterSeconds: classification.retryAfterSeconds ?? 30,
+            creditsRefunded: true,
+            errorId,
+          });
         } finally {
           try {
             controller.close();
@@ -622,8 +674,12 @@ export async function POST(request: Request) {
       creditBreakdown: dynamicCost.summary,
     });
   } catch (error) {
-    console.error("Reader assistant agent error, falling back gracefully:", error);
-    return NextResponse.json(buildFallbackPayload(), { status: 200 });
+    await refundCredits(authCheck.userId, dynamicCost.total).catch(() => {});
+    return buildSafeErrorResponse("POST /api/reader-assistant", error, {
+      fallbackMessage: "Unable to process your question right now. No credits were charged.",
+      creditsRefunded: true,
+      meta: { bookId, activePageNum },
+    });
   }
 }
 

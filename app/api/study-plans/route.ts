@@ -7,6 +7,8 @@ import Book from "@/database/models/book.model";
 import StudyPlan from "@/database/models/study-plan.model";
 import { generateStudyPlanSkeleton } from "@/lib/study-plan/generator";
 import { computeReadinessScore, serializeStudyPlan } from "@/lib/study-plan/utils";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
+import { sanitizePlainText } from "@/lib/security/sanitize";
 
 const CreateStudyPlanSchema = z.object({
   bookId: z.string().min(1),
@@ -36,11 +38,9 @@ export async function GET() {
       plans: docs.map(serializeStudyPlan),
     });
   } catch (error) {
-    console.error("[GET /api/study-plans] error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load study plans" },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("GET /api/study-plans", error, {
+      fallbackMessage: "Failed to load study plans.",
+    });
   }
 }
 
@@ -51,17 +51,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const rawBody = await req.json();
+    const rawBody = await req.json().catch(() => null);
     const parsed = CreateStudyPlanSchema.safeParse(rawBody);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Invalid study plan parameters", details: parsed.error.flatten() },
+        { error: "Invalid study plan parameters." },
         { status: 400 }
       );
     }
 
-    const { bookId, title, examDate, targetGrade, confidenceLevel, topics, language } =
-      parsed.data;
+    const { bookId, examDate, confidenceLevel, language } = parsed.data;
+    const title = parsed.data.title ? sanitizePlainText(parsed.data.title, 140) : undefined;
+    const targetGrade = sanitizePlainText(parsed.data.targetGrade, 30) || "A";
+    const topics = parsed.data.topics.map((t) => sanitizePlainText(t, 100)).filter(Boolean);
 
     if (!mongoose.Types.ObjectId.isValid(bookId)) {
       return NextResponse.json({ error: "Invalid bookId" }, { status: 400 });
@@ -117,10 +119,8 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
-    console.error("[POST /api/study-plans] error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create study plan" },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("POST /api/study-plans", error, {
+      fallbackMessage: "Failed to create study plan.",
+    });
   }
 }

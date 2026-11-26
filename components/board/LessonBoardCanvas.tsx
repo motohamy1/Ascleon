@@ -441,9 +441,13 @@ export function LessonBoardCanvas({
                   opacity={contentOpacity}
                 />
 
-                {/* Stroke-Animated Clinical Icon */}
+                {/* Stroke-Animated Clinical Icon (Mirrored cleanly for RTL cards) */}
                 <g
-                  transform={`translate(${slot.rect.x + 24}, ${slot.rect.y + (isCompactLod ? 60 : 28)})`}
+                  transform={`translate(${
+                    isRtl
+                      ? slot.rect.x + slot.rect.width - (isCompactLod ? 64 : 60)
+                      : slot.rect.x + 24
+                  }, ${slot.rect.y + (isCompactLod ? 60 : 28)})`}
                 >
                   <BoardStrokeIcon
                     iconId={node.icon}
@@ -455,9 +459,9 @@ export function LessonBoardCanvas({
 
                 {/* Node Content + Clickable Page Chip */}
                 <foreignObject
-                  x={slot.rect.x + 74}
+                  x={isRtl ? slot.rect.x + 18 : slot.rect.x + 74}
                   y={slot.rect.y + 16}
-                  width={slot.rect.width - 94}
+                  width={Math.max(80, slot.rect.width - 96)}
                   height={slot.rect.height - 32}
                 >
                   <div

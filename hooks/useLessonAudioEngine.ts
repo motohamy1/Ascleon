@@ -3,6 +3,33 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LessonVoiceSectionTrack } from "@/types/lesson-board";
 
+let prewarmedAudioCtx: AudioContext | null = null;
+
+/**
+ * Call inside a synchronous user click/tap handler before async fetch/planning
+ * so Chrome/Safari unlock AudioContext autoplay permissions before the Living Board opens.
+ */
+export function warmLessonAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  if (!prewarmedAudioCtx || prewarmedAudioCtx.state === "closed") {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    if (AudioCtx) {
+      try {
+        prewarmedAudioCtx = new AudioCtx();
+      } catch {
+        prewarmedAudioCtx = null;
+      }
+    }
+  }
+  if (prewarmedAudioCtx && prewarmedAudioCtx.state === "suspended") {
+    prewarmedAudioCtx.resume().catch(() => {});
+  }
+  return prewarmedAudioCtx;
+}
+
 interface UseLessonAudioEngineOptions {
   sections: LessonVoiceSectionTrack[];
   playbackSpeed: number;
@@ -91,13 +118,18 @@ export function useLessonAudioEngine({
 
   const ensureContext = useCallback(() => {
     if (typeof window === "undefined") return null;
-    if (!ctxRef.current) {
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext;
-      if (AudioCtx) {
-        ctxRef.current = new AudioCtx();
+    if (!ctxRef.current || ctxRef.current.state === "closed") {
+      if (prewarmedAudioCtx && prewarmedAudioCtx.state !== "closed") {
+        ctxRef.current = prewarmedAudioCtx;
+        prewarmedAudioCtx = null;
+      } else {
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext })
+            .webkitAudioContext;
+        if (AudioCtx) {
+          ctxRef.current = new AudioCtx();
+        }
       }
     }
     if (ctxRef.current && ctxRef.current.state === "suspended") {
@@ -184,15 +216,23 @@ export function useLessonAudioEngine({
 
       stopCurrentSource();
 
-      // Path A: Decoded real WAV audio available and healthy
+      // Path A: Decoded real WAV audio available, healthy, and AudioContext is unlocked & running
       const expectedMs = getSectionDurationMs(sec);
       const hasHealthyBuffer = Boolean(
         sec.status === "ready" &&
           buf &&
           ctx &&
+          ctx.state === "running" &&
           !(buf.duration < 0.6 && expectedMs >= 2500)
       );
       if (hasHealthyBuffer && buf && ctx) {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("ascleon:audio-exclusive", {
+              detail: { source: "living-board" },
+            })
+          );
+        }
         const safeOffset = Math.max(0, Math.min(buf.duration - 0.05, startOffsetSec));
         const src = ctx.createBufferSource();
         src.buffer = buf;
@@ -260,10 +300,13 @@ export function useLessonAudioEngine({
     const url = sec.audioUrl;
     const buf = url ? buffersRef.current.get(url) : undefined;
     const expectedMs = getSectionDurationMs(sec);
+    const ctx = ctxRef.current;
     const hasHealthyBuffer = Boolean(
       sec.status === "ready" &&
         url &&
         buf &&
+        ctx &&
+        ctx.state === "running" &&
         !(buf.duration < 0.6 && expectedMs >= 2500)
     );
     if (
@@ -285,6 +328,24 @@ export function useLessonAudioEngine({
     decodedReadyCount,
     startSectionPlayback,
   ]);
+
+  // Coordinate exclusive audio so Live Voice & Living Board never talk over each other
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleExclusive = (e: Event) => {
+      const detail = (e as CustomEvent<{ source?: string }>).detail;
+      if (detail?.source === "live-voice" && isPlayingRef.current) {
+        stopCurrentSource();
+        isPlayingRef.current = false;
+        isVirtualClockRef.current = false;
+        setIsPlaying(false);
+        setIsVirtualClock(false);
+        setWantAutoPlay(false);
+      }
+    };
+    window.addEventListener("ascleon:audio-exclusive", handleExclusive);
+    return () => window.removeEventListener("ascleon:audio-exclusive", handleExclusive);
+  }, [stopCurrentSource]);
 
   // Keep live playbackRate updated without stopping playback
   useEffect(() => {
@@ -396,26 +457,65 @@ export function useLessonAudioEngine({
   }, [stopCurrentSource]);
 
   const togglePlay = useCallback(() => {
-    ensureContext();
+    const ctx = ensureContext();
+    if (
+      isPlayingRef.current &&
+      isVirtualClockRef.current &&
+      ctx?.state === "suspended"
+    ) {
+      // First click while suspended unlocks AudioContext and seamlessly promotes into real audio
+      ctx
+        .resume()
+        .then(() => {
+          const resumeSec = virtualElapsedMsRef.current / 1000;
+          startSectionPlayback(activeIndexRef.current, resumeSec);
+        })
+        .catch(() => {});
+      return;
+    }
     if (isPlayingRef.current) {
       pause();
       return;
     }
     setWantAutoPlay(true);
-    const started = startSectionPlayback(
-      activeIndexRef.current,
-      offsetAtStartSecRef.current
-    );
-    if (!started) {
-      // Fallback immediately to virtual clock if user pressed Play while audio is pending
-      activeIndexRef.current = activeSectionIndex;
-      virtualElapsedMsRef.current = Math.round(offsetAtStartSecRef.current * 1000);
-      virtualLastTickMsRef.current = performance.now();
-      isVirtualClockRef.current = true;
-      isPlayingRef.current = true;
-      setIsVirtualClock(true);
-      setIsPlaying(true);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("ascleon:audio-exclusive", {
+          detail: { source: "living-board" },
+        })
+      );
     }
+    const resumeAndStart = () => {
+      const started = startSectionPlayback(
+        activeIndexRef.current,
+        offsetAtStartSecRef.current
+      );
+      if (!started) {
+        activeIndexRef.current = activeSectionIndex;
+        virtualElapsedMsRef.current = Math.round(offsetAtStartSecRef.current * 1000);
+        virtualLastTickMsRef.current = performance.now();
+        isVirtualClockRef.current = true;
+        isPlayingRef.current = true;
+        setIsVirtualClock(true);
+        setIsPlaying(true);
+      }
+    };
+    if (ctx && ctx.state === "suspended") {
+      resumeAndStart();
+      ctx
+        .resume()
+        .then(() => {
+          if (isPlayingRef.current && isVirtualClockRef.current) {
+            startSectionPlayback(
+              activeIndexRef.current,
+              virtualElapsedMsRef.current / 1000
+            );
+          }
+        })
+        .catch(() => {});
+      return;
+    }
+    resumeAndStart();
   }, [ensureContext, pause, startSectionPlayback, activeSectionIndex]);
 
   const restart = useCallback(() => {

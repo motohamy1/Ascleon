@@ -38,7 +38,7 @@ import { layoutBoardOps } from "@/lib/board/ops-layout";
 import { resolveGuaranteedLabScene } from "@/lib/board/math-presets";
 import { computeBoardTimeline } from "@/lib/board/timeline";
 import { synthesizeChallengeFromSection } from "@/lib/board/validate";
-import { useLessonAudioEngine } from "@/hooks/useLessonAudioEngine";
+import { useLessonAudioEngine, warmLessonAudioContext } from "@/hooks/useLessonAudioEngine";
 import { WHITEBOARD_NARRATOR_VOICES } from "@/lib/whiteboard/voices";
 import { LessonBoardData } from "@/types/lesson-board";
 import { LessonBoardCanvas } from "./LessonBoardCanvas";
@@ -1080,6 +1080,7 @@ export function LessonBoardPlayer({
             <button
               type="button"
               onClick={() => {
+                warmLessonAudioContext();
                 if (isOverview) {
                   setIsOverview(false);
                   setMode("guided");

@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { connectToDatabase } from "@/database/mongoose";
 import StudyPlan from "@/database/models/study-plan.model";
 import { serializeStudyPlan } from "@/lib/study-plan/utils";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
 
 export async function GET(
   _req: NextRequest,
@@ -34,11 +35,9 @@ export async function GET(
       plan: serializeStudyPlan(doc),
     });
   } catch (error) {
-    console.error("[GET /api/study-plans/[id]] error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to fetch study plan" },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("GET /api/study-plans/[id]", error, {
+      fallbackMessage: "Failed to fetch study plan.",
+    });
   }
 }
 
@@ -69,10 +68,8 @@ export async function DELETE(
     await StudyPlan.deleteOne({ _id: id });
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("[DELETE /api/study-plans/[id]] error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to delete study plan" },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("DELETE /api/study-plans/[id]", error, {
+      fallbackMessage: "Failed to delete study plan.",
+    });
   }
 }

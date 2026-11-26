@@ -9,6 +9,7 @@ import {
 } from "@/lib/board/mapper";
 import { StudyLanguage } from "@/lib/language";
 import { isValidWhiteboardVoice } from "@/lib/whiteboard/voices";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
 
 export async function POST(
   req: NextRequest,
@@ -67,15 +68,8 @@ export async function POST(
       lesson: serializeLessonBoard(updated || doc),
     });
   } catch (error) {
-    console.error("[POST /api/whiteboard/lessons/[id]/voice] error:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to switch narrator voice",
-      },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("POST /api/whiteboard/lessons/[id]/voice", error, {
+      fallbackMessage: "Failed to switch narrator voice.",
+    });
   }
 }

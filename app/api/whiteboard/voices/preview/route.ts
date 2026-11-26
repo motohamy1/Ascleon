@@ -1,22 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { z } from "zod";
 import { list } from "@vercel/blob";
 import { callGeminiTtsAudio } from "@/lib/whiteboard/ai-client";
 import { uploadWhiteboardAsset } from "@/lib/whiteboard/blob";
 import { isValidWhiteboardVoice, WHITEBOARD_NARRATOR_VOICES } from "@/lib/whiteboard/voices";
 import { StudyLanguage } from "@/lib/language";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
 
 export const maxDuration = 30;
 
+const PreviewVoiceSchema = z.object({
+  voiceId: z.string().trim().min(1),
+  language: z.enum(["en", "ar", "mixed"]).optional().default("en"),
+});
+
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const voiceId = body?.voiceId as string | undefined;
-    const language = (body?.language || "en") as StudyLanguage;
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    if (!isValidWhiteboardVoice(voiceId)) {
+    const rawBody = await req.json().catch(() => ({}));
+    const parsed = PreviewVoiceSchema.safeParse(rawBody);
+    if (!parsed.success || !isValidWhiteboardVoice(parsed.data.voiceId)) {
       return NextResponse.json({ error: "Unknown narrator voice" }, { status: 400 });
     }
 
+    const voiceId = parsed.data.voiceId;
+    const language = parsed.data.language as StudyLanguage;
     const voiceMeta = WHITEBOARD_NARRATOR_VOICES.find((v) => v.id === voiceId)!;
     const langBucket = language === "ar" || language === "mixed" ? "ar" : "en";
     const pathname = `whiteboard/voice-previews/v2-${voiceId}-${langBucket}.wav`;
@@ -61,10 +74,8 @@ export async function POST(req: NextRequest) {
       cached: false,
     });
   } catch (error) {
-    console.error("[POST /api/whiteboard/voices/preview] error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Preview synthesis failed" },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("POST /api/whiteboard/voices/preview", error, {
+      fallbackMessage: "Voice preview is temporarily unavailable.",
+    });
   }
 }

@@ -82,6 +82,8 @@ export function sanitizeStudyScope(
   };
 }
 
+const MAX_COHESIVE_TOPIC_SPAN = 12;
+
 export function sanitizeTopicCandidates(topics: unknown): TopicCandidate[] {
   if (!Array.isArray(topics)) return [];
   const seen = new Set<string>();
@@ -99,19 +101,46 @@ export function sanitizeTopicCandidates(topics: unknown): TopicCandidate[] {
 
     const startPage = Math.min(p1, p2);
     const endPage = Math.max(p1, p2);
-    const dedupeKey = `${title.toLowerCase()}|${startPage}|${endPage}`;
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
+    const baseKeyConcepts = Array.isArray(raw.keyConcepts)
+      ? raw.keyConcepts.filter((k): k is string => typeof k === "string")
+      : undefined;
+    const span = endPage - startPage + 1;
 
-    valid.push({
-      id: typeof raw.id === "string" ? raw.id : undefined,
-      title,
-      startPage,
-      endPage,
-      keyConcepts: Array.isArray(raw.keyConcepts)
-        ? raw.keyConcepts.filter((k): k is string => typeof k === "string")
-        : undefined,
-    });
+    if (span <= MAX_COHESIVE_TOPIC_SPAN) {
+      const dedupeKey = `${title.toLowerCase()}|${startPage}|${endPage}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+
+      valid.push({
+        id: typeof raw.id === "string" ? raw.id : undefined,
+        title,
+        startPage,
+        endPage,
+        keyConcepts: baseKeyConcepts,
+      });
+    } else {
+      // Subdivide oversized multi-chapter buckets into focused study windows
+      const totalParts = Math.ceil(span / MAX_COHESIVE_TOPIC_SPAN);
+      for (let partIdx = 0; partIdx < totalParts; partIdx++) {
+        const subStart = startPage + partIdx * MAX_COHESIVE_TOPIC_SPAN;
+        const subEnd = Math.min(endPage, subStart + MAX_COHESIVE_TOPIC_SPAN - 1);
+        const subTitle =
+          totalParts > 1 ? `${title} (Part ${partIdx + 1})` : title;
+        const dedupeKey = `${subTitle.toLowerCase()}|${subStart}|${subEnd}`;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+        valid.push({
+          id:
+            typeof raw.id === "string"
+              ? `${raw.id}-p${partIdx + 1}`
+              : undefined,
+          title: subTitle,
+          startPage: subStart,
+          endPage: subEnd,
+          keyConcepts: baseKeyConcepts,
+        });
+      }
+    }
   }
 
   return valid;

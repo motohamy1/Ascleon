@@ -19,7 +19,9 @@ import {
   calculateDynamicCreditCost,
   getScopePageSpan,
 } from "@/lib/subscription-constants";
-import { buildBillingErrorResponse, consumeCredits } from "@/lib/usage.server";
+import { buildBillingErrorResponse, consumeCredits, refundCredits } from "@/lib/usage.server";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
+import { sanitizePlainText, sanitizeRichText } from "@/lib/security/sanitize";
 
 export const maxDuration = 60;
 
@@ -42,6 +44,9 @@ const CreateLessonRequestSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  let chargedUserId: string | null = null;
+  let chargedCredits = 0;
+
   try {
     const { userId } = await auth();
     if (!userId) {
@@ -50,28 +55,25 @@ export async function POST(req: NextRequest) {
         { status: 401 }
       );
     }
-    const rawBody = await req.json();
+    const rawBody = await req.json().catch(() => null);
     const parsed = CreateLessonRequestSchema.safeParse(rawBody);
     if (!parsed.success) {
       return NextResponse.json(
-        {
-          error: "Invalid whiteboard lesson request parameters",
-          details: parsed.error.flatten(),
-        },
+        { error: "Invalid whiteboard lesson request parameters" },
         { status: 400 }
       );
     }
 
     const {
       bookId,
-      bookTitle,
       language,
       pacing,
       voiceId,
       forceRefresh,
-      fallbackPageText,
       scope,
     } = parsed.data;
+    const bookTitle = sanitizePlainText(parsed.data.bookTitle, 240) || "Study Document";
+    const fallbackPageText = sanitizeRichText(parsed.data.fallbackPageText, 25000);
 
     const safeVoiceId = isValidWhiteboardVoice(voiceId)
       ? voiceId
@@ -141,6 +143,8 @@ export async function POST(req: NextRequest) {
     if (!creditCheck.allowed) {
       return buildBillingErrorResponse(creditCheck, dynamicCost.total);
     }
+    chargedUserId = userId;
+    chargedCredits = dynamicCost.total;
 
     const outline = await generateLessonOutline({
       source: resolvedSource,
@@ -195,15 +199,12 @@ export async function POST(req: NextRequest) {
       lesson: serializeLessonBoard(doc || {}),
     });
   } catch (error) {
-    console.error("[POST /api/whiteboard/lessons] error:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to plan whiteboard lesson",
-      },
-      { status: 500 }
-    );
+    if (chargedUserId && chargedCredits > 0) {
+      await refundCredits(chargedUserId, chargedCredits).catch(() => {});
+    }
+    return buildSafeErrorResponse("POST /api/whiteboard/lessons", error, {
+      fallbackMessage: "Failed to plan whiteboard lesson.",
+      creditsRefunded: chargedCredits > 0,
+    });
   }
 }

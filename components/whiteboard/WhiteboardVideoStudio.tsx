@@ -31,10 +31,14 @@ import { toast } from "sonner";
 import { LessonBoardPlayer } from "@/components/board/LessonBoardPlayer";
 import { WhiteboardPlayer } from "./WhiteboardPlayer";
 import { cn } from "@/lib/utils";
+import { warmLessonAudioContext } from "@/hooks/useLessonAudioEngine";
+import { sanitizeTopicCandidates } from "@/lib/ai/rag/topic-resolution";
 import {
   calculateDynamicCreditCost,
   getScopePageSpan,
 } from "@/lib/subscription-constants";
+import { parseApiError, type ParsedServiceError } from "@/lib/api-error-client";
+import { ServiceStatusBanner } from "@/components/ui/ServiceStatusBanner";
 
 interface WhiteboardVideoStudioProps {
   book: IBook;
@@ -55,10 +59,12 @@ const VOICE_PREF_KEY = "ascleon_whiteboard_voice_id";
 const USE_LESSON_BOARD_V2 =
   process.env.NEXT_PUBLIC_WHITEBOARD_V2 !== "false";
 
-class BillingLimitError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "BillingLimitError";
+class ParsedApiError extends Error {
+  parsed: ParsedServiceError;
+  constructor(parsed: ParsedServiceError) {
+    super(parsed.message);
+    this.name = "ParsedApiError";
+    this.parsed = parsed;
   }
 }
 
@@ -139,7 +145,14 @@ export function WhiteboardVideoStudio({
     const bp = book.blueprint as
       | { topicMap?: { topics?: BlueprintTopicItem[] } }
       | undefined;
-    return bp?.topicMap?.topics || [];
+    const raw = bp?.topicMap?.topics || [];
+    const sanitized = sanitizeTopicCandidates(raw);
+    return sanitized.map((t, idx) => ({
+      id: t.id || `topic-${idx + 1}`,
+      title: t.title,
+      startPage: t.startPage,
+      endPage: t.endPage,
+    }));
   }, [book.blueprint]);
 
   const matchedTopic = useMemo(() => {
@@ -156,9 +169,7 @@ export function WhiteboardVideoStudio({
   );
 
   const [scopeType, setScopeType] = useState<WhiteboardScopeType>(() =>
-    selectedText
-      ? "selection"
-      : studyScope?.type || (matchedTopic ? "topic" : "page")
+    selectedText ? "selection" : studyScope?.type || "page"
   );
   const [selectedTopicId, setSelectedTopicId] = useState<string>("");
   const [rangeStart, setRangeStart] = useState<number>(
@@ -166,6 +177,33 @@ export function WhiteboardVideoStudio({
   );
   const [rangeEnd, setRangeEnd] = useState<number>(
     studyScope?.endPage || Math.min(totalBookPages, currentPageNumber + 2)
+  );
+  const [rangeStartInput, setRangeStartInput] = useState<string>(
+    String(studyScope?.startPage || currentPageNumber)
+  );
+  const [rangeEndInput, setRangeEndInput] = useState<string>(
+    String(studyScope?.endPage || Math.min(totalBookPages, currentPageNumber + 2))
+  );
+
+  const commitRangeDraft = useCallback(
+    (startText = rangeStartInput, endText = rangeEndInput) => {
+      const parsedA = parseInt(startText.trim(), 10);
+      const parsedB = parseInt(endText.trim(), 10);
+      const safeA = Number.isFinite(parsedA)
+        ? Math.max(1, Math.min(totalBookPages, parsedA))
+        : currentPageNumber;
+      const safeB = Number.isFinite(parsedB)
+        ? Math.max(1, Math.min(totalBookPages, parsedB))
+        : safeA;
+      const validStart = Math.min(safeA, safeB);
+      const validEnd = Math.max(safeA, safeB);
+      setRangeStart(validStart);
+      setRangeEnd(validEnd);
+      setRangeStartInput(String(validStart));
+      setRangeEndInput(String(validEnd));
+      return { validStart, validEnd };
+    },
+    [rangeStartInput, rangeEndInput, totalBookPages, currentPageNumber]
   );
   const [pacing, setPacing] = useState<WhiteboardPacing>("auto");
   const [selectedVoice, setSelectedVoice] = useState<string>(() => {
@@ -187,8 +225,7 @@ export function WhiteboardVideoStudio({
   const [isGeneratingMore, setIsGeneratingMore] = useState(false);
   const [isSwitchingVoice, setIsSwitchingVoice] = useState(false);
   const [isCinema, setIsCinema] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [isBillingLimitError, setIsBillingLimitError] = useState(false);
+  const [serviceError, setServiceError] = useState<ParsedServiceError | null>(null);
   const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(
     null
   );
@@ -323,6 +360,7 @@ export function WhiteboardVideoStudio({
 
   const handlePreviewVoice = useCallback(
     async (voiceId: string) => {
+      setServiceError(null);
       setPreviewingVoiceId(voiceId);
       try {
         previewAudioRef.current?.pause();
@@ -331,18 +369,22 @@ export function WhiteboardVideoStudio({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ voiceId, language: studyLanguage }),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.audioUrl) {
-          throw new Error(data.error || "Voice preview unavailable");
+          setServiceError(parseApiError(res, data));
+          setPreviewingVoiceId(null);
+          return;
         }
         const audio = new Audio(data.audioUrl);
         previewAudioRef.current = audio;
         audio.onended = () => setPreviewingVoiceId(null);
         await audio.play();
-      } catch (err) {
-        setErrorMsg(
-          err instanceof Error ? err.message : "Failed to play voice preview"
-        );
+      } catch {
+        setServiceError({
+          kind: "generic",
+          title: "Voice Preview Unavailable",
+          message: "Could not play the voice preview right now. Please try again.",
+        });
         setPreviewingVoiceId(null);
       }
     },
@@ -369,16 +411,9 @@ export function WhiteboardVideoStudio({
           body: JSON.stringify({ voiceId, forceAudio }),
         }
       );
-      const data = await res.json();
-      if (res.status === 402 || data?.isBillingError) {
-        throw new BillingLimitError(
-          data?.error || "Monthly AI credit limit reached."
-        );
-      }
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.lesson) {
-        throw new Error(
-          data.error || `Failed recording section ${sectionIndex + 1}`
-        );
+        throw new ParsedApiError(parseApiError(res, data));
       }
       const nextLesson = data.lesson as LessonBoardData;
       setLesson(nextLesson);
@@ -416,6 +451,7 @@ export function WhiteboardVideoStudio({
       }
 
       setIsGeneratingMore(true);
+      setIsConfiguring(false);
       let hitBillingLimit = false;
 
       // Section 0 runs first to lock the single pinned TTS model for the whole lesson.
@@ -431,11 +467,10 @@ export function WhiteboardVideoStudio({
           );
           currentLesson = res0.lesson;
         } catch (err) {
-          if (err instanceof BillingLimitError) {
+          if (err instanceof ParsedApiError && err.parsed.kind === "credits") {
             hitBillingLimit = true;
-            setIsBillingLimitError(true);
-            setErrorMsg(err.message);
-            toast.error(err.message, {
+            setServiceError(err.parsed);
+            toast.error(err.parsed.message, {
               action: {
                 label: "Upgrade Plan",
                 onClick: () => window.location.assign("/subscriptions?reason=limit"),
@@ -479,11 +514,10 @@ export function WhiteboardVideoStudio({
               break;
             }
           } catch (err) {
-            if (err instanceof BillingLimitError) {
+            if (err instanceof ParsedApiError && err.parsed.kind === "credits") {
               hitBillingLimit = true;
-              setIsBillingLimitError(true);
-              setErrorMsg(err.message);
-              toast.error(err.message, {
+              setServiceError(err.parsed);
+              toast.error(err.parsed.message, {
                 action: {
                   label: "Upgrade Plan",
                   onClick: () => window.location.assign("/subscriptions?reason=limit"),
@@ -516,8 +550,7 @@ export function WhiteboardVideoStudio({
       const controller = new AbortController();
       generationAbortRef.current = controller;
 
-      setErrorMsg(null);
-      setIsBillingLimitError(false);
+      setServiceError(null);
       setIsPlanning(true);
       try {
         localStorage.setItem(VOICE_PREF_KEY, selectedVoice);
@@ -558,14 +591,9 @@ export function WhiteboardVideoStudio({
         });
         clearTimeout(planTimeoutId);
 
-        const data = await res.json();
-        if (res.status === 402 || data?.isBillingError) {
-          throw new BillingLimitError(
-            data?.error || "Monthly AI credit limit reached."
-          );
-        }
+        const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.lesson) {
-          throw new Error(data.error || "Failed to plan whiteboard lesson");
+          throw new ParsedApiError(parseApiError(res, data));
         }
 
         const plannedLesson = data.lesson as LessonBoardData;
@@ -582,16 +610,22 @@ export function WhiteboardVideoStudio({
         if (controller.signal.aborted && !timedOut) return;
         setIsPlanning(false);
         setIsGeneratingMore(false);
-        if (err instanceof BillingLimitError) {
-          setIsBillingLimitError(true);
+        if (err instanceof ParsedApiError) {
+          setServiceError(err.parsed);
+        } else if (timedOut) {
+          setServiceError({
+            kind: "overloaded",
+            title: "AI Model Temporarily Busy",
+            message: "Whiteboard generation timed out on a busy network. Please tap Try Again.",
+            retryAfterSeconds: 20,
+          });
+        } else {
+          setServiceError({
+            kind: "generic",
+            title: "Generation Interrupted",
+            message: "Could not generate whiteboard lesson right now. Please try again.",
+          });
         }
-        setErrorMsg(
-          timedOut
-            ? "Whiteboard generation timed out on slow network. Please tap Retry."
-            : err instanceof Error
-              ? err.message
-              : "Could not generate whiteboard lesson."
-        );
       }
     },
     [
@@ -621,8 +655,14 @@ export function WhiteboardVideoStudio({
           true
         );
       } catch (err) {
-        setErrorMsg(
-          err instanceof Error ? err.message : "Failed to retry section audio"
+        setServiceError(
+          err instanceof ParsedApiError
+            ? err.parsed
+            : {
+                kind: "generic",
+                title: "Audio Retry Failed",
+                message: "Could not retry section audio right now. Please try again.",
+              }
         );
       }
     },
@@ -649,19 +689,23 @@ export function WhiteboardVideoStudio({
           signal: controller.signal,
           body: JSON.stringify({ voiceId: nextVoiceId }),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.lesson) {
-          throw new Error(data.error || "Failed to switch voice");
+          throw new ParsedApiError(parseApiError(res, data));
         }
         const switched = data.lesson as LessonBoardData;
         setLesson(switched);
         await runLessonAudioQueue(switched, nextVoiceId, controller.signal);
       } catch (err) {
         if (!controller.signal.aborted) {
-          setErrorMsg(
-            err instanceof Error
-              ? err.message
-              : "Failed to switch narrator voice"
+          setServiceError(
+            err instanceof ParsedApiError
+              ? err.parsed
+              : {
+                  kind: "generic",
+                  title: "Voice Switch Failed",
+                  message: "Could not switch narrator voice right now. Please try again.",
+                }
           );
         }
       } finally {
@@ -697,16 +741,9 @@ export function WhiteboardVideoStudio({
           }),
         }
       );
-      const data = await res.json();
-      if (res.status === 402 || data?.isBillingError) {
-        throw new BillingLimitError(
-          data?.error || "Monthly AI credit limit reached."
-        );
-      }
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.video) {
-        throw new Error(
-          data.error || `Failed generating scene ${beatIndex + 1}`
-        );
+        throw new ParsedApiError(parseApiError(res, data));
       }
       setVideo(data.video as WhiteboardVideoData);
       return data.video as WhiteboardVideoData;
@@ -758,10 +795,9 @@ export function WhiteboardVideoStudio({
           try {
             await renderBeat(initialVideo.id, nextIdx, voiceId, signal);
           } catch (err) {
-            if (err instanceof BillingLimitError) {
+            if (err instanceof ParsedApiError && err.parsed.kind === "credits") {
               hitBillingLimit = true;
-              setIsBillingLimitError(true);
-              setErrorMsg(err.message);
+              setServiceError(err.parsed);
               break;
             }
             if (!signal.aborted) {
@@ -793,8 +829,7 @@ export function WhiteboardVideoStudio({
       const controller = new AbortController();
       generationAbortRef.current = controller;
 
-      setErrorMsg(null);
-      setIsBillingLimitError(false);
+      setServiceError(null);
       setIsPlanning(true);
       try {
         localStorage.setItem(VOICE_PREF_KEY, selectedVoice);
@@ -828,14 +863,9 @@ export function WhiteboardVideoStudio({
           }),
         });
 
-        const data = await res.json();
-        if (res.status === 402 || data?.isBillingError) {
-          throw new BillingLimitError(
-            data?.error || "Monthly AI credit limit reached."
-          );
-        }
+        const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.video) {
-          throw new Error(data.error || "Failed to plan whiteboard video");
+          throw new ParsedApiError(parseApiError(res, data));
         }
 
         const plannedVideo = data.video as WhiteboardVideoData;
@@ -847,13 +877,14 @@ export function WhiteboardVideoStudio({
         if (controller.signal.aborted) return;
         setIsPlanning(false);
         setIsGeneratingMore(false);
-        if (err instanceof BillingLimitError) {
-          setIsBillingLimitError(true);
-        }
-        setErrorMsg(
-          err instanceof Error
-            ? err.message
-            : "Could not generate whiteboard video."
+        setServiceError(
+          err instanceof ParsedApiError
+            ? err.parsed
+            : {
+                kind: "generic",
+                title: "Generation Interrupted",
+                message: "Could not generate whiteboard video right now. Please try again.",
+              }
         );
       }
     },
@@ -890,8 +921,14 @@ export function WhiteboardVideoStudio({
           }
         );
       } catch (err) {
-        setErrorMsg(
-          err instanceof Error ? err.message : "Failed to retry scene"
+        setServiceError(
+          err instanceof ParsedApiError
+            ? err.parsed
+            : {
+                kind: "generic",
+                title: "Scene Retry Failed",
+                message: "Could not retry this scene right now. Please try again.",
+              }
         );
       }
     },
@@ -918,19 +955,23 @@ export function WhiteboardVideoStudio({
           signal: controller.signal,
           body: JSON.stringify({ voiceId: nextVoiceId }),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.video) {
-          throw new Error(data.error || "Failed to switch voice");
+          throw new ParsedApiError(parseApiError(res, data));
         }
         const switchedVideo = data.video as WhiteboardVideoData;
         setVideo(switchedVideo);
         await runBeatQueue(switchedVideo, nextVoiceId, controller.signal);
       } catch (err) {
         if (!controller.signal.aborted) {
-          setErrorMsg(
-            err instanceof Error
-              ? err.message
-              : "Failed to switch narrator voice"
+          setServiceError(
+            err instanceof ParsedApiError
+              ? err.parsed
+              : {
+                  kind: "generic",
+                  title: "Voice Switch Failed",
+                  message: "Could not switch narrator voice right now. Please try again.",
+                }
           );
         }
       } finally {
@@ -1137,33 +1178,55 @@ export function WhiteboardVideoStudio({
             <div className="flex items-center gap-2 rounded-[12px] border border-[var(--study-border)] bg-[var(--study-surface-muted)] px-3 py-2 text-xs text-[var(--study-text)]">
               <span className="font-mono text-[10px] font-bold">From Page</span>
               <input
-                type="number"
-                min={1}
-                max={totalBookPages}
-                value={rangeStart}
-                onChange={(e) =>
-                  setRangeStart(Math.max(1, Number(e.target.value) || 1))
-                }
-                className="w-16 rounded border border-[var(--study-border-strong)] bg-[var(--study-surface-solid)] text-[var(--study-text)] px-2 py-0.5 font-mono text-xs font-bold"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={rangeStartInput}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (/^\d*$/.test(val)) {
+                    setRangeStartInput(val);
+                    const parsed = parseInt(val, 10);
+                    if (Number.isFinite(parsed) && parsed >= 1) {
+                      setRangeStart(Math.min(totalBookPages, parsed));
+                    }
+                  }
+                }}
+                onBlur={() => commitRangeDraft()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitRangeDraft();
+                  }
+                }}
+                placeholder="1"
+                className="w-16 rounded border border-[var(--study-border-strong)] bg-[var(--study-surface-solid)] text-[var(--study-text)] px-2 py-0.5 text-center font-mono text-xs font-bold"
               />
               <span className="font-mono text-[10px] font-bold">to</span>
               <input
-                type="number"
-                min={rangeStart}
-                max={totalBookPages}
-                value={rangeEnd}
-                onChange={(e) =>
-                  setRangeEnd(
-                    Math.max(
-                      rangeStart,
-                      Math.min(
-                        totalBookPages,
-                        Number(e.target.value) || rangeStart
-                      )
-                    )
-                  )
-                }
-                className="w-16 rounded border border-[var(--study-border-strong)] bg-[var(--study-surface-solid)] text-[var(--study-text)] px-2 py-0.5 font-mono text-xs font-bold"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={rangeEndInput}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (/^\d*$/.test(val)) {
+                    setRangeEndInput(val);
+                    const parsed = parseInt(val, 10);
+                    if (Number.isFinite(parsed) && parsed >= 1) {
+                      setRangeEnd(Math.min(totalBookPages, parsed));
+                    }
+                  }
+                }}
+                onBlur={() => commitRangeDraft()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitRangeDraft();
+                  }
+                }}
+                placeholder={String(totalBookPages)}
+                className="w-16 rounded border border-[var(--study-border-strong)] bg-[var(--study-surface-solid)] text-[var(--study-text)] px-2 py-0.5 text-center font-mono text-xs font-bold"
               />
             </div>
           )}
@@ -1177,7 +1240,12 @@ export function WhiteboardVideoStudio({
                 );
                 if (chosen) {
                   setSelectedTopicId(chosen.id);
-                  onNavigateToPage?.(chosen.startPage);
+                  if (
+                    currentPageNumber < chosen.startPage ||
+                    currentPageNumber > chosen.endPage
+                  ) {
+                    onNavigateToPage?.(chosen.startPage);
+                  }
                 }
               }}
               className="w-full cursor-pointer rounded-[12px] border border-[var(--study-border)] bg-[var(--study-surface-solid)] text-[var(--study-text)] px-3 py-1.5 font-sans text-xs font-bold"
@@ -1256,27 +1324,12 @@ export function WhiteboardVideoStudio({
         </div>
 
         {/* Status / Error Banner */}
-        {errorMsg && (
-          <div className="flex flex-wrap items-center gap-2 rounded-[14px] border-2 border-[var(--study-red-border)] bg-[var(--study-red-bg)] px-3 py-2 text-xs font-bold text-[var(--study-red-text)]">
-            <AlertCircle className="size-4 shrink-0" />
-            <span className="flex-1">{errorMsg}</span>
-            {isBillingLimitError ? (
-              <Link
-                href="/subscriptions?reason=limit"
-                className="rounded-full border border-[var(--study-panel-border)] bg-[color:var(--orange)] px-3 py-1 font-mono text-[10px] font-black uppercase text-[#0f0e10]"
-              >
-                Upgrade Plan
-              </Link>
-            ) : (
-              <button
-                type="button"
-                onClick={() => startGeneration(false)}
-                className="cursor-pointer rounded-full border border-[var(--study-red-border)] bg-[var(--study-surface-solid)] text-[var(--study-text)] px-2.5 py-0.5 font-mono text-[10px] font-black uppercase"
-              >
-                Retry
-              </button>
-            )}
-          </div>
+        {serviceError && (
+          <ServiceStatusBanner
+            error={serviceError}
+            onRetry={() => startGeneration(false)}
+            onDismiss={() => setServiceError(null)}
+          />
         )}
 
         {/* Planning / Recording Progress */}
@@ -1307,7 +1360,11 @@ export function WhiteboardVideoStudio({
           <button
             type="button"
             disabled={isPlanning || isGeneratingMore}
-            onClick={() => startGeneration(false)}
+            onClick={() => {
+              warmLessonAudioContext();
+              if (scopeType === "range") commitRangeDraft();
+              startGeneration(false);
+            }}
             className="flex-1 cursor-pointer rounded-full border-2 border-[var(--study-panel-border)] bg-[color:var(--orange)] px-5 py-2.5 font-sans text-xs font-black uppercase text-[#0f0e10] shadow-[var(--study-active-shadow)] hover:scale-[1.01] transition-transform flex items-center justify-center gap-2 disabled:opacity-60"
           >
             {isPlanning ? (

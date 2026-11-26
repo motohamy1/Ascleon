@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { GoogleGenAI } from "@google/genai";
 import { buildLanguageDirective, StudyLanguage } from "@/lib/language";
 import {
@@ -8,6 +9,8 @@ import {
   orderModelsByHealth,
   PRIMARY_GEMINI_MODEL,
 } from "@/lib/ai/model-cooldown";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
+import { sanitizePlainText, sanitizeRichText } from "@/lib/security/sanitize";
 
 export const maxDuration = 60;
 import { getBookSegmentsByRange } from "@/lib/actions/book.actions";
@@ -20,25 +23,50 @@ import {
 import {
   buildBillingErrorResponse,
   consumeCredits,
+  refundCredits,
   requireAuthAndCredits,
 } from "@/lib/usage.server";
 
+const SummaryRequestSchema = z.object({
+  bookId: z.string().max(120).optional(),
+  bookTitle: z.string().max(240).optional().default("Study Material"),
+  pageNumber: z.number().int().min(1).max(10000).optional().default(1),
+  pageText: z.string().max(50000).optional().default(""),
+  selectedText: z.string().max(20000).optional().default(""),
+  language: z.enum(["en", "ar", "mixed"]).optional().default("en"),
+  studyScope: z
+    .object({
+      type: z.enum(["page", "range", "topic"]).default("page"),
+      startPage: z.number().int().min(1).max(10000).default(1),
+      endPage: z.number().int().min(1).max(10000).default(1),
+      topicTitle: z.string().max(200).optional(),
+      topicId: z.string().max(100).optional(),
+    })
+    .optional(),
+  forceRefresh: z.boolean().optional().default(false),
+});
+
 export async function POST(req: NextRequest) {
+  let chargedUserId: string | null = null;
+  let chargedCredits = 0;
+
   try {
     const authCheck = await requireAuthAndCredits(0);
     if (!authCheck.ok) return authCheck.response;
 
-    const body = await req.json();
-    const {
-      bookId,
-      bookTitle = "Study Material",
-      pageNumber = 1,
-      pageText = "",
-      selectedText = "",
-      language = "en",
-      studyScope,
-      forceRefresh = false,
-    } = body;
+    const rawBody = await req.json().catch(() => null);
+    const parsedBody = SummaryRequestSchema.safeParse(rawBody);
+    if (!parsedBody.success) {
+      return NextResponse.json(
+        { error: "Invalid summary request parameters." },
+        { status: 400 }
+      );
+    }
+
+    const { bookId, pageNumber, language, studyScope, forceRefresh } = parsedBody.data;
+    const bookTitle = sanitizePlainText(parsedBody.data.bookTitle, 240) || "Study Material";
+    const pageText = sanitizeRichText(parsedBody.data.pageText, 25000);
+    const selectedText = sanitizeRichText(parsedBody.data.selectedText, 12000);
 
     const rawLiveText = (selectedText || pageText || "").trim();
     const hasRealLiveText = Boolean(rawLiveText) && !isPlaceholderPageText(rawLiveText);
@@ -48,7 +76,7 @@ export async function POST(req: NextRequest) {
     const isMultiPageScope =
       Boolean(studyScope && (studyScope.type === "range" || studyScope.type === "topic"));
 
-    if (bookId && isMultiPageScope) {
+    if (bookId && isMultiPageScope && studyScope) {
       try {
         const ragRes = await retrieveFromBookRAG({
           bookId,
@@ -114,11 +142,17 @@ export async function POST(req: NextRequest) {
     if (!creditCheck.allowed) {
       return buildBillingErrorResponse(creditCheck, dynamicCost.total);
     }
+    chargedUserId = authCheck.userId;
+    chargedCredits = dynamicCost.total;
 
     const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
+    let lastProviderError: unknown = null;
+    if (apiKey && apiKey !== "your_gemini_api_key_here") {
       try {
-        const ai = new GoogleGenAI({ apiKey });
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: { retryOptions: { attempts: 1 } },
+        });
         const prompt = `You are Ascleon's Deep Study Synthesizer.
 Generate an executive, high-yield summary for ${scopeLabel} of "${bookTitle}".
 
@@ -195,6 +229,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
               });
             }
           } catch (modelErr) {
+            lastProviderError = modelErr;
             markModelCooldownFromError(`gemini:${candidateModel}`, modelErr);
             console.warn(`[Summary] ${candidateModel} failed:`, modelErr);
           } finally {
@@ -202,46 +237,31 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
           }
         }
       } catch (aiErr) {
-        console.warn("AI Summary generation warning, using fallback:", aiErr);
+        lastProviderError = aiErr;
+        console.warn("AI Summary generation warning:", aiErr);
       }
     }
 
-    // Dynamic Fallback
-    const sentences = focalText.split(/(?<=[.!?])\s+/).filter((s: string) => s.length > 20);
-    const fallback = {
-      executiveSummary: sentences.slice(0, 2).join(" ") || `Core foundational concepts for Page ${pageNumber} of ${bookTitle}.`,
-      keyTakeaways: [
-        sentences[0] || `Foundational invariant on Page ${pageNumber}`,
-        sentences[1] || "Direct relationship between physical constraints and observable behavior",
-        sentences[2] || "Critical boundary condition for exams and practical application",
-      ],
-      proTips: [
-        "Focus on the primary mechanism before analyzing secondary variations.",
-        "Verify your understanding against the authoritative canonical standard.",
-      ],
-      mnemonics: [
-        {
-          title: "First Principles Anchor",
-          mnemonic: "F - P - R",
-          expansion: "Foundation, Process, Result",
-          notes: "Trace any complex presentation back to its foundational process.",
-        },
-      ],
-    };
+    if (chargedUserId && chargedCredits > 0) {
+      await refundCredits(chargedUserId, chargedCredits).catch(() => {});
+      chargedCredits = 0;
+    }
 
-    return NextResponse.json({
-      success: true,
-      summary: fallback,
-      source: "fallback",
-      creditsCharged: dynamicCost.total,
-      creditsRemaining: creditCheck.remaining,
-      creditBreakdown: dynamicCost.summary,
-    });
-  } catch (error) {
-    console.error("Summary API fatal error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to generate summary" },
-      { status: 500 }
+    return buildSafeErrorResponse(
+      "POST /api/summary:providers_exhausted",
+      lastProviderError || new Error("All AI summary providers unavailable"),
+      {
+        creditsRefunded: true,
+        meta: { bookId, pageNumber },
+      }
     );
+  } catch (error) {
+    if (chargedUserId && chargedCredits > 0) {
+      await refundCredits(chargedUserId, chargedCredits).catch(() => {});
+    }
+    return buildSafeErrorResponse("POST /api/summary", error, {
+      fallbackMessage: "Unable to generate summary right now. Please try again.",
+      creditsRefunded: chargedCredits > 0,
+    });
   }
 }

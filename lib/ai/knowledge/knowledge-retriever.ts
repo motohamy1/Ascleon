@@ -11,6 +11,7 @@ import {
 } from "./deep-corpus";
 import { connectToDatabase } from "@/database/mongoose";
 import KnowledgeNode from "@/database/models/knowledge-node.model";
+import { escapeRegex } from "@/lib/utils";
 
 // In-memory cache for dynamic DB knowledge nodes
 const knowledgeNodeCache = new Map<string, any[]>();
@@ -445,21 +446,8 @@ export async function retrieveEnrichedContext(
             relevanceTag: "peri_arrest_als",
           });
         }
-        if (matchingRefs.length === 0) {
-          matchingRefs.push({
-            id: "ref-kumar-clark",
-            source: "Kumar & Clark's Clinical Medicine",
-            type: "textbook",
-            title: "Core Internal Medicine & Clinical Management",
-            chapterOrSection: "Internal Medicine Canon",
-            excerpt:
-              "Evidence-based internal medicine integrates pathophysiology, bedside clinical signs, and societal guidelines to guide diagnostic investigation and first-line therapy.",
-            clinicalPearls: [
-              "Prioritize haemodynamic stability and reversible causes before definitive workup.",
-            ],
-            relevanceTag: "internal_medicine_canon",
-          });
-        }
+        // Leave matchingRefs empty when no specific subtopic matched so the AI
+        // grounds strictly in the student's actual active book/lecture text.
       }
 
       // Add matching QBank vignette only if strictly relevant to active topic
@@ -576,43 +564,9 @@ export async function retrieveEnrichedContext(
     }
 
     default: {
-      // General dynamic adaptive fallback for any other subject
-      focalTopic = bookTitle || bookTopic || "Core Conceptual Framework";
-      matchingRefs.push({
-        id: "ref-general-1",
-        source: `Authoritative Literature on ${bookTopic || bookTitle || "Subject"}`,
-        type: "textbook",
-        title: "Foundational Principles & Verified Invariants",
-        chapterOrSection: "Core Reference Chapter",
-        excerpt: `The established academic literature on ${bookTopic || bookTitle} emphasizes first-principles reasoning: decomposing composite problems into foundational axioms and isolating causal variables before predicting empirical outcomes.`,
-        clinicalPearls: [
-          "Trace observed surface details back to primary invariants.",
-          "Validate assumptions against baseline empirical standards.",
-        ],
-        relevanceTag: "foundational_principles",
-      });
-      matchingQBank.push({
-        id: "qbank-gen-01",
-        examType: "General Clinical",
-        topic: bookTopic || "Core Principles",
-        difficulty: "medium",
-        vignette: `In studying ${bookTitle || "this domain"}, a researcher observes a discrepancy between theoretical predictions and experimental results under stress conditions.\n\nWhat is the most rigorous methodological step according to first-principles inquiry?`,
-        options: [
-          "Discard the empirical data in favor of established historical models",
-          "Identify and isolate the underlying boundary conditions that fail under extreme load",
-          "Average the anomalous values with baseline steady-state measurements",
-          "Introduce ad-hoc parameters without testing underlying causation",
-        ],
-        correctIndex: 1,
-        distractorRationales: {
-          0: "Incorrect: Discarding data introduces confirmation bias.",
-          1: "Correct: Identifying boundary condition failures reveals where simplified theoretical assumptions break down under stress.",
-          2: "Incorrect: Averaging obscures diagnostic signal.",
-          3: "Incorrect: Ad-hoc parameterization hides root cause mechanisms.",
-        },
-        highYieldTakeaway: "Breakdowns at boundary conditions reveal core causal invariants.",
-        sourceQBank: "Foundational Inquiry Exam",
-      });
+      // Leave groundingSnippet empty for general subjects so the AI stays 100% anchored
+      // in the user's actual uploaded book/lecture text rather than generic boilerplate.
+      focalTopic = bookTitle || bookTopic || "Primary Study Source";
       break;
     }
   }
@@ -658,10 +612,14 @@ export async function retrieveEnrichedContext(
     } else {
       try {
         await connectToDatabase();
+        const safeDomain = escapeRegex(domain.slice(0, 60));
+        const safeTopicToken = escapeRegex((focalTopic.split(" ")[0] || "").slice(0, 60));
         const dbNodesPromise = KnowledgeNode.find({
           $or: [
-            { domain: { $regex: domain, $options: "i" } },
-            { topic: { $regex: focalTopic.split(" ")[0], $options: "i" } },
+            { domain: { $regex: safeDomain, $options: "i" } },
+            ...(safeTopicToken
+              ? [{ topic: { $regex: safeTopicToken, $options: "i" } }]
+              : []),
           ],
         })
           .limit(3)

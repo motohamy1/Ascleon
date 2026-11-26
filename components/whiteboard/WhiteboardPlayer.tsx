@@ -248,16 +248,17 @@ export function WhiteboardPlayer({
       setIsPlaying(false);
     } else {
       setWantAutoPlay(true);
-      const blobSrc = activeAudioBeat?.audioUrl
-        ? blobCacheRef.current.get(activeAudioBeat.audioUrl)
+      const remoteUrl = activeAudioBeat?.audioUrl;
+      const srcToUse = remoteUrl
+        ? blobCacheRef.current.get(remoteUrl) || remoteUrl
         : undefined;
-      if (!blobSrc) {
+      if (!srcToUse) {
         audio.load();
         return;
       }
-      if (audio.src !== blobSrc) {
-        loadedBeatUrlRef.current = blobSrc;
-        audio.src = blobSrc;
+      if (audio.src !== srcToUse && loadedBeatUrlRef.current !== srcToUse) {
+        loadedBeatUrlRef.current = srcToUse;
+        audio.src = srcToUse;
         audio.currentTime = 0;
       }
       audio.playbackRate = playbackSpeed;

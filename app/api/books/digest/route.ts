@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { z } from "zod";
 import { GoogleGenAI } from "@google/genai";
 import {
   clearModelCooldown,
@@ -6,6 +8,15 @@ import {
   markModelCooldownFromError,
   orderModelsByHealth,
 } from "@/lib/ai/model-cooldown";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
+import { sanitizePlainText, sanitizeRichText } from "@/lib/security/sanitize";
+
+const DigestRequestSchema = z.object({
+  title: z.string().trim().min(1, "Title is required").max(220),
+  author: z.string().trim().max(200).optional().default("Unknown"),
+  totalPages: z.union([z.number(), z.string()]).optional(),
+  textPreview: z.string().max(15000).optional().default(""),
+});
 
 interface DigestBlueprint {
   sourceCategory: "lecture_notes" | "textbook" | "clinical_sheet" | "guideline_paper" | "exam_review";
@@ -270,8 +281,24 @@ function generateFallbackBlueprint(title: string, preview: string): DigestBluepr
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { title, author, totalPages, textPreview } = body;
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const rawBody = await req.json().catch(() => null);
+    const parsedBody = DigestRequestSchema.safeParse(rawBody);
+    if (!parsedBody.success) {
+      return NextResponse.json(
+        { error: parsedBody.error.issues[0]?.message || "Invalid digest request" },
+        { status: 400 }
+      );
+    }
+
+    const title = sanitizePlainText(parsedBody.data.title, 220);
+    const author = sanitizePlainText(parsedBody.data.author, 200) || "Unknown";
+    const totalPages = parsedBody.data.totalPages;
+    const textPreview = sanitizeRichText(parsedBody.data.textPreview, 12000);
 
     if (!title) {
       return NextResponse.json({ error: "Title is required" }, { status: 400 });
@@ -369,10 +396,8 @@ Return ONLY a valid JSON object matching this structure.`;
       source: "fallback-heuristic",
     });
   } catch (error) {
-    console.error("Digest API fatal error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Internal digestion error" },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("POST /api/books/digest", error, {
+      fallbackMessage: "Unable to analyze study material right now.",
+    });
   }
 }

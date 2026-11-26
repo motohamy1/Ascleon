@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { connectToDatabase } from "@/database/mongoose";
 import WhiteboardVideo from "@/database/models/whiteboard-video.model";
 import { serializeWhiteboardVideo } from "@/lib/whiteboard/video-mapper";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
 
 export async function GET(
   _req: NextRequest,
@@ -32,10 +33,8 @@ export async function GET(
       video: serializeWhiteboardVideo(doc),
     });
   } catch (error) {
-    console.error("[GET /api/whiteboard/videos/[id]] error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load whiteboard video" },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("GET /api/whiteboard/videos/[id]", error, {
+      fallbackMessage: "Failed to load whiteboard video.",
+    });
   }
 }

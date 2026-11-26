@@ -31,6 +31,8 @@ import {
 } from "@/types/study-plan";
 import { cn } from "@/lib/utils";
 import { BiDiText, resolveTextDirection } from "@/components/ui/BiDiText";
+import { parseApiError, type ParsedServiceError } from "@/lib/api-error-client";
+import { ServiceStatusBanner } from "@/components/ui/ServiceStatusBanner";
 
 interface StudyPlanPanelProps {
   books: IBook[];
@@ -112,6 +114,7 @@ export default function StudyPlanPanel({
   // Conversational replan state
   const [chatInput, setChatInput] = useState("");
   const [isReplanning, setIsReplanning] = useState(false);
+  const [serviceError, setServiceError] = useState<ParsedServiceError | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const activePlan = useMemo(
@@ -144,6 +147,7 @@ export default function StudyPlanPanel({
       return;
     }
 
+    setServiceError(null);
     setIsCreating(true);
     try {
       const topics = topicsInput
@@ -164,9 +168,12 @@ export default function StudyPlanPanel({
           language,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.plan) {
-        throw new Error(data.error || "Failed to create study plan");
+        const parsed = parseApiError(res, data);
+        setServiceError(parsed);
+        toast.error(parsed.message);
+        return;
       }
 
       upsertPlanInState(data.plan);
@@ -174,8 +181,14 @@ export default function StudyPlanPanel({
       setPlanTitle("");
       setTopicsInput("");
       toast.success("Study plan skeleton created! Click any step to generate it.");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not create plan");
+    } catch {
+      const fallback: ParsedServiceError = {
+        kind: "generic",
+        title: "Plan Creation Interrupted",
+        message: "Could not create your study plan right now. Please try again.",
+      };
+      setServiceError(fallback);
+      toast.error(fallback.message);
     } finally {
       setIsCreating(false);
     }
@@ -207,6 +220,7 @@ export default function StudyPlanPanel({
       return;
     }
 
+    setServiceError(null);
     setGeneratingStepId(step.id);
     try {
       const res = await fetch(
@@ -217,17 +231,26 @@ export default function StudyPlanPanel({
           body: JSON.stringify({ force }),
         }
       );
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.plan || !data.step) {
-        throw new Error(data.error || "Failed to generate step");
+        const parsed = parseApiError(res, data);
+        setServiceError(parsed);
+        toast.error(parsed.message);
+        return;
       }
       upsertPlanInState(data.plan);
       setCardIndex(0);
       setCardFlipped(false);
       setQuizAnswers({});
       setActiveStepModal({ planId, step: data.step });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Generation failed");
+    } catch {
+      const fallback: ParsedServiceError = {
+        kind: "generic",
+        title: "Generation Interrupted",
+        message: "Could not generate this study step right now. Please try again.",
+      };
+      setServiceError(fallback);
+      toast.error(fallback.message);
     } finally {
       setGeneratingStepId(null);
     }
@@ -294,6 +317,7 @@ export default function StudyPlanPanel({
     if (!activePlan || !chatInput.trim() || isReplanning) return;
     const msg = chatInput.trim();
     setChatInput("");
+    setServiceError(null);
     setIsReplanning(true);
     try {
       const res = await fetch(`/api/study-plans/${activePlan._id}/chat`, {
@@ -301,13 +325,22 @@ export default function StudyPlanPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: msg }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.plan) {
-        throw new Error(data.error || "Failed to update study plan");
+        const parsed = parseApiError(res, data);
+        setServiceError(parsed);
+        toast.error(parsed.message);
+        return;
       }
       upsertPlanInState(data.plan);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Replanning failed");
+    } catch {
+      const fallback: ParsedServiceError = {
+        kind: "generic",
+        title: "Replanning Interrupted",
+        message: "Could not update your study plan right now. Please try again.",
+      };
+      setServiceError(fallback);
+      toast.error(fallback.message);
     } finally {
       setIsReplanning(false);
     }
@@ -377,6 +410,14 @@ export default function StudyPlanPanel({
       </div>
 
       {/* Empty State */}
+      {serviceError && (
+        <ServiceStatusBanner
+          className="mt-4"
+          error={serviceError}
+          onDismiss={() => setServiceError(null)}
+        />
+      )}
+
       {!activePlan ? (
         <div className="mt-5 flex flex-col items-start justify-between gap-4 rounded-[20px] border-2 border-dashed border-[color:var(--ink)]/25 bg-[color:var(--panel)] p-6 sm:flex-row sm:items-center">
           <div className="max-w-xl">

@@ -9,6 +9,7 @@ import {
   deferStepInSections,
   serializeStudyPlan,
 } from "@/lib/study-plan/utils";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
 
 const DeferSchema = z.object({
   moveToNextSession: z.boolean().optional().default(true),
@@ -68,10 +69,10 @@ export async function POST(
       plan: serializeStudyPlan(doc),
     });
   } catch (error) {
-    console.error("[POST /api/study-plans/[id]/steps/[stepId]/defer] error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to defer step" },
-      { status: 500 }
+    return buildSafeErrorResponse(
+      "POST /api/study-plans/[id]/steps/[stepId]/defer",
+      error,
+      { fallbackMessage: "Failed to defer study step." }
     );
   }
 }

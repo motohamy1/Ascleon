@@ -20,7 +20,8 @@ import {
 } from "@/lib/whiteboard/voices";
 import { LessonSection, LessonVoiceTrack } from "@/types/lesson-board";
 import { calculateDynamicCreditCost } from "@/lib/subscription-constants";
-import { buildBillingErrorResponse, consumeCredits } from "@/lib/usage.server";
+import { buildBillingErrorResponse, consumeCredits, refundCredits } from "@/lib/usage.server";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
 
 export const maxDuration = 60;
 
@@ -60,6 +61,9 @@ export async function POST(
   } catch {
     // Optional JSON body
   }
+
+  let chargedUserId: string | null = null;
+  let chargedCredits = 0;
 
   try {
     const { userId } = await auth();
@@ -142,6 +146,8 @@ export async function POST(
     if (!creditCheck.allowed) {
       return buildBillingErrorResponse(creditCheck, dynamicCost.total);
     }
+    chargedUserId = userId;
+    chargedCredits = dynamicCost.total;
 
     const combinedNarration = section.script.map((s) => s.text).join(" ");
     const pinnedModel = normalizedTrack.pinnedModel;
@@ -257,10 +263,9 @@ export async function POST(
       ),
     });
   } catch (error) {
-    console.error(
-      `[POST /api/whiteboard/lessons/${id}/sections/${sectionIndex}/audio] error:`,
-      error
-    );
+    if (chargedUserId && chargedCredits > 0) {
+      await refundCredits(chargedUserId, chargedCredits).catch(() => {});
+    }
 
     try {
       await connectToDatabase();
@@ -274,10 +279,7 @@ export async function POST(
             [`voiceTracks.${voiceId}.sections.${sectionIndex}`]: {
               status: "failed",
               cues: [],
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "Audio synthesis failed",
+              error: "Audio synthesis temporarily unavailable",
             },
           },
         });
@@ -286,14 +288,13 @@ export async function POST(
       // Non-fatal error persistence failure
     }
 
-    return NextResponse.json(
+    return buildSafeErrorResponse(
+      `POST /api/whiteboard/lessons/${id}/sections/${sectionIndex}/audio`,
+      error,
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to synthesize section audio",
-      },
-      { status: 500 }
+        fallbackMessage: "Failed to synthesize section audio.",
+        creditsRefunded: chargedCredits > 0,
+      }
     );
   }
 }

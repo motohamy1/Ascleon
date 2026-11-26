@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { get } from "@vercel/blob";
+import { buildSafeErrorResponse } from "@/lib/security/error-handler";
+import { isAllowedStorageUrl } from "@/lib/security/sanitize";
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,20 +12,30 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Missing url parameter" }, { status: 400 });
     }
 
+    const urlCheck = isAllowedStorageUrl(targetUrl);
+    if (!urlCheck.allowed || !urlCheck.parsed) {
+      return NextResponse.json(
+        { error: "Invalid or disallowed storage URL" },
+        { status: 400 }
+      );
+    }
+
+    const safeTargetUrl = urlCheck.parsed.toString();
+
     // If it's a Vercel Blob URL, stream it securely using the server token (private with public fallback)
-    if (targetUrl.includes(".blob.vercel-storage.com")) {
+    if (urlCheck.isVercelBlob) {
       const token =
         process.env.BLOB_READ_WRITE_TOKEN ||
         process.env.BLOB_ASCLEON_READ_WRITE_TOKEN;
 
       let blobRes = null;
       try {
-        blobRes = await get(targetUrl, {
+        blobRes = await get(safeTargetUrl, {
           access: "private",
           token,
         });
       } catch {
-        blobRes = await get(targetUrl, {
+        blobRes = await get(safeTargetUrl, {
           access: "public",
           token,
         });
@@ -62,6 +74,7 @@ export async function GET(req: NextRequest) {
         headers.set("Content-Range", `bytes ${start}-${end}/${total}`);
         headers.set("Content-Length", String(slice.byteLength));
         headers.set("Cache-Control", "public, max-age=31536000, immutable");
+        headers.set("X-Content-Type-Options", "nosniff");
 
         return new Response(slice, {
           status: 206,
@@ -76,6 +89,7 @@ export async function GET(req: NextRequest) {
         headers.set("Content-Length", blobRes.headers.get("content-length")!);
       }
       headers.set("Cache-Control", "public, max-age=31536000, immutable");
+      headers.set("X-Content-Type-Options", "nosniff");
 
       return new Response(blobRes.stream as BodyInit, {
         status: 200,
@@ -83,13 +97,11 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // If it's already a public URL (e.g. Cloudflare R2), redirect to it directly
-    return NextResponse.redirect(targetUrl, 302);
+    // If it's an allowlisted external storage URL (e.g. Cloudflare R2), redirect safely
+    return NextResponse.redirect(safeTargetUrl, 302);
   } catch (error) {
-    console.error("Storage proxy error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load storage file" },
-      { status: 500 }
-    );
+    return buildSafeErrorResponse("GET /api/storage/file", error, {
+      fallbackMessage: "Failed to load storage file.",
+    });
   }
 }

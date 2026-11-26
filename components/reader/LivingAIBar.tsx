@@ -14,6 +14,12 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import RichStudyMessage from "./RichStudyMessage";
+import {
+  parseApiError,
+  parseServiceErrorPayload,
+  type ParsedServiceError,
+} from "@/lib/api-error-client";
+import { ServiceStatusBanner } from "@/components/ui/ServiceStatusBanner";
 
 interface LivingAIBarProps {
   bookId: string;
@@ -40,6 +46,8 @@ export default function LivingAIBar({
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [serviceError, setServiceError] = useState<ParsedServiceError | null>(null);
+  const [lastAskedQuery, setLastAskedQuery] = useState<string>("");
 
   const handleAsk = async (textToAsk: string) => {
     const q = textToAsk.trim();
@@ -47,6 +55,8 @@ export default function LivingAIBar({
 
     setQuery("");
     setIsOpen(true);
+    setServiceError(null);
+    setLastAskedQuery(q);
     setMessages((prev) => [...prev, { role: "user", content: q }]);
     setIsLoading(true);
 
@@ -66,23 +76,7 @@ export default function LivingAIBar({
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        if (res.status === 402 || errData?.isBillingError) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content: `${errData?.error || "Monthly AI credit limit reached."} [Upgrade your plan](/subscriptions?reason=limit) to continue.`,
-            },
-          ]);
-        } else {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content: errData?.error || "Sorry, I could not process your query at this moment.",
-            },
-          ]);
-        }
+        setServiceError(parseApiError(res, errData));
         return;
       }
 
@@ -91,6 +85,7 @@ export default function LivingAIBar({
         const streamId = `bar-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         let hasStreamedBubble = false;
         let donePayload: any = null;
+        let streamErrPayload: ParsedServiceError | null = null;
 
         const handleLine = (rawLine: string) => {
           const trimmed = rawLine.trim();
@@ -115,6 +110,11 @@ export default function LivingAIBar({
                   )
                 );
               }
+            } else if (evt?.type === "error") {
+              streamErrPayload = parseServiceErrorPayload(
+                evt?.isModelOverloaded ? 503 : 500,
+                evt
+              );
             } else if (evt?.type === "done" && evt.payload) {
               donePayload = evt.payload;
             }
@@ -140,6 +140,11 @@ export default function LivingAIBar({
           handleLine(buffer);
         }
 
+        if (streamErrPayload) {
+          setServiceError(streamErrPayload);
+          return;
+        }
+
         const data = donePayload || {};
         if (hasStreamedBubble) {
           setMessages((prev) =>
@@ -163,26 +168,14 @@ export default function LivingAIBar({
             },
           ]);
         } else {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content: data?.error || "Sorry, I could not process your query at this moment.",
-            },
-          ]);
+          setServiceError(parseServiceErrorPayload(500, data));
         }
         return;
       }
 
       const data = await res.json();
-      if (res.status === 402 || data?.isBillingError) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: `${data?.error || "Monthly AI credit limit reached."} [Upgrade your plan](/subscriptions?reason=limit) to continue.`,
-          },
-        ]);
+      if (res.status === 402 || data?.isBillingError || data?.isModelOverloaded) {
+        setServiceError(parseApiError(res, data));
       } else if (data.success) {
         setMessages((prev) => [
           ...prev,
@@ -193,22 +186,14 @@ export default function LivingAIBar({
           },
         ]);
       } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: data?.error || "Sorry, I could not process your query at this moment.",
-          },
-        ]);
+        setServiceError(parseApiError(res, data));
       }
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "Failed to connect to assistant.",
-        },
-      ]);
+      setServiceError({
+        kind: "generic",
+        title: "Connection Interrupted",
+        message: "Could not reach the assistant. Please check your connection and try again.",
+      });
     } finally {
       setIsLoading(false);
     }
@@ -294,6 +279,17 @@ export default function LivingAIBar({
                 <Loader2 className="w-4 h-4 animate-spin" />
                 <span>Consulting book knowledge...</span>
               </div>
+            )}
+
+            {serviceError && (
+              <ServiceStatusBanner
+                variant="dark"
+                error={serviceError}
+                onRetry={
+                  lastAskedQuery ? () => handleAsk(lastAskedQuery) : undefined
+                }
+                onDismiss={() => setServiceError(null)}
+              />
             )}
           </div>
         )}
