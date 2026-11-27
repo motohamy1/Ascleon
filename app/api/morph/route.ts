@@ -481,18 +481,22 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
         let parsed: any = null;
         let usedModel = "";
+        const generationStartedAt = Date.now();
+        const GEMINI_STAGE_BUDGET_MS = 28_000;
 
         if (apiKey && apiKey !== "your_gemini_api_key_here") {
           const ai = new GoogleGenAI({
             apiKey,
             httpOptions: { retryOptions: { attempts: 1 } },
           });
-          const morphModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
+          const morphModels = orderModelsByHealth(GEMINI_MODEL_CHAIN).slice(0, 3);
           for (let idx = 0; idx < morphModels.length; idx++) {
+            const remainingBudget = GEMINI_STAGE_BUDGET_MS - (Date.now() - generationStartedAt);
+            if (remainingBudget < 5_000) break;
+
             const candidateModel = morphModels[idx];
-            const timeoutMs = idx === 0 ? 18_000 : 12_000;
+            const timeoutMs = Math.min(idx === 0 ? 18_000 : 12_000, remainingBudget);
             const supportsThinking = !candidateModel.includes("lite");
-            const thinkingBudget = candidateModel === PRIMARY_GEMINI_MODEL ? 128 : 0;
             const abortCtrl = new AbortController();
             const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
             try {
@@ -502,9 +506,9 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                 config: {
                   responseMimeType: "application/json",
                   temperature: 0.2,
-                  maxOutputTokens: 8192,
+                  maxOutputTokens: 6144,
                   abortSignal: abortCtrl.signal,
-                  ...(supportsThinking ? { thinkingConfig: { thinkingBudget } } : {}),
+                  ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
                 },
               });
 
@@ -557,17 +561,17 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
             jsonMode: true,
           },
           {
-            label: "openrouter:google/gemini-2.5-flash",
-            endpoint: "https://openrouter.ai/api/v1/chat/completions",
-            key: openRouterKey !== "your_openrouter_api_key_here" ? openRouterKey : undefined,
-            model: "google/gemini-2.5-flash",
-            jsonMode: false,
-          },
-          {
             label: "openrouter:meta-llama/llama-3.3-70b-instruct",
             endpoint: "https://openrouter.ai/api/v1/chat/completions",
             key: openRouterKey !== "your_openrouter_api_key_here" ? openRouterKey : undefined,
             model: "meta-llama/llama-3.3-70b-instruct",
+            jsonMode: false,
+          },
+          {
+            label: "openrouter:google/gemini-2.5-flash",
+            endpoint: "https://openrouter.ai/api/v1/chat/completions",
+            key: openRouterKey !== "your_openrouter_api_key_here" ? openRouterKey : undefined,
+            model: "google/gemini-2.5-flash",
             jsonMode: false,
           },
           {
@@ -582,6 +586,8 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
         if (!parsed) {
           for (const provider of fallbackProviders) {
             if (!provider.key) continue;
+            const totalElapsed = Date.now() - generationStartedAt;
+            if (totalElapsed > 44_000) break;
             try {
               const res = await fetch(provider.endpoint, {
                 method: "POST",
@@ -589,7 +595,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                   "Content-Type": "application/json",
                   Authorization: `Bearer ${provider.key}`,
                 },
-                signal: AbortSignal.timeout(16_000),
+                signal: AbortSignal.timeout(Math.min(16_000, Math.max(8_000, 48_000 - totalElapsed))),
                 body: JSON.stringify({
                   model: provider.model,
                   messages: [
@@ -601,6 +607,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                     { role: "user", content: prompt },
                   ],
                   temperature: 0.2,
+                  max_tokens: 6000,
                   ...(provider.jsonMode ? { response_format: { type: "json_object" } } : {}),
                 }),
               });

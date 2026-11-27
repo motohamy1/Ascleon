@@ -1,7 +1,6 @@
 import mongoose from "mongoose";
 import dns from "node:dns";
 
-mongoose.set("sanitizeFilter", true);
 mongoose.set("strictQuery", true);
 
 // Configure public DNS resolvers to prevent Windows / ISP querySrv ECONNREFUSED on MongoDB Atlas

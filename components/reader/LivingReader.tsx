@@ -1136,17 +1136,15 @@ export default function LivingReader({
         setMorphServiceError({
           kind: "overloaded",
           title: "AI Model Temporarily Busy",
-          message: "Morph generation took longer than expected. Please try again.",
-          retryAfterSeconds: 20,
+          message: "Morph generation took longer than expected. Click Try Again to retry.",
+          retryAfterSeconds: 10,
         });
-        toast.error("Morph generation timed out on slow network. Please retry.");
       } else if (err instanceof Error && err.name !== "AbortError") {
         setMorphServiceError({
           kind: "generic",
           title: "Morph Interrupted",
           message: "Could not build the Morph view right now. Please try again.",
         });
-        toast.error("Could not generate Morph view right now. Please try again.");
       }
     } finally {
       clearTimeout(timeoutId);

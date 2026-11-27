@@ -1,17 +1,15 @@
 /**
  * Shared Gemini model selection & per-model cooldown registry.
- * Primary: gemini-4-hydrogen (highest Gemini 4 reasoning enabled on API key).
- * Fallbacks cascade cleanly across Gemini 4 & 3.x Flash models so transient
- * 503/overloaded/429 spikes never stall requests for 30s-300s.
+ * Prioritizes stable, low-latency Gemini models first so high-demand 503/429
+ * spikes on preview/flagship tiers never stall user requests into timeouts.
  */
 
-export const PRIMARY_GEMINI_MODEL = "gemini-4-hydrogen";
+export const PRIMARY_GEMINI_MODEL = "gemini-3.6-flash";
 export const FALLBACK_GEMINI_MODELS = [
-  "gemini-4-argon",
-  "gemini-3.8-flash",
-  "gemini-3.6-flash",
-  "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-4-hydrogen",
+  "gemini-3.5-flash",
 ] as const;
 
 export const GEMINI_MODEL_CHAIN = [
@@ -20,12 +18,10 @@ export const GEMINI_MODEL_CHAIN = [
 ] as const;
 
 export const FAST_GEMINI_MODEL_CHAIN = [
-  "gemini-3.8-flash",
   "gemini-3.6-flash",
-  "gemini-4-argon",
-  "gemini-4-hydrogen",
-  "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-4-hydrogen",
 ] as const;
 
 const TRANSIENT_COOLDOWN_MS = 180_000; // 3 min
@@ -59,7 +55,10 @@ export function markModelCooldownFromError(key: string, err: unknown): void {
     msg.includes("per_day") ||
     msg.includes("limit: 20") ||
     msg.includes("limit: 0") ||
-    msg.includes("quota exceeded")
+    msg.includes("quota exceeded") ||
+    msg.includes("exceeded your current quota") ||
+    msg.includes("404") ||
+    msg.includes("no longer available")
   ) {
     markModelCooldown(key, DAILY_QUOTA_COOLDOWN_MS);
   } else if (
@@ -69,6 +68,7 @@ export function markModelCooldownFromError(key: string, err: unknown): void {
     msg.includes("500") ||
     msg.includes("504") ||
     msg.includes("overloaded") ||
+    msg.includes("high demand") ||
     msg.includes("resource_exhausted") ||
     msg.includes("rate limit") ||
     msg.includes("rate_limit") ||

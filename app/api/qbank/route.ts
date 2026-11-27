@@ -467,12 +467,16 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
         });
       }
 
-      const qbankGeminiModels = orderModelsByHealth(GEMINI_MODEL_CHAIN);
+      const qbankStartedAt = Date.now();
+      const GEMINI_STAGE_BUDGET_MS = 26_000;
+      const qbankGeminiModels = orderModelsByHealth(GEMINI_MODEL_CHAIN).slice(0, 3);
       for (let idx = 0; idx < qbankGeminiModels.length; idx++) {
+        const remainingBudget = GEMINI_STAGE_BUDGET_MS - (Date.now() - qbankStartedAt);
+        if (remainingBudget < 5_000) break;
+
         const candidateModel = qbankGeminiModels[idx];
-        const timeoutMs = idx === 0 ? 16_000 : 11_000;
+        const timeoutMs = Math.min(idx === 0 ? 16_000 : 11_000, remainingBudget);
         const supportsThinking = !candidateModel.includes("lite");
-        const thinkingBudget = candidateModel === PRIMARY_GEMINI_MODEL ? 128 : 0;
         const abortCtrl = new AbortController();
         const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
         try {
@@ -484,7 +488,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                 responseMimeType: "application/json",
                 temperature: 0.35,
                 abortSignal: abortCtrl.signal,
-                ...(supportsThinking ? { thinkingConfig: { thinkingBudget } } : {}),
+                ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
               },
             }),
             new Promise((_, reject) =>
@@ -537,6 +541,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
             ],
             response_format: { type: "json_object" },
             temperature: 0.35,
+            max_tokens: 4096,
           }),
         });
         if (res.ok) {
@@ -565,7 +570,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
     // 5. OpenRouter High-Grade Fallback (meta-llama/llama-3.3-70b-instruct)
     if (openRouterKey && openRouterKey !== "your_openrouter_api_key_here") {
-      const openRouterModels = ["meta-llama/llama-3.3-70b-instruct", "google/gemini-2.0-flash-001"];
+      const openRouterModels = ["meta-llama/llama-3.3-70b-instruct", "google/gemini-2.5-flash"];
       for (const orModel of openRouterModels) {
         try {
           const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -582,6 +587,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                 { role: "user", content: prompt },
               ],
               temperature: 0.35,
+              max_tokens: 4096,
             }),
           });
 

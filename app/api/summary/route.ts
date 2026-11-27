@@ -188,12 +188,16 @@ Return ONLY the JSON object.
 
 ${buildLanguageDirective(language as StudyLanguage, "json")}`;
 
-        const summaryModels = orderModelsByHealth(FAST_GEMINI_MODEL_CHAIN);
+        const summaryStartedAt = Date.now();
+        const GEMINI_STAGE_BUDGET_MS = 26_000;
+        const summaryModels = orderModelsByHealth(FAST_GEMINI_MODEL_CHAIN).slice(0, 3);
         for (let idx = 0; idx < summaryModels.length; idx++) {
+          const remainingBudget = GEMINI_STAGE_BUDGET_MS - (Date.now() - summaryStartedAt);
+          if (remainingBudget < 4_500) break;
+
           const candidateModel = summaryModels[idx];
-          const timeoutMs = idx === 0 ? 15_000 : 10_000;
+          const timeoutMs = Math.min(idx === 0 ? 15_000 : 10_000, remainingBudget);
           const supportsThinking = !candidateModel.includes("lite");
-          const thinkingBudget = candidateModel === PRIMARY_GEMINI_MODEL ? 128 : 0;
           const abortCtrl = new AbortController();
           const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
           try {
@@ -204,7 +208,7 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
                 responseMimeType: "application/json",
                 temperature: 0.2,
                 abortSignal: abortCtrl.signal,
-                ...(supportsThinking ? { thinkingConfig: { thinkingBudget } } : {}),
+                ...(supportsThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
               },
             });
 
@@ -234,6 +238,71 @@ ${buildLanguageDirective(language as StudyLanguage, "json")}`;
             console.warn(`[Summary] ${candidateModel} failed:`, modelErr);
           } finally {
             clearTimeout(timer);
+          }
+        }
+
+        const fallbackProviders = [
+          {
+            label: "groq:openai/gpt-oss-120b",
+            endpoint: "https://api.groq.com/openai/v1/chat/completions",
+            key: process.env.GROQ_API_KEY,
+            model: "openai/gpt-oss-120b",
+            jsonMode: true,
+          },
+          {
+            label: "openrouter:meta-llama/llama-3.3-70b-instruct",
+            endpoint: "https://openrouter.ai/api/v1/chat/completions",
+            key: process.env.OPENROUTER_API_KEY,
+            model: "meta-llama/llama-3.3-70b-instruct",
+            jsonMode: false,
+          },
+        ];
+
+        for (const provider of fallbackProviders) {
+          if (!provider.key || provider.key.startsWith("your_")) continue;
+          try {
+            const res = await fetch(provider.endpoint, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${provider.key}`,
+              },
+              signal: AbortSignal.timeout(14_000),
+              body: JSON.stringify({
+                model: provider.model,
+                messages: [
+                  { role: "system", content: "You are Ascleon's Deep Study Synthesizer. Return ONLY valid JSON." },
+                  { role: "user", content: prompt },
+                ],
+                temperature: 0.2,
+                max_tokens: 4096,
+                ...(provider.jsonMode ? { response_format: { type: "json_object" } } : {}),
+              }),
+            });
+            if (!res.ok) {
+              lastProviderError = new Error(`${provider.label} HTTP ${res.status}`);
+              continue;
+            }
+            const data = await res.json();
+            const raw = String(data?.choices?.[0]?.message?.content || "")
+              .trim()
+              .replace(/^```(?:json)?\s*/i, "")
+              .replace(/\s*```$/i, "")
+              .trim();
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              return NextResponse.json({
+                success: true,
+                summary: parsed,
+                source: provider.label,
+                creditsCharged: dynamicCost.total,
+                creditsRemaining: creditCheck.remaining,
+                creditBreakdown: dynamicCost.summary,
+              });
+            }
+          } catch (fbErr) {
+            lastProviderError = fbErr;
+            console.warn(`[Summary] Fallback ${provider.label} failed:`, fbErr);
           }
         }
       } catch (aiErr) {

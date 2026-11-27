@@ -839,7 +839,7 @@ export function StudioMenuDrawer({
             </div>
 
             {/* Canvas Theme & RAG Status */}
-            <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-[var(--study-border)]">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-[var(--study-border)]">
               <div className="flex items-center gap-1.5">
                 <span className="text-[10.5px] font-bold text-[var(--study-text-muted)]">Canvas</span>
                 <div className="flex items-center rounded-full border border-[var(--study-border)] bg-[var(--study-surface-solid)] p-0.5">

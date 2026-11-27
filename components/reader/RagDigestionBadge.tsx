@@ -110,30 +110,30 @@ export function RagDigestionBadge({
   return (
     <div
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold border transition-all duration-300 shadow-xs",
+        "inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold border transition-all duration-300 shadow-xs",
         isCompleted
-          ? "border-[#43a08f]/40 bg-[#43a08f]/15 text-[#7fd8c9]"
+          ? "border-[#43a08f]/40 bg-[#43a08f]/15 text-[var(--study-teal-text,#1f6e60)]"
           : isFailed
-          ? "border-red-500/40 bg-red-500/10 text-red-200"
-          : "border-[color:var(--orange)]/40 bg-[color:var(--orange)]/15 text-[color:var(--cream)] animate-pulse",
+          ? "border-red-500/40 bg-red-500/12 text-red-600 dark:text-red-300"
+          : "border-[color:var(--orange)]/40 bg-[color:var(--orange)]/15 text-[var(--study-text)] animate-pulse",
         className
       )}
       title={stage}
     >
       {isCompleted ? (
         <>
-          <CheckCircle2 className="size-3 text-[#43a08f]" />
-          <span className="font-mono uppercase tracking-wider text-[9.5px]">RAG Ready</span>
+          <CheckCircle2 className="size-3 text-[#43a08f] shrink-0" />
+          <span className="font-mono uppercase tracking-wider text-[9.5px] whitespace-nowrap">RAG Ready</span>
           {domain && domain.trim().toLowerCase() !== "general" && (
-            <span className="hidden sm:inline opacity-80 border-l border-white/20 pl-1 font-sans">
+            <span className="hidden sm:inline max-w-[96px] truncate opacity-80 border-l border-current/25 pl-1 font-sans">
               {domain}
             </span>
           )}
         </>
       ) : isFailed ? (
         <>
-          <AlertCircle className="size-3 text-red-400 shrink-0" />
-          <span>{status === "unavailable" ? "Index Unavailable" : "Sync Needed"}</span>
+          <AlertCircle className="size-3 text-red-500 shrink-0" />
+          <span className="whitespace-nowrap">{status === "unavailable" ? "Index Unavailable" : "Sync Needed"}</span>
           <button
             type="button"
             onClick={() => {
@@ -143,7 +143,7 @@ export function RagDigestionBadge({
               setStage("Re-indexing book pages...");
               triggerReindex().finally(() => setRetryNonce((n) => n + 1));
             }}
-            className="ml-1 inline-flex items-center gap-1 rounded-full border border-red-300/35 bg-red-400/15 px-1.5 py-0.5 text-[9.5px] font-bold text-red-100 hover:bg-red-400/25 cursor-pointer"
+            className="ml-1 inline-flex items-center gap-1 rounded-full border border-red-500/35 bg-red-500/15 px-1.5 py-0.5 text-[9.5px] font-bold text-red-700 dark:text-red-200 hover:bg-red-500/25 cursor-pointer shrink-0"
             title="Trigger RAG page indexing"
           >
             <RefreshCw className="size-2.5" />
